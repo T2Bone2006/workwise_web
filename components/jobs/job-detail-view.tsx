@@ -9,10 +9,12 @@ import { JobDetailActionsCard } from '@/components/jobs/job-detail-actions-card'
 import { JobDetailJobReportCard } from '@/components/jobs/job-detail-job-report-card';
 import { JobDetailCompletionNotes } from '@/components/jobs/job-detail-completion-notes';
 import { JobDetailPhotosCard } from '@/components/jobs/job-detail-photos-card';
+import { JobDetailCompletionSection } from '@/components/jobs/job-detail-completion-section';
 import { JobLocationMap } from '@/components/maps/job-location-map';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
+import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
 
 interface WorkerOption {
   id: string;
@@ -35,10 +37,11 @@ interface JobDetailViewProps {
   statusHistory: JobStatusHistoryEntry[];
   workers: WorkerOption[];
   mapData?: JobDetailMapData | null;
-  /** When set, `industry_data` is non-empty */
+  /** Set when the job report card should render, or when status is completed (completion section). */
   industryData?: unknown;
   completionNotes?: string;
-  jobPhotos?: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
+  /** Before/after image attachments from `job_attachments` for this job. */
+  attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
 }
 
 export function JobDetailView({
@@ -48,8 +51,14 @@ export function JobDetailView({
   mapData,
   industryData,
   completionNotes,
-  jobPhotos,
+  attachmentPhotos,
 }: JobDetailViewProps) {
+  const isCompleted = job.status === 'completed';
+  const hasPhotoGroups =
+    attachmentPhotos.before.length > 0 || attachmentPhotos.after.length > 0;
+  const showJobReportCard =
+    industryData !== undefined && !isCompleted && !isIndustryDataEmpty(industryData);
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
       {/* Left column */}
@@ -62,19 +71,28 @@ export function JobDetailView({
           createdAt={job.created_at}
           updatedAt={job.updated_at}
         />
-        {industryData !== undefined && (
+        {isCompleted && (
+          <JobDetailCompletionSection
+            completedAt={job.completed_at}
+            industryData={industryData}
+            completionNotes={completionNotes}
+            jobPhotos={attachmentPhotos}
+          />
+        )}
+        {showJobReportCard && (
           <JobDetailJobReportCard industryData={industryData} />
         )}
-        {completionNotes !== undefined && completionNotes !== '' && (
-          <JobDetailCompletionNotes completionNotes={completionNotes} />
-        )}
-        {jobPhotos != null &&
-          (jobPhotos.before.length > 0 || jobPhotos.after.length > 0) && (
-            <JobDetailPhotosCard
-              beforePhotos={jobPhotos.before}
-              afterPhotos={jobPhotos.after}
-            />
+        {!isCompleted &&
+          completionNotes !== undefined &&
+          completionNotes !== '' && (
+            <JobDetailCompletionNotes completionNotes={completionNotes} />
           )}
+        {!isCompleted && hasPhotoGroups && (
+          <JobDetailPhotosCard
+            beforePhotos={attachmentPhotos.before}
+            afterPhotos={attachmentPhotos.after}
+          />
+        )}
         {mapData != null && (
           <Card>
             <CardHeader>

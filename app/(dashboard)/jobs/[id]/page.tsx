@@ -211,14 +211,17 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
   const jobPhotosSplit = splitJobAttachmentsForPhotos(
     (attachmentRows ?? []) as JobAttachmentRow[]
   );
-  const hasPhotoGroups =
-    jobPhotosSplit.before.length > 0 || jobPhotosSplit.after.length > 0;
 
   const industryRaw = jobRow.industry_data;
   const showJobReport = !isIndustryDataEmpty(industryRaw);
+  const industryDataForDetail =
+    job.status === 'completed'
+      ? industryRaw
+      : showJobReport
+        ? industryRaw
+        : undefined;
 
   const completionNotesTrimmed = (jobRow.completion_notes ?? '').trim();
-  const showCompletionNotes = completionNotesTrimmed.length > 0;
 
   const { workers } = await getWorkersForTenant(tenantId);
   const workerOptions = workers.map((w) => ({ id: w.id, full_name: w.full_name }));
@@ -237,11 +240,15 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         statusHistory={statusHistory}
         workers={workerOptions}
         mapData={mapData}
-        industryData={showJobReport ? industryRaw : undefined}
+        industryData={industryDataForDetail}
         completionNotes={
-          showCompletionNotes ? completionNotesTrimmed : undefined
+          job.status === 'completed'
+            ? completionNotesTrimmed
+            : completionNotesTrimmed.length > 0
+              ? completionNotesTrimmed
+              : undefined
         }
-        jobPhotos={hasPhotoGroups ? jobPhotosSplit : undefined}
+        attachmentPhotos={jobPhotosSplit}
       />
     </div>
   );

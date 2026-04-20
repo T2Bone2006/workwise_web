@@ -44,35 +44,29 @@ function PhotoGrid({
   );
 }
 
-export function JobDetailPhotosCard({ beforePhotos, afterPhotos }: JobDetailPhotosCardProps) {
+/** Before/after grids + lightbox; use inside another card or standalone. */
+export function JobAttachmentPhotoGrids({
+  beforePhotos,
+  afterPhotos,
+}: JobDetailPhotosCardProps) {
   const [lightbox, setLightbox] = React.useState<{ url: string; label: string } | null>(null);
 
   return (
     <>
-      <Card
-        className={cn(
-          'glass-card overflow-hidden border-border/80 transition-all duration-300',
-          'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+      <div className="space-y-6">
+        {beforePhotos.length > 0 && (
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-foreground">Before photos</h3>
+            <PhotoGrid items={beforePhotos} onOpen={(url, label) => setLightbox({ url, label })} />
+          </div>
         )}
-      >
-        <CardHeader className="pb-3">
-          <h2 className="text-base font-semibold text-foreground">Photos</h2>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {beforePhotos.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-medium text-foreground">Before photos</h3>
-              <PhotoGrid items={beforePhotos} onOpen={(url, label) => setLightbox({ url, label })} />
-            </div>
-          )}
-          {afterPhotos.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-medium text-foreground">After photos</h3>
-              <PhotoGrid items={afterPhotos} onOpen={(url, label) => setLightbox({ url, label })} />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {afterPhotos.length > 0 && (
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-foreground">After photos</h3>
+            <PhotoGrid items={afterPhotos} onOpen={(url, label) => setLightbox({ url, label })} />
+          </div>
+        )}
+      </div>
 
       <Dialog open={lightbox != null} onOpenChange={(open) => !open && setLightbox(null)}>
         <DialogContent
@@ -93,5 +87,23 @@ export function JobDetailPhotosCard({ beforePhotos, afterPhotos }: JobDetailPhot
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+export function JobDetailPhotosCard({ beforePhotos, afterPhotos }: JobDetailPhotosCardProps) {
+  return (
+    <Card
+      className={cn(
+        'glass-card overflow-hidden border-border/80 transition-all duration-300',
+        'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+      )}
+    >
+      <CardHeader className="pb-3">
+        <h2 className="text-base font-semibold text-foreground">Photos</h2>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <JobAttachmentPhotoGrids beforePhotos={beforePhotos} afterPhotos={afterPhotos} />
+      </CardContent>
+    </Card>
   );
 }
