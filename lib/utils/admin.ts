@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 
 /**
- * Admin check: user has role 'admin' in users table OR email is in whitelist.
+ * Admin check: user email is in whitelist.
  * Update adminEmails with your email for platform admin access.
  */
 const adminEmails: string[] = [
@@ -22,15 +22,12 @@ export async function isAdmin(): Promise<boolean> {
 
   const { data: userData } = await supabase
     .from('users')
-    .select('role, email')
+    .select('email')
     .eq('id', user.id)
     .single();
 
   const email = (userData?.email ?? user.email ?? '').toLowerCase();
-  return (
-    (userData?.role as string) === 'admin' ||
-    adminEmails.some((e) => e.toLowerCase() === email)
-  );
+  return adminEmails.some((e) => e.toLowerCase() === email);
 }
 
 export async function requireAdmin(): Promise<void> {

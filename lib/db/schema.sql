@@ -167,7 +167,7 @@ CREATE TABLE public.users (
   tenant_id uuid,
   email text NOT NULL,
   full_name text,
-  role text NOT NULL DEFAULT 'admin'::text,
+  role text NOT NULL DEFAULT 'owner'::text,
   avatar_url text,
   is_active boolean DEFAULT true,
   last_login_at timestamp with time zone,

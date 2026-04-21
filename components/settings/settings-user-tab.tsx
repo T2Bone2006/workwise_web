@@ -26,7 +26,7 @@ import type { SettingsPageData } from '@/lib/data/settings-types';
 import { cn } from '@/lib/utils';
 
 const ROLE_LABELS: Record<string, string> = {
-  admin: 'Admin',
+  owner: 'Owner',
   manager: 'Manager',
   viewer: 'Viewer',
 };
@@ -153,7 +153,7 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
                 disabled
                 className="bg-muted/50"
               />
-              <p className="text-xs text-muted-foreground">Role is read-only (Admin / Manager / Viewer).</p>
+              <p className="text-xs text-muted-foreground">Role is read-only (Owner / Manager / Viewer).</p>
             </div>
             <div className="space-y-2">
               <Label>Avatar</Label>
