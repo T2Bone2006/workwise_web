@@ -8,7 +8,10 @@ import {
 } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
+import {
+  resolveJobAttachmentUrl,
+  type JobAttachmentRow,
+} from '@/lib/utils/job-attachments';
 
 interface JobDetailPhotosCardProps {
   beforePhotos: JobAttachmentRow[];
@@ -24,22 +27,24 @@ function PhotoGrid({
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {items.map((att) => (
+      {items.map((att) => {
+        const imageUrl = resolveJobAttachmentUrl(att.file_url);
+        return (
         <button
           key={att.id}
           type="button"
-          onClick={() => onOpen(att.file_url, att.file_name)}
+          onClick={() => onOpen(imageUrl, att.file_name)}
           className="group relative aspect-square overflow-hidden rounded-md border border-border/80 bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- remote Supabase URLs; avoid remotePatterns setup */}
           <img
-            src={att.file_url}
+            src={imageUrl}
             alt={att.file_name}
             className="size-full object-cover transition-transform group-hover:scale-[1.02]"
-            loading="lazy"
           />
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -54,18 +59,22 @@ export function JobAttachmentPhotoGrids({
   return (
     <>
       <div className="space-y-6">
-        {beforePhotos.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-foreground">Before photos</h3>
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-foreground">Before Photos</h3>
+          {beforePhotos.length > 0 ? (
             <PhotoGrid items={beforePhotos} onOpen={(url, label) => setLightbox({ url, label })} />
-          </div>
-        )}
-        {afterPhotos.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-foreground">After photos</h3>
+          ) : (
+            <p className="text-xs text-muted-foreground">No before photos uploaded</p>
+          )}
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-foreground">After Photos</h3>
+          {afterPhotos.length > 0 ? (
             <PhotoGrid items={afterPhotos} onOpen={(url, label) => setLightbox({ url, label })} />
-          </div>
-        )}
+          ) : (
+            <p className="text-xs text-muted-foreground">No after photos uploaded</p>
+          )}
+        </div>
       </div>
 
       <Dialog open={lightbox != null} onOpenChange={(open) => !open && setLightbox(null)}>

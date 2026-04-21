@@ -200,9 +200,14 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
 
   const { data: attachmentRows, error: attachmentsError } = await supabase
     .from('job_attachments')
-    .select('id, file_url, file_name, file_type, attachment_type')
+    .select('*')
     .eq('job_id', jobId)
     .order('created_at', { ascending: true });
+
+  console.log('[JobDetailPage] job_attachments raw result:', {
+    error: attachmentsError,
+    data: attachmentRows,
+  });
 
   if (attachmentsError) {
     console.error('[JobDetailPage] job_attachments query error:', attachmentsError);

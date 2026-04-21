@@ -4,12 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { autoAllocateJob } from '@/lib/actions/jobs';
 import { detectSkills } from '@/lib/detect-skills';
+import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
 /** Process 10 jobs at a time for AI skill detection to avoid rate limits. */
 const SKILL_DETECT_BATCH_SIZE = 10;
 const SKILL_DETECT_DELAY_MS = 300;
+const GEOCODE_BATCH_SIZE = 5;
+const GEOCODE_DELAY_MS = 300;
 const VALID_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 /** DB enum job_priority may only have low, normal, high - map urgent/emergency to high for insert */
 const DB_PRIORITIES = ['low', 'normal', 'high'] as const;
@@ -196,6 +199,7 @@ export async function importJobs(params: {
 
       const priority = toPriority(get(row, 'priority') || 'normal');
       const scheduledDate = get(row, 'scheduled_date') || null;
+      const fullAddress = buildFullAddressString([address, postcode]);
 
       jobs.push({
         tenant_id: tenantId,
@@ -212,10 +216,28 @@ export async function importJobs(params: {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         required_skills: [] as string[],
+        lat: null,
+        lng: null,
         _description: jobDescription,
         _address: address,
         _priority: priority,
+        _fullAddress: fullAddress,
       });
+    }
+
+    for (let i = 0; i < jobs.length; i += GEOCODE_BATCH_SIZE) {
+      const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (job) => {
+          const fullAddress = (job as Record<string, unknown>)._fullAddress as string;
+          const geocoded = await geocodeAddress(fullAddress);
+          (job as Record<string, unknown>).lat = geocoded?.lat ?? null;
+          (job as Record<string, unknown>).lng = geocoded?.lng ?? null;
+        })
+      );
+      if (i + GEOCODE_BATCH_SIZE < jobs.length) {
+        await new Promise((r) => setTimeout(r, GEOCODE_DELAY_MS));
+      }
     }
 
     for (let i = 0; i < jobs.length; i += SKILL_DETECT_BATCH_SIZE) {
@@ -233,6 +255,7 @@ export async function importJobs(params: {
           delete (job as Record<string, unknown>)._description;
           delete (job as Record<string, unknown>)._address;
           delete (job as Record<string, unknown>)._priority;
+          delete (job as Record<string, unknown>)._fullAddress;
         })
       );
       if (i + SKILL_DETECT_BATCH_SIZE < jobs.length) {

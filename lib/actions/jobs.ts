@@ -6,6 +6,7 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { createJobSchema } from '@/lib/validations/job';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
+import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
 import { sendJobAssignedPushToWorker } from '@/lib/services/worker-push';
@@ -124,6 +125,9 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       requiredSkills = result.data;
     }
 
+    const fullAddress = buildFullAddressString([parsed.data.address, parsed.data.postcode]);
+    const geocoded = await geocodeAddress(fullAddress);
+
     const { data: job, error: insertError } = await supabase
       .from('jobs')
       .insert({
@@ -138,6 +142,8 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         priority: parsed.data.priority,
         scheduled_date: parsed.data.scheduled_date || null,
         required_skills: requiredSkills,
+        lat: geocoded?.lat ?? null,
+        lng: geocoded?.lng ?? null,
       })
       .select('id')
       .single();

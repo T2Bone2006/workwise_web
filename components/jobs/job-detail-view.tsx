@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { JobDetailDetailsCard } from '@/components/jobs/job-detail-details-card';
 import { JobDetailSkillsCard } from '@/components/jobs/job-detail-skills-card';
 import { JobStatusTimeline } from '@/components/jobs/job-status-timeline';
@@ -10,11 +11,15 @@ import { JobDetailJobReportCard } from '@/components/jobs/job-detail-job-report-
 import { JobDetailCompletionNotes } from '@/components/jobs/job-detail-completion-notes';
 import { JobDetailPhotosCard } from '@/components/jobs/job-detail-photos-card';
 import { JobDetailCompletionSection } from '@/components/jobs/job-detail-completion-section';
-import { JobLocationMap } from '@/components/maps/job-location-map';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
+
+const JobLocationMap = dynamic(
+  () => import('@/components/maps/job-location-map').then((mod) => mod.JobLocationMap),
+  { ssr: false }
+);
 
 interface WorkerOption {
   id: string;

@@ -48,10 +48,11 @@ export function formatIndustryDateTime(value: unknown): string | null {
   if (!s) return null;
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString(undefined, {
+  return new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
-  });
+    timeZone: 'UTC',
+  }).format(d);
 }
 
 export function nonEmptyString(value: unknown): string | null {
