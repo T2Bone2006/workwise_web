@@ -22,7 +22,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  updateIntegrations,
   saveAnthropicApiKey,
   saveVAPIApiKey,
 } from '@/lib/actions/settings';
@@ -45,26 +44,8 @@ export function SettingsIntegrationsTab({ data, onSaved }: SettingsIntegrationsT
   const [vapiDialogOpen, setVapiDialogOpen] = useState(false);
 
   const integrations = data.tenant?.settings?.integrations ?? {};
-  const xero = integrations.xero ?? { connected: false };
   const vapi = integrations.vapi ?? { configured: false };
   const anthropic = integrations.anthropic ?? { configured: false };
-
-  async function handleConnectXero() {
-    toast.info('Xero OAuth will open in a popup. (Placeholder – not implemented yet.)');
-    window.open('/api/integrations/xero/connect', '_blank', 'width=600,height=700');
-  }
-
-  async function handleDisconnectXero() {
-    setSaving(true);
-    const result = await updateIntegrations({
-      xero: { ...xero, connected: false, organisation_name: undefined, last_sync: undefined },
-    });
-    setSaving(false);
-    if (result.success) {
-      toast.success('Disconnected from Xero');
-      onSaved();
-    } else toast.error(result.error);
-  }
 
   async function handleSaveAnthropic() {
     if (!anthropicKey.trim()) {
@@ -100,50 +81,6 @@ export function SettingsIntegrationsTab({ data, onSaved }: SettingsIntegrationsT
 
   return (
     <div className="space-y-6">
-      {/* Xero */}
-      <Card
-        className={cn(
-          'glass-card rounded-xl border border-border/60',
-          'bg-card/80 backdrop-blur-[var(--blur-glass)]'
-        )}
-      >
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                Xero
-                {xero.connected ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
-                    <Check className="size-3" /> Connected to {xero.organisation_name ?? 'Xero'}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-600 dark:text-red-400">
-                    <X className="size-3" /> Not Connected
-                  </span>
-                )}
-              </CardTitle>
-              <CardDescription>Sync invoices and payments with Xero.</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {xero.last_sync && (
-            <p className="text-sm text-muted-foreground">Last sync: {new Date(xero.last_sync).toLocaleString()}</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {!xero.connected ? (
-              <Button type="button" variant="gradient" onClick={handleConnectXero} disabled={saving}>
-                Connect to Xero
-              </Button>
-            ) : (
-              <Button type="button" variant="outline" onClick={handleDisconnectXero} disabled={saving}>
-                Disconnect
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* VAPI */}
       <Card
         className={cn(
@@ -185,15 +122,6 @@ export function SettingsIntegrationsTab({ data, onSaved }: SettingsIntegrationsT
             <Button type="button" variant="outline" onClick={() => setVapiDialogOpen(true)}>
               {vapi.configured ? 'Update' : 'Configure'} VAPI
             </Button>
-            {vapi.configured && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => toast.info('Test Emergency Line – placeholder')}
-              >
-                Test Emergency Line
-              </Button>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -239,31 +167,7 @@ export function SettingsIntegrationsTab({ data, onSaved }: SettingsIntegrationsT
             <Button type="button" variant="outline" onClick={() => setAnthropicDialogOpen(true)}>
               {anthropic.configured ? 'Update' : 'Add'} API Key
             </Button>
-            {anthropic.configured && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => toast.info('Test AI Quote Generation – placeholder')}
-              >
-                Test AI Quote Generation
-              </Button>
-            )}
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Future */}
-      <Card className="rounded-xl border border-border/50 bg-muted/30 opacity-80">
-        <CardHeader>
-          <CardTitle className="text-muted-foreground">Future integrations</CardTitle>
-          <CardDescription>Coming soon.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <li>Stripe (Coming Soon)</li>
-            <li>QuickBooks (Coming Soon)</li>
-            <li>Sage (Coming Soon)</li>
-          </ul>
         </CardContent>
       </Card>
 

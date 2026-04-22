@@ -176,12 +176,6 @@ export function SettingsCompanyTab({ data, onSaved }: SettingsCompanyTabProps) {
               placeholder="123 High Street, London"
             />
           </div>
-          <div className="space-y-2">
-            <Label>Logo</Label>
-            <p className="text-sm text-muted-foreground">
-              Logo upload will be available in a future update.
-            </p>
-          </div>
         </CardContent>
         <CardContent className="pt-0">
           <Button type="submit" variant="gradient" disabled={saving}>

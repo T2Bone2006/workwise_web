@@ -25,12 +25,6 @@ import { updateUserProfile, changePassword } from '@/lib/actions/settings';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import { cn } from '@/lib/utils';
 
-const ROLE_LABELS: Record<string, string> = {
-  owner: 'Owner',
-  manager: 'Manager',
-  viewer: 'Viewer',
-};
-
 interface SettingsUserTabProps {
   data: SettingsPageData;
   onSaved: () => void;
@@ -112,7 +106,7 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
       >
         <CardHeader>
           <CardTitle>Personal info</CardTitle>
-          <CardDescription>Your account details. Email and role are managed by your organisation.</CardDescription>
+          <CardDescription>Your account details. Email is managed by your organisation.</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-5">
@@ -146,21 +140,8 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
                 placeholder="+44 7xxx xxxxxx"
               />
             </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Input
-                value={ROLE_LABELS[user.role] ?? user.role}
-                disabled
-                className="bg-muted/50"
-              />
-              <p className="text-xs text-muted-foreground">Role is read-only (Owner / Manager / Viewer).</p>
-            </div>
-            <div className="space-y-2">
-              <Label>Avatar</Label>
-              <p className="text-sm text-muted-foreground">Avatar upload will be available in a future update.</p>
-            </div>
           </CardContent>
-          <CardContent className="pt-0">
+          <CardContent className="pt-4">
             <Button type="submit" variant="gradient" disabled={saving}>
               {saving && <Loader2 className="size-4 animate-spin" />}
               Save profile

@@ -4,16 +4,12 @@ import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Building2,
-  Plug,
-  Bell,
   User,
   AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import { SettingsCompanyTab } from './settings-company-tab';
-import { SettingsIntegrationsTab } from './settings-integrations-tab';
-import { SettingsNotificationsTab } from './settings-notifications-tab';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 
@@ -23,8 +19,6 @@ interface SettingsViewProps {
 
 const tabs = [
   { value: 'company', label: 'Company Settings', icon: Building2 },
-  { value: 'integrations', label: 'Integrations', icon: Plug },
-  { value: 'notifications', label: 'Notifications', icon: Bell },
   { value: 'profile', label: 'User Profile', icon: User },
   { value: 'danger', label: 'Danger Zone', icon: AlertTriangle },
 ] as const;
@@ -72,12 +66,6 @@ export function SettingsView({ initialData }: SettingsViewProps) {
       <div className="flex-1 min-w-0">
         <TabsContent value="company" className="mt-0 outline-none">
           <SettingsCompanyTab data={initialData} onSaved={onSaved} />
-        </TabsContent>
-        <TabsContent value="integrations" className="mt-0 outline-none">
-          <SettingsIntegrationsTab data={initialData} onSaved={onSaved} />
-        </TabsContent>
-        <TabsContent value="notifications" className="mt-0 outline-none">
-          <SettingsNotificationsTab data={initialData} onSaved={onSaved} />
         </TabsContent>
         <TabsContent value="profile" className="mt-0 outline-none">
           <SettingsUserTab data={initialData} onSaved={onSaved} />

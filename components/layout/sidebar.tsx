@@ -177,7 +177,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false }: SidebarP
         initial={false}
         animate={{ width: collapsed ? 72 : 256 }}
         transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-        className="hidden md:flex md:flex-col md:shrink-0 md:border-r md:border-sidebar-border"
+        className="hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl"
         style={{
           background: 'var(--glass-bg)',
           backdropFilter: 'blur(var(--blur-glass))',
@@ -186,7 +186,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false }: SidebarP
         }}
       >
         <div
-          className="absolute inset-0 rounded-r-xl border-r border-sidebar-border pointer-events-none"
+          className="absolute inset-0 rounded-r-xl border border-l-0 border-sidebar-border pointer-events-none"
           aria-hidden
         />
         <div className="relative z-10 flex flex-1 flex-col min-h-0">
