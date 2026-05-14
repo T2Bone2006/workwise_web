@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -13,6 +13,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   X,
   Building2,
@@ -57,10 +59,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { CustomerListRow } from '@/lib/data/customers';
+import type { CustomerListRow, CustomersListFilters } from '@/lib/data/customers';
 import { deleteCustomer } from '@/lib/actions/customers';
 import { cn } from '@/lib/utils';
+import { FloatingAddButton } from '@/components/ui/floating-add-button';
 
+const PAGE_SIZE = 50;
 const DEBOUNCE_MS = 300;
 type SortCol = 'name' | 'email' | 'jobs';
 type SortDir = 'asc' | 'desc';
@@ -100,34 +104,30 @@ function TypeBadge({ type }: { type: string }) {
 
 export interface CustomersTableProps {
   customers: CustomerListRow[];
-  initialSearch: string;
-  initialTypeFilter: 'all' | 'bulk_client' | 'individual';
-  initialSort: SortCol;
-  initialSortDir: SortDir;
+  totalCount: number;
+  initialFilters: CustomersListFilters & { page?: number };
   fetchError: Error | null;
 }
 
 export function CustomersTable({
   customers,
-  initialSearch,
-  initialTypeFilter,
-  initialSort,
-  initialSortDir,
+  totalCount,
+  initialFilters,
   fetchError,
 }: CustomersTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [searchInput, setSearchInput] = useState(initialFilters.search ?? '');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [sortCol, setSortCol] = useState<SortCol>(initialSort);
-  const [sortDir, setSortDir] = useState<SortDir>(initialSortDir);
 
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
       const next = new URLSearchParams(searchParams.toString());
+      const hasFilterChange = Object.keys(updates).some((k) => k !== 'page');
+      if (hasFilterChange) next.delete('page');
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined || value === '') next.delete(key);
         else next.set(key, value);
@@ -138,8 +138,13 @@ export function CustomersTable({
   );
 
   useEffect(() => {
-    setSearchInput(initialSearch);
-  }, [initialSearch]);
+    setSearchInput(initialFilters.search ?? '');
+  }, [initialFilters.search]);
+
+  useEffect(() => {
+    const valid = new Set(customers.map((c) => c.id));
+    setSelectedIds((prev) => new Set([...prev].filter((id) => valid.has(id))));
+  }, [customers]);
 
   useEffect(() => {
     if (fetchError) {
@@ -157,26 +162,12 @@ export function CustomersTable({
     return () => clearTimeout(t);
   }, [searchInput, updateParams, searchParams]);
 
-  const sortedCustomers = useMemo(() => {
-    const list = [...customers];
-    list.sort((a, b) => {
-      let cmp = 0;
-      if (sortCol === 'name') {
-        cmp = (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' });
-      } else if (sortCol === 'email') {
-        cmp = (a.email ?? '').localeCompare(b.email ?? '', undefined, { sensitivity: 'base' });
-      } else {
-        cmp = (a.job_count ?? 0) - (b.job_count ?? 0);
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [customers, sortCol, sortDir]);
+  const sortCol = (initialFilters.sort ?? 'name') as SortCol;
+  const sortDir = (initialFilters.sort_dir ?? 'asc') as SortDir;
 
   const toggleSort = (col: SortCol) => {
     const nextDir = sortCol === col && sortDir === 'asc' ? 'desc' : 'asc';
-    setSortCol(col);
-    setSortDir(nextDir);
+    updateParams({ sort: col, sort_dir: nextDir });
   };
 
   const SortIcon = ({ column }: { column: SortCol }) => {
@@ -189,8 +180,8 @@ export function CustomersTable({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size >= sortedCustomers.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(sortedCustomers.map((c) => c.id)));
+    if (selectedIds.size >= customers.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(customers.map((c) => c.id)));
   };
 
   const toggleSelect = (id: string) => {
@@ -236,7 +227,7 @@ export function CustomersTable({
   };
 
   const handleExportSelected = () => {
-    const selected = sortedCustomers.filter((c) => selectedIds.has(c.id));
+    const selected = customers.filter((c) => selectedIds.has(c.id));
     const headers = ['Name', 'Type', 'Email', 'Phone', 'Total Jobs'];
     const rows = selected.map((c) => [
       c.name,
@@ -259,8 +250,11 @@ export function CustomersTable({
     toast.success('Export downloaded');
   };
 
-  const isEmpty = sortedCustomers.length === 0 && !fetchError;
-  const typeFilterValue = initialTypeFilter === 'all' ? 'all' : initialTypeFilter;
+  const isEmpty = customers.length === 0 && !fetchError;
+  const typeFilterValue = initialFilters.type ?? 'all';
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  const currentPage = Math.min(Math.max(1, initialFilters.page ?? 1), totalPages);
+  const showPagination = totalCount > PAGE_SIZE;
 
   return (
     <TooltipProvider>
@@ -276,14 +270,24 @@ export function CustomersTable({
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="relative flex-1 min-w-[180px] sm:max-w-[260px]">
-                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
                   <Input
                     placeholder="Name, email, phone..."
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
-                    className="pl-9"
+                    className="pl-9 pr-9"
                     aria-label="Search customers"
                   />
+                  {searchInput.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchInput('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-foreground"
+                      aria-label="Clear search"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  )}
                 </div>
                 <Select
                   value={typeFilterValue}
@@ -304,17 +308,6 @@ export function CustomersTable({
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  variant="gradient"
-                  size="default"
-                  className="ml-auto shadow-[var(--shadow-btn-glow-value)]"
-                  asChild
-                >
-                  <Link href="/customers/new" className="gap-2">
-                    <Plus className="size-4" />
-                    Add Customer
-                  </Link>
-                </Button>
               </div>
 
               {selectedIds.size > 0 && (
@@ -363,7 +356,7 @@ export function CustomersTable({
               <Button
                 variant="gradient"
                 size="lg"
-                className="mt-6 shadow-[var(--shadow-btn-glow-value)]"
+                className="mt-6"
                 asChild
               >
                 <Link href="/customers/new" className="gap-2">
@@ -388,7 +381,7 @@ export function CustomersTable({
                     <TableHead className="w-10">
                       <input
                         type="checkbox"
-                        checked={selectedIds.size === sortedCustomers.length && sortedCustomers.length > 0}
+                        checked={selectedIds.size === customers.length && customers.length > 0}
                         onChange={toggleSelectAll}
                         className="rounded border-border"
                         aria-label="Select all"
@@ -430,7 +423,7 @@ export function CustomersTable({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedCustomers.map((row) => (
+                  {customers.map((row) => (
                     <TableRow
                       key={row.id}
                       className={cn(
@@ -527,6 +520,38 @@ export function CustomersTable({
                 </TableBody>
               </Table>
             </div>
+            {showPagination && (
+              <div className="flex items-center justify-between border-t border-border/80 px-4 py-3">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage <= 1}
+                    onClick={() =>
+                      updateParams({
+                        page: currentPage > 2 ? String(currentPage - 1) : undefined,
+                      })
+                    }
+                  >
+                    <ChevronLeft className="size-4" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => updateParams({ page: String(currentPage + 1) })}
+                  >
+                    Next
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
@@ -576,6 +601,7 @@ export function CustomersTable({
           </DialogContent>
         </Dialog>
       </div>
+      <FloatingAddButton href="/customers/new" label="New Customer" desktopLabel={false} />
     </TooltipProvider>
   );
 }

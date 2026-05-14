@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getUnassignedJobsForTenant } from '@/lib/data/jobs';
+import { getConnectionsForTenant } from '@/lib/data/network';
 import { getRankedWorkersForJob } from '@/lib/actions/jobs';
 import { JobsReviewFlow } from '@/components/jobs/jobs-review-flow';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,9 @@ export default async function JobsReviewPage() {
   if (!unassignedJobs || unassignedJobs.length === 0) {
     redirect('/jobs');
   }
+
+  const { connections } = await getConnectionsForTenant(tenantId);
+  const activeConnections = connections.filter((connection) => connection.status === 'active');
 
   const job = unassignedJobs[0]!;
   const rankedResult = await getRankedWorkersForJob(job.id);
@@ -53,6 +57,8 @@ export default async function JobsReviewPage() {
         totalInQueue={unassignedJobs.length}
         rankedWorkers={rankedWorkers}
         workersNoRequiredSkillMatch={workersNoRequiredSkillMatch}
+        queueJobIds={unassignedJobs.map((queuedJob) => queuedJob.id)}
+        activeConnections={activeConnections}
       />
     </div>
   );

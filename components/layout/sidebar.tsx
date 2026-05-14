@@ -8,6 +8,8 @@ import {
   LayoutDashboard,
   Briefcase,
   Users,
+  Share2,
+  Activity,
   Building2,
   Upload,
   Settings,
@@ -32,6 +34,8 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/jobs', label: 'Jobs', icon: Briefcase },
   { href: '/workers', label: 'Workers', icon: Users },
+  { href: '/network', label: 'Network', icon: Share2 },
+  { href: '/monitor', label: 'Monitor', icon: Activity },
   { href: '/customers', label: 'Customers', icon: Building2 },
   { href: '/import', label: 'Import', icon: Upload },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -175,7 +179,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false }: SidebarP
       {/* Desktop: fixed sidebar */}
       <motion.aside
         initial={false}
-        animate={{ width: collapsed ? 72 : 256 }}
+        animate={{ width: collapsed ? 72 : 192 }}
         transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
         className="hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl"
         style={{

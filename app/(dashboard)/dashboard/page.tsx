@@ -2,6 +2,8 @@ import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/da
 import { getDashboardJobStatCards, getRecentJobs } from '@/lib/data/dashboard';
 import { DashboardStatCards } from '@/components/dashboard/dashboard-stat-cards';
 import { RecentJobs } from '@/components/dashboard/recent-jobs';
+import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { redirect } from 'next/navigation';
 
 export default async function DashboardPage() {
@@ -19,10 +21,8 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="shrink-0">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Dashboard</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground sm:text-base">{tenantName}</p>
-      </div>
+      <PageGradientHeader title="Dashboard" subtitle={tenantName ?? undefined} />
+      <DeclinedJobsBanner />
 
       <section className="shrink-0">
         <DashboardStatCards stats={jobStats} />

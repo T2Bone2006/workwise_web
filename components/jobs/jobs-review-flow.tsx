@@ -6,9 +6,12 @@ import { Loader2, Sparkles, MapPin, FileText, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { assignJob, autoAllocateJob } from '@/lib/actions/jobs';
+import { bulkDispatchToNetwork } from '@/lib/actions/network';
 import type { RankedWorkerForJob } from '@/lib/jobs/worker-skill-match';
 import { cn } from '@/lib/utils';
 import type { JobRow } from '@/lib/data/jobs';
+import type { NetworkConnectionRow } from '@/lib/data/network';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 
 /** Primary list: workers with ≥1 required skill match (or all workers if job has no requirements). */
 const MAX_SKILL_MATCH_WORKERS = 5;
@@ -20,6 +23,8 @@ interface JobsReviewFlowProps {
   totalInQueue: number;
   rankedWorkers: RankedWorkerForJob[];
   workersNoRequiredSkillMatch: RankedWorkerForJob[];
+  queueJobIds?: string[];
+  activeConnections?: NetworkConnectionRow[];
 }
 
 function WorkerSkillBreakdown({
@@ -121,6 +126,8 @@ export function JobsReviewFlow({
   totalInQueue,
   rankedWorkers,
   workersNoRequiredSkillMatch,
+  queueJobIds,
+  activeConnections,
 }: JobsReviewFlowProps) {
   const requiredSkills = job.required_skills ?? [];
   const requiredCount = requiredSkills.length;
@@ -133,10 +140,17 @@ export function JobsReviewFlow({
   const [autoAssignError, setAutoAssignError] = useState<string | null>(
     () => job.auto_assign_failure_reason ?? null
   );
+  const [isNetworkPickerOpen, setIsNetworkPickerOpen] = useState(false);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string>('');
+  const [isBulkDispatching, setIsBulkDispatching] = useState(false);
+  const availableJobIds = queueJobIds && queueJobIds.length > 0 ? queueJobIds : [job.id];
+  const canBulkDispatchToNetwork = Boolean(activeConnections && activeConnections.length > 0);
 
   useEffect(() => {
     setSelectedWorkerId(null);
     setAutoAssignError(job.auto_assign_failure_reason ?? null);
+    setIsNetworkPickerOpen(false);
+    setSelectedConnectionId('');
   }, [job.id, job.auto_assign_failure_reason]);
 
   async function handleAutoAssign() {
@@ -188,6 +202,40 @@ export function JobsReviewFlow({
     }
   }
 
+  async function handleBulkDispatchToNetwork() {
+    if (!selectedConnectionId) {
+      toast.error('Select a connected business first');
+      return;
+    }
+    setIsBulkDispatching(true);
+    try {
+      const result = await bulkDispatchToNetwork(availableJobIds, selectedConnectionId);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      const { success, failed, errors } = result.data;
+      if (failed === 0) {
+        toast.success(
+          success === 1
+            ? '1 job sent to connected business'
+            : `${success} jobs sent to connected business`
+        );
+      } else {
+        toast.error(
+          `Sent ${success} ${success === 1 ? 'job' : 'jobs'}, ${failed} failed. ${errors[0] ?? 'Check jobs list for details.'}`
+        );
+      }
+      setIsNetworkPickerOpen(false);
+      setSelectedConnectionId('');
+      router.refresh();
+    } catch {
+      toast.error('Failed to send jobs to connected business');
+    } finally {
+      setIsBulkDispatching(false);
+    }
+  }
+
   /** Already sorted by distance server-side; cap list lengths for a tighter UI. */
   const skillMatchListWorkers = rankedWorkers.slice(0, MAX_SKILL_MATCH_WORKERS);
   const noSkillMatchListWorkers = workersNoRequiredSkillMatch.slice(
@@ -203,7 +251,65 @@ export function JobsReviewFlow({
         <p className="text-sm font-medium text-muted-foreground">
           Job 1 of {totalInQueue} needing assignment
         </p>
+        {canBulkDispatchToNetwork && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setIsNetworkPickerOpen((prev) => !prev);
+                setSelectedConnectionId('');
+              }}
+              disabled={isAssigning || isAutoAssigning || isBulkDispatching}
+            >
+              Send all to connected business
+            </Button>
+          </div>
+        )}
       </div>
+      {canBulkDispatchToNetwork && isNetworkPickerOpen && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:flex-row sm:items-center">
+          <SearchableSelect
+            value={selectedConnectionId}
+            onValueChange={setSelectedConnectionId}
+            placeholder="Choose connected business"
+            searchPlaceholder="Search connected business..."
+            className="w-full sm:w-[280px]"
+            options={
+              activeConnections?.map((connection) => ({
+                value: connection.id,
+                label:
+                  connection.other_tenant_name ??
+                  connection.other_tenant_slug ??
+                  connection.id.slice(0, 8),
+              })) ?? []
+            }
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleBulkDispatchToNetwork}
+              disabled={!selectedConnectionId || isBulkDispatching}
+            >
+              {isBulkDispatching ? <Loader2 className="size-4 animate-spin" /> : 'Confirm'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setIsNetworkPickerOpen(false);
+                setSelectedConnectionId('');
+              }}
+              disabled={isBulkDispatching}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div
         className={cn(
@@ -258,7 +364,7 @@ export function JobsReviewFlow({
             type="button"
             variant="gradient"
             size="lg"
-            className="w-full gap-2 shadow-[var(--shadow-btn-glow-value)]"
+            className="w-full gap-2"
             onClick={handleAutoAssign}
             disabled={isAutoAssigning || isAssigning}
           >

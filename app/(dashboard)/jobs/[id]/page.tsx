@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
 import { getWorkersForTenant } from '@/lib/data/workers';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import { JobDetailHeader } from '@/components/jobs/job-detail-header';
 import { JobDetailView } from '@/components/jobs/job-detail-view';
+import { JobOriginRealtimeView } from '@/components/jobs/job-origin-realtime-view';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
 import {
   splitJobAttachmentsForPhotos,
@@ -32,6 +34,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     .select(
       `
       id,
+      network_dispatch_id,
       tenant_id,
       reference_number,
       address,
@@ -54,7 +57,6 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     `
     )
     .eq('id', jobId)
-    .eq('tenant_id', tenantId)
     .maybeSingle();
 
   if (jobError) {
@@ -63,6 +65,34 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
   }
 
   if (!jobRow) {
+    redirect('/jobs?error=not_found');
+  }
+
+  const isLocalTenantJob = (jobRow.tenant_id as string) === tenantId;
+  let isNetworkOriginView = false;
+  let receivingBusinessName: string | null = null;
+  let networkOriginatingTenantId: string | null = null;
+  if (jobRow.network_dispatch_id) {
+    const { data: dispatchRow } = await supabase
+      .from('network_job_dispatches')
+      .select('originating_tenant_id')
+      .eq('id', jobRow.network_dispatch_id)
+      .maybeSingle();
+
+    networkOriginatingTenantId = (dispatchRow?.originating_tenant_id as string | null) ?? null;
+    isNetworkOriginView = networkOriginatingTenantId === tenantId && !isLocalTenantJob;
+
+    if (isNetworkOriginView) {
+      const { data: receivingTenant } = await supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', jobRow.tenant_id)
+        .maybeSingle();
+      receivingBusinessName = (receivingTenant?.name as string | null) ?? null;
+    }
+  }
+
+  if (!isLocalTenantJob && !isNetworkOriginView) {
     redirect('/jobs?error=not_found');
   }
 
@@ -228,8 +258,44 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
 
   const completionNotesTrimmed = (jobRow.completion_notes ?? '').trim();
 
-  const { workers } = await getWorkersForTenant(tenantId);
+  const [{ workers }, tenantSkills] = await Promise.all([
+    getWorkersForTenant(tenantId),
+    getTenantSkills(tenantId),
+  ]);
   const workerOptions = workers.map((w) => ({ id: w.id, full_name: w.full_name }));
+  const jobForView: JobDetailJob = {
+    ...job,
+    worker: job.worker
+      ? {
+          ...job.worker,
+          full_name: isNetworkOriginView
+            ? job.worker.full_name.split(' ')[0] || job.worker.full_name
+            : job.worker.full_name,
+        }
+      : null,
+  };
+
+  if (isNetworkOriginView) {
+    return (
+      <JobOriginRealtimeView
+        initialJob={jobForView}
+        initialStatusHistory={statusHistory}
+        workers={workerOptions}
+        tenantSkills={tenantSkills}
+        mapData={mapData}
+        industryData={industryDataForDetail}
+        completionNotes={
+          job.status === 'completed'
+            ? completionNotesTrimmed
+            : completionNotesTrimmed.length > 0
+              ? completionNotesTrimmed
+              : undefined
+        }
+        attachmentPhotos={jobPhotosSplit}
+        receivingBusinessName={receivingBusinessName}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -241,9 +307,10 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         createdAt={job.created_at}
       />
       <JobDetailView
-        job={job}
+        job={jobForView}
         statusHistory={statusHistory}
         workers={workerOptions}
+        tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryDataForDetail}
         completionNotes={
@@ -254,6 +321,8 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
               : undefined
         }
         attachmentPhotos={jobPhotosSplit}
+        isNetworkOriginView={false}
+        receivingBusinessName={null}
       />
     </div>
   );

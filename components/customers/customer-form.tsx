@@ -282,7 +282,6 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
                   type="submit"
                   variant="gradient"
                   disabled={isSubmitting}
-                  className="shadow-[var(--shadow-btn-glow-value)]"
                 >
                   {isSubmitting ? (
                     <>

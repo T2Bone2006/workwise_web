@@ -33,9 +33,13 @@ import {
 } from '@/components/ui/dialog';
 import type { CustomerDetailRow, CustomerJobStats } from '@/lib/data/customers';
 import type { RecentJobRow } from '@/lib/data/jobs';
-import { deleteCustomer } from '@/lib/actions/customers';
+import {
+  deleteCustomer,
+  getCustomerPortalInviteState,
+  inviteCustomerToPortal,
+} from '@/lib/actions/customers';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -73,8 +77,32 @@ export function CustomerDetailView({
   const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
+  const [canInviteToPortal, setCanInviteToPortal] = useState(false);
 
   const isBulk = customer.type === 'bulk_client';
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadPortalInviteState() {
+      const state = await getCustomerPortalInviteState(customer.id);
+      if (!mounted) return;
+
+      if (!state.success) {
+        setCanInviteToPortal(false);
+        return;
+      }
+
+      setCanInviteToPortal(state.hasEmail && !state.hasPortalUser);
+    }
+
+    void loadPortalInviteState();
+
+    return () => {
+      mounted = false;
+    };
+  }, [customer.id]);
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -88,6 +116,21 @@ export function CustomerDetailView({
     } else {
       toast.error(result.error ?? 'Failed to delete customer');
     }
+  };
+
+  const handleInviteToPortal = async () => {
+    setIsInviting(true);
+    const result = await inviteCustomerToPortal(customer.id);
+    setIsInviting(false);
+
+    if (result.success) {
+      toast.success('Portal invite sent');
+      setCanInviteToPortal(false);
+      router.refresh();
+      return;
+    }
+
+    toast.error(result.error ?? 'Failed to send portal invite');
   };
 
   return (
@@ -280,12 +323,23 @@ export function CustomerDetailView({
                 Edit customer
               </Link>
             </Button>
-            <Button variant="gradient" className="w-full justify-start gap-2 shadow-[var(--shadow-btn-glow-value)]" asChild>
+            <Button variant="gradient" className="w-full justify-start gap-2" asChild>
               <Link href={`/jobs/new?customer_id=${customer.id}`}>
                 <Briefcase className="size-4" />
                 Create job for this customer
               </Link>
             </Button>
+            {canInviteToPortal && (
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-2"
+                onClick={handleInviteToPortal}
+                disabled={isInviting}
+              >
+                {isInviting ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+                Invite to Portal
+              </Button>
+            )}
             <Button
               variant="ghost"
               className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"

@@ -32,13 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import {
   Tooltip,
   TooltipContent,
@@ -47,13 +41,13 @@ import {
 } from '@/components/ui/tooltip';
 import {
   type CustomerJobCount,
+  type ImportBatchRow,
   type JobRow,
   type JobsFilters,
   type JobStatus,
   type JobsStatusSummary,
 } from '@/lib/data/jobs';
 import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
-import { JobsGroupedView } from '@/components/jobs/jobs-grouped-view';
 import {
   Dialog,
   DialogContent,
@@ -65,6 +59,9 @@ import {
 import { bulkDeleteJobs } from '@/lib/actions/jobs';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { BatchesView } from '@/components/jobs/batches-view';
+import { ExportJobsButton } from '@/components/jobs/export-jobs-button';
+import { FloatingAddButton } from '@/components/ui/floating-add-button';
 
 const PAGE_SIZE = 50;
 const DEBOUNCE_MS = 300;
@@ -74,7 +71,9 @@ const STATUS_TOOLTIPS: Record<JobStatus, string> = {
   pending_send: 'Worker chosen — send from jobs list to notify their app.',
   assigned: 'Worker assigned — waiting to start on site.',
   in_progress: 'Work is underway.',
+  paused: 'Work paused temporarily.',
   completed: 'Finished.',
+  declined: 'Worker declined this job.',
   cancelled: 'Cancelled; will not be completed.',
 };
 
@@ -83,6 +82,7 @@ const FILTER_TABS: { value: 'all' | JobStatus; dbStatuses?: JobStatus[] }[] = [
   { value: 'pending' },
   { value: 'pending_send' },
   { value: 'in_progress' },
+  { value: 'paused' },
   { value: 'assigned' },
   { value: 'completed' },
 ];
@@ -136,11 +136,12 @@ function truncateAddress(addr: string | null, max = 48) {
 interface JobsTableProps {
   initialJobs: JobRow[];
   totalCount: number;
-  initialFilters: JobsFilters & { page?: number; view?: 'list' | 'grouped' };
+  initialFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' };
   fetchError: Error | null;
   statusSummary: JobsStatusSummary;
   customerFilterOptions: CustomerJobCount[];
-  customerCompletionSummary: { total: number; completed: number } | null;
+  batches: ImportBatchRow[];
+  activeBatchId: string | null;
 }
 
 export function JobsTable({
@@ -150,7 +151,8 @@ export function JobsTable({
   fetchError,
   statusSummary,
   customerFilterOptions,
-  customerCompletionSummary,
+  batches,
+  activeBatchId,
 }: JobsTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -229,6 +231,7 @@ export function JobsTable({
       s === 'pending' ||
       s === 'pending_send' ||
       s === 'in_progress' ||
+      s === 'paused' ||
       s === 'assigned' ||
       s === 'completed'
     )
@@ -280,6 +283,9 @@ export function JobsTable({
   );
 
   const customerSelectValue = initialFilters.customer_id ?? '__all__';
+  const activeBatch = activeBatchId
+    ? batches.find((batch) => batch.id === activeBatchId) ?? null
+    : null;
 
   const sortCol = initialFilters.sort ?? 'created_at';
   const sortDir = initialFilters.sort_dir ?? 'desc';
@@ -318,6 +324,13 @@ export function JobsTable({
     initialFilters.date_to ||
     initialFilters.customer_id ||
     initialFilters.priority
+  );
+  const hasNonCustomerFilters = !!(
+    initialFilters.search ||
+    initialFilters.status ||
+    initialFilters.date_from ||
+    initialFilters.date_to ||
+    initialFilters.import_source_id
   );
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
   const currentPage = Math.min(Math.max(1, initialFilters.page ?? 1), totalPages);
@@ -383,20 +396,6 @@ export function JobsTable({
     },
   ] as const;
 
-  const customerFilteredCompletionBanner =
-    initialFilters.customer_id && customerCompletionSummary ? (
-      <div className="shrink-0 border-b border-border/60 bg-muted/30 px-4 py-2.5 text-sm">
-        <span className="tabular-nums font-semibold text-foreground">
-          {customerCompletionSummary.completed}
-        </span>
-        <span className="text-muted-foreground"> of </span>
-        <span className="tabular-nums font-semibold text-foreground">
-          {customerCompletionSummary.total}
-        </span>
-        <span className="text-muted-foreground"> jobs completed</span>
-      </div>
-    ) : null;
-
   return (
     <TooltipProvider>
       <div className="space-y-4">
@@ -430,80 +429,92 @@ export function JobsTable({
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
-                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
                   <Input
                     placeholder="Search ref, address, description…"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
-                    className="pl-9"
+                    className="pl-9 pr-9"
                     aria-label="Search jobs"
                   />
+                  {searchInput.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchInput('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-foreground"
+                      aria-label="Clear search"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  )}
                 </div>
                 <div className="flex min-w-[200px] max-w-[min(100%,320px)] flex-col gap-1.5">
                   <label htmlFor="jobs-customer-filter" className="sr-only">
                     Filter by customer
                   </label>
-                  <Select
+                  <SearchableSelect
                     value={customerSelectValue}
                     onValueChange={(v) => {
                       if (v === '__all__') updateParams({ customer_id: undefined });
                       else updateParams({ customer_id: v });
                     }}
-                  >
-                    <SelectTrigger id="jobs-customer-filter" className="h-10 w-full" aria-label="Filter by customer">
-                      <SelectValue placeholder="All customers" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All customers</SelectItem>
-                      {sortedCustomerFilterOptions.map((c) => (
-                        <SelectItem
-                          key={c.customer_id ?? 'none'}
-                          value={c.customer_id ?? 'none'}
-                        >
-                          {`${c.name} (${c.count})`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="All customers"
+                    searchPlaceholder="Search customer..."
+                    className="h-10 w-full"
+                    options={[
+                      { value: '__all__', label: 'All customers' },
+                      ...sortedCustomerFilterOptions.map((c) => ({
+                        value: c.customer_id ?? 'none',
+                        label: `${c.name} (${c.count})${hasNonCustomerFilters ? ' (filtered)' : ''}`,
+                      })),
+                    ]}
+                  />
                 </div>
                 <div className="flex items-center gap-1 rounded-md border border-border/80 p-0.5">
                   <Button
-                    variant={initialFilters.view !== 'grouped' ? 'secondary' : 'ghost'}
+                    variant={
+                      !initialFilters.view || initialFilters.view === 'list'
+                        ? 'secondary'
+                        : 'ghost'
+                    }
                     size="sm"
                     className="h-8 gap-1"
-                    onClick={() => updateParams({ view: 'list' })}
+                    onClick={() =>
+                      updateParams(
+                        initialFilters.view === 'batches'
+                          ? { view: 'list', batchId: undefined }
+                          : { view: 'list' }
+                      )
+                    }
                   >
                     <List className="size-3.5" />
                     List
                   </Button>
                   <Button
-                    variant={initialFilters.view === 'grouped' ? 'secondary' : 'ghost'}
+                    variant={initialFilters.view === 'batches' ? 'secondary' : 'ghost'}
                     size="sm"
                     className="h-8 gap-1"
-                    onClick={() => updateParams({ view: 'grouped' })}
+                    onClick={() => updateParams({ view: 'batches', batchId: undefined })}
                   >
                     <Layers className="size-3.5" />
-                    Grouped
+                    Batches
                   </Button>
                 </div>
-                {hasFilters && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setSearchInput('');
-                      router.push('/jobs', { scroll: false });
-                    }}
-                  >
-                    Clear filters
-                  </Button>
-                )}
-                <Button variant="gradient" size="default" className="ml-auto shrink-0" asChild>
-                  <Link href="/jobs/new">
-                    <Plus className="size-4" />
-                    New Job
-                  </Link>
-                </Button>
+                <div className="ml-auto flex items-center gap-2">
+                  {hasFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSearchInput('');
+                        router.push('/jobs', { scroll: false });
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                  <ExportJobsButton jobs={initialJobs} />
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
@@ -630,15 +641,27 @@ export function JobsTable({
                 </div>
               </div>
             </div>
-          ) : initialFilters.view === 'grouped' ? (
-            <>
-              {customerFilteredCompletionBanner}
-              <JobsGroupedView jobs={initialJobs} />
-            </>
+          ) : initialFilters.view === 'batches' && !activeBatchId ? (
+            <div className="p-4">
+              <BatchesView batches={batches} />
+            </div>
           ) : (
             <>
+              {activeBatch ? (
+                <div className="border-b border-border/70 px-4 py-3">
+                  <button
+                    type="button"
+                    className="text-sm text-primary hover:underline"
+                    onClick={() => updateParams({ batchId: undefined })}
+                  >
+                    ← All batches
+                  </button>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {activeBatch.file_name ?? 'Unnamed import batch'}
+                  </p>
+                </div>
+              ) : null}
               <div className="flex max-h-[calc(100vh-14rem)] min-h-[320px] flex-col">
-                {customerFilteredCompletionBanner}
                 {selectedIds.size > 0 && (
                   <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border/80 bg-primary/5 px-4 py-2">
                     <span className="text-sm font-medium">{selectedIds.size} selected</span>
@@ -858,6 +881,7 @@ export function JobsTable({
           )}
         </Card>
       </div>
+      <FloatingAddButton href="/jobs/new" label="New Job" desktopLabel={false} />
     </TooltipProvider>
   );
 }

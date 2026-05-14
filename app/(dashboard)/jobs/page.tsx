@@ -5,7 +5,7 @@ import {
   getJobsStatusSummary,
   getPendingSendJobsForTenant,
   getCustomerJobCounts,
-  getCustomerJobsCompletionSummary,
+  getImportBatchesForTenant,
   type JobsFilters,
   type JobStatus,
   type JobPriority,
@@ -15,6 +15,7 @@ import { JobsTable } from '@/components/jobs/jobs-table';
 import { JobsForReviewBanner } from '@/components/jobs/jobs-for-review-banner';
 import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banner';
 import { JobsPageErrorToast } from '@/components/jobs/jobs-page-error-toast';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 interface JobsPageProps {
   searchParams: Promise<{
@@ -28,6 +29,7 @@ interface JobsPageProps {
     sort?: string;
     sort_dir?: string;
     view?: string;
+    batchId?: string;
     error?: string;
   }>;
 }
@@ -37,6 +39,7 @@ const VALID_STATUS: JobStatus[] = [
   'pending_send',
   'assigned',
   'in_progress',
+  'paused',
   'completed',
   'cancelled',
 ];
@@ -44,7 +47,7 @@ const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'urgent'];
 
 function parseSearchParams(
   raw: Awaited<JobsPageProps['searchParams']>
-): JobsFilters & { page?: number; view?: 'list' | 'grouped' } {
+): JobsFilters & { page?: number; view?: 'list' | 'batches' } {
   const statusRaw = raw.status?.trim();
   const status: JobStatus | JobStatus[] | undefined = statusRaw
     ? statusRaw.includes(',')
@@ -68,7 +71,7 @@ function parseSearchParams(
       ? raw.sort
       : undefined;
   const sort_dir = raw.sort_dir === 'asc' || raw.sort_dir === 'desc' ? raw.sort_dir : undefined;
-  const view = raw.view === 'grouped' ? 'grouped' : 'list';
+  const view = raw.view === 'batches' ? raw.view : 'list';
   return {
     search: raw.search?.trim() || undefined,
     status,
@@ -121,7 +124,8 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     }
 
     const rawParams = await searchParams;
-    let filters: JobsFilters & { page?: number };
+    const activeBatchId = rawParams.batchId?.trim() || null;
+    let filters: JobsFilters & { page?: number; view?: 'list' | 'batches' };
     try {
       filters = parseSearchParams(rawParams);
     } catch (paramErr) {
@@ -130,22 +134,32 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     }
 
     const [
-      { jobs, totalCount, error },
       { jobs: unassignedJobs },
       statusSummary,
       { jobs: pendingSendJobs },
       customerJobCountsResult,
-      customerCompletionResult,
+      batchesResult,
     ] = await Promise.all([
-      getJobsForTenant(tenantId, filters),
       getUnassignedJobsForTenant(tenantId, 500),
       getJobsStatusSummary(tenantId),
       getPendingSendJobsForTenant(tenantId),
       getCustomerJobCounts(tenantId),
-      filters.customer_id
-        ? getCustomerJobsCompletionSummary(tenantId, filters.customer_id)
-        : Promise.resolve({ total: 0, completed: 0, error: null as Error | null }),
+      getImportBatchesForTenant(tenantId),
     ]);
+
+    const activeBatch = activeBatchId
+      ? batchesResult.batches.find((batch) => batch.id === activeBatchId) ?? null
+      : null;
+    const jobsFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' } = {
+      ...filters,
+      import_source_id:
+        filters.view === 'batches'
+          ? activeBatchId === 'ungrouped'
+            ? 'ungrouped'
+            : activeBatch?.import_source_id ?? undefined
+          : undefined,
+    };
+    const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
     console.log('[JobsPage] Jobs query result:', {
       jobsCount: jobs?.length ?? 0,
       totalCount: totalCount ?? 0,
@@ -157,38 +171,26 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     const customerFilterOptions: CustomerJobCount[] = customerJobCountsResult.error
       ? []
       : customerJobCountsResult.customers;
-    const customerCompletionSummary =
-      filters.customer_id && !customerCompletionResult.error
-        ? {
-            completed: customerCompletionResult.completed,
-            total: customerCompletionResult.total,
-          }
-        : null;
 
     return (
       <div className="space-y-6">
         <JobsPageErrorToast error={redirectError} />
         <PendingSendJobsBanner jobs={pendingSendJobs} />
         <JobsForReviewBanner count={unassignedCount} />
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              Jobs
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Manage and track all your jobs
-            </p>
-          </div>
-        </div>
+        <PageGradientHeader
+          title="Jobs"
+          subtitle="Manage and track all your jobs"
+        />
 
         <JobsTable
           initialJobs={Array.isArray(jobs) ? jobs : []}
           totalCount={typeof totalCount === 'number' ? totalCount : 0}
-          initialFilters={filters}
+          initialFilters={jobsFilters}
           fetchError={error}
           statusSummary={statusSummary}
           customerFilterOptions={customerFilterOptions}
-          customerCompletionSummary={customerCompletionSummary}
+          batches={batchesResult.error ? [] : batchesResult.batches}
+          activeBatchId={activeBatchId}
         />
       </div>
     );

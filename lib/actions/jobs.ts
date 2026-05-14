@@ -8,8 +8,11 @@ import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
+import { getTenantSkills } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
 import { sendJobAssignedPushToWorker } from '@/lib/services/worker-push';
+import { getConnectionsForTenant } from '@/lib/data/network';
+import { dispatchJobToNetwork, handleNetworkJobDeclined } from '@/lib/actions/network';
 import {
   parseWorkerSkillsArray,
   requiredSkillBreakdown,
@@ -93,10 +96,18 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       referenceNumber = `JOB-${String(nextNum).padStart(3, '0')}`;
     }
 
-    const assignedWorkerId =
+    const requestedAssignment =
       parsed.data.assigned_worker_id && parsed.data.assigned_worker_id.length > 0
         ? parsed.data.assigned_worker_id
         : null;
+    const isBusinessAssignment = requestedAssignment?.startsWith('business:') ?? false;
+    const assignedWorkerId = isBusinessAssignment ? null : requestedAssignment;
+    const assignedBusinessConnectionId = isBusinessAssignment
+      ? requestedAssignment!.slice('business:'.length)
+      : null;
+    if (isBusinessAssignment && !assignedBusinessConnectionId) {
+      return { success: false, error: 'Invalid connected business assignment.' };
+    }
 
     let requiredSkills: string[];
     if (
@@ -115,13 +126,14 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         );
       }
     } else {
-      const result = await detectSkills(
-        {
-          description: parsed.data.description,
-          address: parsed.data.address,
-          priority: parsed.data.priority,
-        }
-      );
+      const tenantSkillRows = await getTenantSkills(tenantId);
+      const tenantSkills = tenantSkillRows.map(({ key, label }) => ({ key, label }));
+      const result = await detectSkills({
+        description: parsed.data.description,
+        address: parsed.data.address,
+        priority: parsed.data.priority,
+        tenantSkills,
+      });
       requiredSkills = result.data;
     }
 
@@ -160,6 +172,16 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       return { success: false, error: 'Failed to create job.' };
     }
 
+    if (assignedBusinessConnectionId) {
+      const dispatchResult = await dispatchJobToNetwork(job.id, assignedBusinessConnectionId);
+      if (!dispatchResult.success) {
+        return {
+          success: false,
+          error: dispatchResult.error ?? 'Failed to dispatch job to connected business.',
+        };
+      }
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     const { error: historyError } = await supabase
       .from('job_status_history')
@@ -195,11 +217,13 @@ export type UpdateJobStatusResult =
   | { success: false; error: string };
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  pending: ['assigned', 'cancelled', 'pending_send'],
-  pending_send: ['assigned', 'cancelled'],
-  assigned: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
+  pending: ['assigned', 'cancelled', 'pending_send', 'declined'],
+  pending_send: ['assigned', 'cancelled', 'declined'],
+  assigned: ['in_progress', 'cancelled', 'declined'],
+  in_progress: ['completed', 'cancelled', 'paused'],
+  paused: ['in_progress'],
   completed: ['assigned'],
+  declined: ['pending', 'assigned'],
   cancelled: [],
 };
 
@@ -216,7 +240,7 @@ export async function updateJobStatus(
     const supabase = await createClient();
     const { data: job, error: fetchError } = await supabase
       .from('jobs')
-      .select('id, status')
+      .select('id, status, network_dispatch_id')
       .eq('id', jobId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -256,6 +280,25 @@ export async function updateJobStatus(
       return { success: false, error: updateError.message ?? 'Failed to update status.' };
     }
 
+    if (newStatus === 'declined') {
+      const dispatchId =
+        typeof job.network_dispatch_id === 'string' && job.network_dispatch_id.length > 0
+          ? job.network_dispatch_id
+          : null;
+
+      if (dispatchId) {
+        const declinedResult = await handleNetworkJobDeclined(jobId, dispatchId);
+        if (!declinedResult.success) {
+          return { success: false, error: declinedResult.error };
+        }
+      } else {
+        const declinedResult = await handleRegularJobDeclined(jobId);
+        if (!declinedResult.success) {
+          return { success: false, error: declinedResult.error };
+        }
+      }
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     const { error: historyError } = await supabase
       .from('job_status_history')
@@ -286,6 +329,64 @@ export async function updateJobStatus(
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to update status. Please try again.',
+    };
+  }
+}
+
+export async function handleRegularJobDeclined(jobId: string): Promise<UpdateJobStatusResult> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const autoAllocateResult = await autoAllocateJob(jobId);
+    if (autoAllocateResult.success) {
+      return { success: true };
+    }
+
+    const { error: resetError } = await supabase
+      .from('jobs')
+      .update({
+        status: 'pending',
+        assigned_worker_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', jobId)
+      .eq('tenant_id', tenantId);
+
+    if (resetError) {
+      console.error('[handleRegularJobDeclined] reset error:', resetError);
+      return { success: false, error: resetError.message ?? 'Failed to return job to pending.' };
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error: historyError } = await supabase.from('job_status_history').insert({
+      job_id: jobId,
+      from_status: 'declined',
+      to_status: 'pending',
+      created_at: new Date().toISOString(),
+      changed_by_user_id: user?.id ?? null,
+      changed_by_worker_id: null,
+      notes: 'Worker declined — returned to pending queue',
+      metadata: {},
+    });
+
+    if (historyError) {
+      console.error('[handleRegularJobDeclined] job_status_history insert error:', historyError);
+    }
+
+    revalidatePath('/jobs');
+    revalidatePath(`/jobs/${jobId}`);
+    return { success: true };
+  } catch (err) {
+    console.error('[handleRegularJobDeclined]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to handle declined job.',
     };
   }
 }
@@ -393,6 +494,52 @@ export type {
   WorkerSkillMatchLevel,
 } from '@/lib/jobs/worker-skill-match';
 
+type UnifiedAutoAssignCandidate =
+  | {
+      type: 'worker';
+      id: string;
+      name: string;
+      lat: number;
+      lng: number;
+      skills: string[];
+      currentLoad: number;
+    }
+  | {
+      type: 'business';
+      id: string;
+      name: string;
+      lat: number;
+      lng: number;
+      skills: string[];
+      currentLoad: number;
+      coverageRadiusMiles: number | null;
+    };
+
+function parsePointLatLng(value: unknown): { lat: number; lng: number } | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const raw = value.trim();
+
+  const pointWkt = raw.match(/^POINT\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s*\)$/i);
+  if (pointWkt) {
+    const lng = Number(pointWkt[1]);
+    const lat = Number(pointWkt[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  }
+
+  const tuple = raw.match(/^\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)$/);
+  if (tuple) {
+    const lng = Number(tuple[1]);
+    const lat = Number(tuple[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Ranks all available tenant workers for a job: distance (then active job count), same as {@link autoAllocateJob},
  * but includes every available worker (not only full skill matches) with skill match metadata for manual selection.
@@ -452,11 +599,50 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
     }
 
     const workersList = workersRaw ?? [];
-    if (workersList.length === 0) {
-      return { success: true, workers: [], workersNoRequiredSkillMatch: [] };
+    const workerIds = workersList.map((w) => w.id);
+    let excludedWorkerIds = new Set<string>();
+    if (workerIds.length > 0) {
+      const { data: workerTenantRows, error: workerTenantError } = await supabase
+        .from('worker_tenants')
+        .select('worker_id')
+        .eq('tenant_id', userData.tenant_id)
+        .eq('exclude_from_auto_assign', true)
+        .in('worker_id', workerIds);
+      if (workerTenantError) {
+        console.error('[getRankedWorkersForJob] worker_tenants fetch error:', workerTenantError);
+        return { success: false, error: 'Failed to load workers' };
+      }
+      excludedWorkerIds = new Set((workerTenantRows ?? []).map((r) => r.worker_id as string));
     }
 
-    const workerIds = workersList.map((w) => w.id);
+    const eligibleWorkers = workersList.filter((w) => !excludedWorkerIds.has(w.id));
+
+    const { connections, error: connectionsError } = await getConnectionsForTenant(userData.tenant_id);
+    if (connectionsError) {
+      console.error('[getRankedWorkersForJob] connections fetch error:', connectionsError);
+      return { success: false, error: 'Failed to load connected businesses' };
+    }
+    const activeConnections = connections.filter((c) => c.status === 'active');
+    const activeConnectionIds = activeConnections.map((c) => c.id);
+
+    const connectionPointMap = new Map<string, { lat: number; lng: number }>();
+    if (activeConnectionIds.length > 0) {
+      const { data: connectionRows, error: connectionRowsError } = await supabase
+        .from('tenant_network_connections')
+        .select('id, coverage_area_centre')
+        .in('id', activeConnectionIds);
+      if (connectionRowsError) {
+        console.error('[getRankedWorkersForJob] connection geometry fetch error:', connectionRowsError);
+        return { success: false, error: 'Failed to load connected businesses' };
+      }
+      for (const row of connectionRows ?? []) {
+        const parsed = parsePointLatLng(row.coverage_area_centre);
+        if (parsed && row.id) {
+          connectionPointMap.set(row.id as string, parsed);
+        }
+      }
+    }
+
     const { data: jobCounts } = await supabase
       .from('jobs')
       .select('assigned_worker_id')
@@ -471,6 +657,29 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
       }
     });
 
+    const businessLoadMap = new Map<string, number>();
+    if (activeConnectionIds.length > 0) {
+      const { data: dispatchCounts, error: dispatchCountsError } = await supabase
+        .from('network_job_dispatches')
+        .select(
+          `
+          connection_id,
+          canonical_job:jobs!network_job_dispatches_canonical_job_id_fkey(status)
+        `
+        )
+        .in('connection_id', activeConnectionIds)
+        .in('canonical_job.status', ['assigned', 'in_progress', 'pending_send']);
+      if (dispatchCountsError) {
+        console.error('[getRankedWorkersForJob] business load fetch error:', dispatchCountsError);
+        return { success: false, error: 'Failed to load connected businesses' };
+      }
+      for (const row of dispatchCounts ?? []) {
+        const connectionId = row.connection_id as string | null;
+        if (!connectionId) continue;
+        businessLoadMap.set(connectionId, (businessLoadMap.get(connectionId) ?? 0) + 1);
+      }
+    }
+
     const sortByDistanceThenLoad = (a: RankedWorkerForJob, b: RankedWorkerForJob) => {
       const da = a.distanceKm ?? Infinity;
       const db = b.distanceKm ?? Infinity;
@@ -478,7 +687,7 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
       return a.currentJobs - b.currentJobs;
     };
 
-    const ranked: RankedWorkerForJob[] = workersList.map((w) => {
+    const rankedWorkers: RankedWorkerForJob[] = eligibleWorkers.map((w) => {
       const ws = parseWorkerSkillsArray(w.skills);
       const { matched: matchedRequiredSkills, missing: missingRequiredSkills } =
         requiredSkillBreakdown(requiredSkills, ws);
@@ -508,6 +717,35 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
         missingRequiredSkills,
       };
     });
+
+    const rankedBusinesses: RankedWorkerForJob[] = activeConnections
+      .map((connection) => {
+        const point = connectionPointMap.get(connection.id);
+        if (!point) return null;
+        const tradeTypes = Array.isArray(connection.trade_types) ? connection.trade_types : [];
+        const { matched: matchedRequiredSkills, missing: missingRequiredSkills } =
+          requiredSkillBreakdown(requiredSkills, tradeTypes);
+        const skillMatch = skillMatchLevelForJob(requiredSkills, tradeTypes);
+        const distanceKm = jobCoords
+          ? haversineDistance(jobCoords.lat, jobCoords.lng, point.lat, point.lng)
+          : null;
+        return {
+          id: connection.id,
+          full_name: connection.other_tenant_name ?? 'Connected business',
+          distanceKm,
+          currentJobs: businessLoadMap.get(connection.id) ?? 0,
+          skillMatch,
+          matchedRequiredSkills,
+          missingRequiredSkills,
+        } satisfies RankedWorkerForJob;
+      })
+      .filter((row): row is RankedWorkerForJob => row !== null);
+
+    const ranked: RankedWorkerForJob[] = [...rankedWorkers, ...rankedBusinesses];
+
+    if (ranked.length === 0) {
+      return { success: true, workers: [], workersNoRequiredSkillMatch: [] };
+    }
 
     if (requiredSkills.length === 0) {
       ranked.sort(sortByDistanceThenLoad);
@@ -611,44 +849,96 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
       return await fail('Failed to load workers');
     }
 
-    // Filter workers who have all required skills (in-memory to avoid JSONB @> serialization issues)
-    const workers =
-      requiredSet.size === 0
-        ? workersRaw ?? []
-        : (workersRaw ?? []).filter((w) => {
-            const arr = parseWorkerSkillsArray(w.skills);
-            const workerSet = new Set(arr);
-            return [...requiredSet].every((skill) => workerSet.has(skill));
-          });
+    const workersWithSkills = (workersRaw ?? []).map((worker) => ({
+      ...worker,
+      parsedSkills: parseWorkerSkillsArray(worker.skills),
+    }));
+    const workerIds = workersWithSkills.map((w) => w.id);
+    let declinedWorkerIds = new Set<string>();
+    if (workerIds.length > 0) {
+      const { data: declinedRows, error: declinedRowsError } = await supabase
+        .from('job_status_history')
+        .select('changed_by_worker_id')
+        .eq('job_id', jobId)
+        .eq('to_status', 'declined')
+        .not('changed_by_worker_id', 'is', null)
+        .in('changed_by_worker_id', workerIds);
+      if (declinedRowsError) {
+        console.error('[autoAllocateJob] declined worker history fetch error:', declinedRowsError);
+        return await fail('Failed to load workers');
+      }
+      declinedWorkerIds = new Set((declinedRows ?? []).map((r) => r.changed_by_worker_id as string));
+    }
+    let excludedWorkerIds = new Set<string>();
+    if (workerIds.length > 0) {
+      const { data: workerTenantRows, error: workerTenantError } = await supabase
+        .from('worker_tenants')
+        .select('worker_id')
+        .eq('tenant_id', tenantId)
+        .eq('exclude_from_auto_assign', true)
+        .in('worker_id', workerIds);
+      if (workerTenantError) {
+        console.error('[autoAllocateJob] worker_tenants fetch error:', workerTenantError);
+        return await fail('Failed to load workers');
+      }
+      excludedWorkerIds = new Set((workerTenantRows ?? []).map((r) => r.worker_id as string));
+    }
 
-    if (!workers || workers.length === 0) {
+    // Filter workers who have all required skills (in-memory to avoid JSONB @> serialization issues)
+    const workers = workersWithSkills.filter((w) => {
+      if (excludedWorkerIds.has(w.id)) return false;
+      if (declinedWorkerIds.has(w.id)) return false;
+      if (requiredSet.size === 0) return true;
+      const workerSet = new Set(w.parsedSkills);
+      return [...requiredSet].every((skill) => workerSet.has(skill));
+    });
+
+    const { connections, error: connectionsError } = await getConnectionsForTenant(tenantId);
+    if (connectionsError) {
+      console.error('[autoAllocateJob] connections fetch error:', connectionsError);
+      return await fail('Failed to load connected businesses');
+    }
+    const activeConnections = connections.filter((connection) => connection.status === 'active');
+    const activeConnectionIds = activeConnections.map((connection) => connection.id);
+
+    const connectionPointMap = new Map<string, { lat: number; lng: number }>();
+    if (activeConnectionIds.length > 0) {
+      const { data: connectionRows, error: connectionRowsError } = await supabase
+        .from('tenant_network_connections')
+        .select('id, coverage_area_centre')
+        .in('id', activeConnectionIds);
+      if (connectionRowsError) {
+        console.error('[autoAllocateJob] connection geometry fetch error:', connectionRowsError);
+        return await fail('Failed to load connected businesses');
+      }
+      for (const row of connectionRows ?? []) {
+        const parsed = parsePointLatLng(row.coverage_area_centre);
+        if (parsed && row.id) {
+          connectionPointMap.set(row.id as string, parsed);
+        }
+      }
+    }
+
+    const businesses = activeConnections.filter((connection) => {
+      const point = connectionPointMap.get(connection.id);
+      if (!point) return false;
+      const tradeTypes = Array.isArray(connection.trade_types) ? connection.trade_types : [];
+      if (requiredSet.size === 0) return true;
+      const tradeSet = new Set(tradeTypes);
+      return [...requiredSet].every((skill) => tradeSet.has(skill));
+    });
+
+    if (workers.length === 0 && businesses.length === 0) {
       const message =
         requiredSkills.length > 0
-          ? `No workers with required skills: ${requiredSkills.join(', ')}`
-          : 'No available workers';
+          ? `No workers or connected businesses with required skills: ${requiredSkills.join(', ')}`
+          : 'No available workers or connected businesses';
       return await fail(message);
     }
+
     console.log('[autoAllocateJob] worker count found:', workers.length);
+    console.log('[autoAllocateJob] business count found:', businesses.length);
 
-    const workersWithDistance = workers.map((worker) => ({
-      ...worker,
-      distance: haversineDistance(
-        jobCoords.lat,
-        jobCoords.lng,
-        Number(worker.home_lat),
-        Number(worker.home_lng)
-      ),
-    }));
-    console.log(
-      '[autoAllocateJob] distances (km):',
-      workersWithDistance.map((w) => ({
-        id: w.id,
-        name: w.full_name,
-        distance: Math.round(w.distance * 10) / 10,
-      }))
-    );
-
-    const workerIds = workers.map((w) => w.id);
     const { data: jobCounts } = await supabase
       .from('jobs')
       .select('assigned_worker_id')
@@ -663,34 +953,94 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
       }
     });
 
-    const rankedWorkers = workersWithDistance
+    const businessLoadMap = new Map<string, number>();
+    if (activeConnectionIds.length > 0) {
+      const { data: dispatchCounts, error: dispatchCountsError } = await supabase
+        .from('network_job_dispatches')
+        .select(
+          `
+          connection_id,
+          canonical_job:jobs!network_job_dispatches_canonical_job_id_fkey(status)
+        `
+        )
+        .in('connection_id', activeConnectionIds)
+        .in('canonical_job.status', ['assigned', 'in_progress', 'pending_send']);
+      if (dispatchCountsError) {
+        console.error('[autoAllocateJob] business load fetch error:', dispatchCountsError);
+        return await fail('Failed to load connected businesses');
+      }
+      for (const row of dispatchCounts ?? []) {
+        const connectionId = row.connection_id as string | null;
+        if (!connectionId) continue;
+        businessLoadMap.set(connectionId, (businessLoadMap.get(connectionId) ?? 0) + 1);
+      }
+    }
+
+    const workerCandidates: UnifiedAutoAssignCandidate[] = workers
+      .filter((worker) => Number.isFinite(Number(worker.home_lat)) && Number.isFinite(Number(worker.home_lng)))
       .map((worker) => ({
-        ...worker,
-        currentJobs: jobCountMap.get(worker.id) ?? 0,
+        type: 'worker',
+        id: worker.id,
+        name: worker.full_name,
+        lat: Number(worker.home_lat),
+        lng: Number(worker.home_lng),
+        skills: worker.parsedSkills,
+        currentLoad: jobCountMap.get(worker.id) ?? 0,
+      }));
+
+    const businessCandidates: UnifiedAutoAssignCandidate[] = businesses.flatMap((business) => {
+      const point = connectionPointMap.get(business.id);
+      if (!point) return [];
+      return [
+        {
+          type: 'business',
+          id: business.id,
+          name: business.other_tenant_name ?? 'Connected business',
+          lat: point.lat,
+          lng: point.lng,
+          skills: business.trade_types ?? [],
+          coverageRadiusMiles: business.coverage_radius_miles,
+          currentLoad: businessLoadMap.get(business.id) ?? 0,
+        } satisfies UnifiedAutoAssignCandidate,
+      ];
+    });
+
+    const rankedCandidates = [...workerCandidates, ...businessCandidates]
+      .map((candidate) => ({
+        ...candidate,
+        distance: haversineDistance(jobCoords.lat, jobCoords.lng, candidate.lat, candidate.lng),
       }))
       .sort((a, b) => {
         if (a.distance !== b.distance) return a.distance - b.distance;
-        return a.currentJobs - b.currentJobs;
+        return a.currentLoad - b.currentLoad;
       });
 
-    const bestWorker = rankedWorkers[0];
-    console.log('[autoAllocateJob] selected worker', {
-      id: bestWorker.id,
-      name: bestWorker.full_name,
-      distance: Math.round(bestWorker.distance * 10) / 10,
-      currentJobs: bestWorker.currentJobs,
+    const bestCandidate = rankedCandidates[0];
+    console.log('[autoAllocateJob] selected candidate', {
+      id: bestCandidate.id,
+      name: bestCandidate.name,
+      type: bestCandidate.type,
+      distance: Math.round(bestCandidate.distance * 10) / 10,
+      currentLoad: bestCandidate.currentLoad,
     });
 
-    const assignResult = await assignJob(jobId, bestWorker.id, { pendingSend: true });
-    if (!assignResult.success) {
-      return await fail(assignResult.error ?? 'Failed to assign worker');
+    if (bestCandidate.type === 'business') {
+      const dispatchResult = await dispatchJobToNetwork(jobId, bestCandidate.id);
+      if (!dispatchResult.success) {
+        return await fail(dispatchResult.error ?? 'Failed to dispatch to connected business');
+      }
+    } else {
+      const assignResult = await assignJob(jobId, bestCandidate.id, { pendingSend: true });
+      if (!assignResult.success) {
+        return await fail(assignResult.error ?? 'Failed to assign worker');
+      }
     }
 
     return {
       success: true,
-      workerId: bestWorker.id,
-      workerName: bestWorker.full_name,
-      distance: Math.round(bestWorker.distance * 10) / 10,
+      workerId: bestCandidate.id,
+      workerName: bestCandidate.name,
+      distance: Math.round(bestCandidate.distance * 10) / 10,
     };
   } catch (err) {
     console.error('[autoAllocateJob]', err);

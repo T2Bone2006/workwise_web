@@ -7,16 +7,17 @@ export type JobStatusUi =
   | 'pending_send'
   | 'assigned'
   | 'in_progress'
+  | 'paused'
   | 'completed'
+  | 'declined'
   | 'cancelled';
 
-/** DB `assigned` is shown in UI as Paused (amber). */
 export const JOB_STATUS_DISPLAY: Record<
   JobStatusUi,
   { label: string; summaryBarClass: string; badgeClass: string }
 > = {
   pending: {
-    label: 'Not Started',
+    label: 'Pending',
     summaryBarClass:
       'border-slate-400/50 bg-slate-500/10 text-slate-800 dark:text-slate-200 border',
     badgeClass:
@@ -35,8 +36,15 @@ export const JOB_STATUS_DISPLAY: Record<
     badgeClass:
       'border-blue-400/60 bg-blue-500/10 text-blue-800 dark:text-blue-300 shadow-[0_0_12px_-2px_rgba(59,130,246,0.25)]',
   },
-  assigned: {
+  paused: {
     label: 'Paused',
+    summaryBarClass:
+      'border-amber-200/80 bg-[#FEF3C7] text-[#B45309] border',
+    badgeClass:
+      'border-amber-200/80 bg-[#FEF3C7] text-[#B45309]',
+  },
+  assigned: {
+    label: 'Assigned',
     summaryBarClass: 'border-amber-400/50 bg-amber-500/10 text-amber-900 dark:text-amber-300 border',
     badgeClass:
       'border-amber-400/60 bg-amber-500/10 text-amber-900 dark:text-amber-300 shadow-[0_0_12px_-2px_rgba(245,158,11,0.25)]',
@@ -47,6 +55,12 @@ export const JOB_STATUS_DISPLAY: Record<
       'border-emerald-400/50 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300 border',
     badgeClass:
       'border-emerald-400/60 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
+  },
+  declined: {
+    label: 'Declined',
+    summaryBarClass: 'border-red-500/50 bg-red-500/10 text-red-900 dark:text-red-200 border',
+    badgeClass:
+      'border-red-500/60 bg-red-500/10 text-red-800 dark:text-red-200 shadow-[0_0_12px_-2px_rgba(239,68,68,0.3)]',
   },
   cancelled: {
     label: 'Cancelled',

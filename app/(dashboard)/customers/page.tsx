@@ -1,6 +1,7 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getCustomersForTenantList, type CustomersListFilters } from '@/lib/data/customers';
 import { CustomersTable } from '@/components/customers/customers-table';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 interface CustomersPageProps {
   searchParams: Promise<{
@@ -8,6 +9,7 @@ interface CustomersPageProps {
     type?: string;
     sort?: string;
     sort_dir?: string;
+    page?: string;
   }>;
 }
 
@@ -30,37 +32,31 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
   }
 
   const raw = await searchParams;
-  const filters: CustomersListFilters = {
+  const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : undefined;
+  const filters: CustomersListFilters & { page?: number } = {
     search: raw.search?.trim() || undefined,
     type:
       raw.type === 'bulk_client' || raw.type === 'individual'
         ? raw.type
         : undefined,
+    sort: raw.sort === 'email' || raw.sort === 'jobs' ? raw.sort : 'name',
+    sort_dir: raw.sort_dir === 'desc' ? 'desc' : 'asc',
+    page,
   };
-  const sortCol = raw.sort === 'email' || raw.sort === 'jobs' ? raw.sort : 'name';
-  const sortDir = raw.sort_dir === 'desc' ? 'desc' as const : 'asc' as const;
 
-  const { customers, error } = await getCustomersForTenantList(tenantId, filters);
+  const { customers, totalCount, error } = await getCustomersForTenantList(tenantId, filters);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Customers
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manage bulk clients and individual customers
-          </p>
-        </div>
-      </div>
+      <PageGradientHeader
+        title="Customers"
+        subtitle="Manage bulk clients and individual customers"
+      />
 
       <CustomersTable
         customers={customers}
-        initialSearch={filters.search ?? ''}
-        initialTypeFilter={filters.type ?? 'all'}
-        initialSort={sortCol}
-        initialSortDir={sortDir}
+        totalCount={totalCount}
+        initialFilters={filters}
         fetchError={error}
       />
     </div>

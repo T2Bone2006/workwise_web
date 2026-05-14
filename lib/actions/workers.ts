@@ -3,9 +3,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { workerSchema } from '@/lib/validations/worker';
-import { workerInviteSchema } from '@/lib/validations/worker-invite';
+import { inviteWorkerPayloadSchema } from '@/lib/validations/worker-invite';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
+import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 
 function getRawFormData(formData: FormData) {
   return {
@@ -99,26 +100,49 @@ export async function inviteWorker(formData: FormData) {
     return { success: false, error: 'No tenant found' };
   }
 
-  const raw = {
-    full_name: formData.get('full_name'),
-    email: formData.get('email'),
-    phone: formData.get('phone'),
-  };
+  const rawData = getRawFormData(formData);
+  let skills: string[];
+  try {
+    const skillsRaw = rawData.skills;
+    skills =
+      typeof skillsRaw === 'string'
+        ? (JSON.parse(skillsRaw || '[]') as string[])
+        : [];
+  } catch {
+    return { success: false, error: 'Invalid skills data' };
+  }
 
-  const parsed = workerInviteSchema.safeParse({
-    full_name: typeof raw.full_name === 'string' ? raw.full_name : '',
-    email: typeof raw.email === 'string' ? raw.email : '',
-    phone: typeof raw.phone === 'string' ? raw.phone : '',
+  const parsed = inviteWorkerPayloadSchema.safeParse({
+    full_name: typeof rawData.full_name === 'string' ? rawData.full_name : '',
+    phone: typeof rawData.phone === 'string' ? rawData.phone : '',
+    email: typeof rawData.email === 'string' ? rawData.email : '',
+    home_postcode:
+      typeof rawData.home_postcode === 'string' ? rawData.home_postcode : '',
+    worker_type: rawData.worker_type,
+    status: rawData.status,
+    skills,
   });
 
   if (!parsed.success) {
     const fe = parsed.error.flatten().fieldErrors;
     const message =
       fe.full_name?.[0] ||
-      fe.email?.[0] ||
       fe.phone?.[0] ||
+      fe.email?.[0] ||
+      fe.home_postcode?.[0] ||
+      fe.worker_type?.[0] ||
+      fe.status?.[0] ||
+      fe.skills?.[0] ||
       parsed.error.message;
     return { success: false, error: message ?? 'Validation failed' };
+  }
+
+  const coords = await postcodeToLatLng(parsed.data.home_postcode);
+  if (!coords) {
+    return {
+      success: false,
+      error: 'Invalid postcode - could not find coordinates',
+    };
   }
 
   const emailNorm = parsed.data.email.trim().toLowerCase();
@@ -149,15 +173,13 @@ export async function inviteWorker(formData: FormData) {
 
   const tenantId = userData.tenant_id;
 
-  const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-    emailNorm,
-    {
+  const { data: inviteData, error: inviteError } =
+    await admin.auth.admin.inviteUserByEmail(emailNorm, {
       data: {
         full_name: parsed.data.full_name,
         primary_tenant_id: tenantId,
       },
-    }
-  );
+    });
 
   if (inviteError) {
     console.error('[inviteWorker] inviteUserByEmail:', inviteError);
@@ -171,11 +193,16 @@ export async function inviteWorker(formData: FormData) {
       full_name: parsed.data.full_name,
       phone: parsed.data.phone,
       email: emailNorm,
+      home_postcode: parsed.data.home_postcode,
+      home_lat: coords.lat,
+      home_lng: coords.lng,
+      worker_type: parsed.data.worker_type,
+      status: parsed.data.status,
+      skills: parsed.data.skills,
       invite_status: 'pending',
       user_id: null,
-      status: 'unavailable',
-      worker_type: 'company_subcontractor',
-      skills: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
     .select('id')
     .single();
@@ -274,6 +301,32 @@ export async function updateWorker(workerId: string, formData: FormData) {
   revalidatePath('/workers');
   revalidatePath(`/workers/${workerId}`);
   return { success: true };
+}
+
+export async function updateWorkerAutoAssign(workerId: string, exclude: boolean) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) {
+    return { success: false, error: 'No tenant found' };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('worker_tenants')
+    .update({
+      exclude_from_auto_assign: exclude,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('worker_id', workerId)
+    .eq('tenant_id', tenantId);
+
+  if (error) {
+    console.error('[updateWorkerAutoAssign] error:', error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath('/workers');
+  revalidatePath(`/workers/${workerId}`);
+  return { success: true, error: null };
 }
 
 export async function deleteWorker(workerId: string) {

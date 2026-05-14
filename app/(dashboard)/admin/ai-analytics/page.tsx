@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { isAdmin } from '@/lib/utils/admin';
 import { createClient } from '@/lib/supabase/server';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import {
   Card,
   CardContent,
@@ -123,13 +124,10 @@ export default async function AIAnalyticsPage() {
         </div>
       </div>
 
-      <div>
-        <h1 className="text-3xl font-bold">AI Performance & Training Data</h1>
-        <p className="text-muted-foreground">
-          Track AI accuracy and collect training data for custom models (Admin
-          View)
-        </p>
-      </div>
+      <PageGradientHeader
+        title="AI Performance & Training Data"
+        subtitle="Track AI accuracy and collect training data for custom models (Admin View)"
+      />
 
       <Card className="border-purple-200 dark:border-purple-800">
         <CardHeader>

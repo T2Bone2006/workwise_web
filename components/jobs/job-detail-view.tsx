@@ -11,9 +11,11 @@ import { JobDetailJobReportCard } from '@/components/jobs/job-detail-job-report-
 import { JobDetailCompletionNotes } from '@/components/jobs/job-detail-completion-notes';
 import { JobDetailPhotosCard } from '@/components/jobs/job-detail-photos-card';
 import { JobDetailCompletionSection } from '@/components/jobs/job-detail-completion-section';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
 
 const JobLocationMap = dynamic(
@@ -41,22 +43,28 @@ interface JobDetailViewProps {
   job: JobDetailJob;
   statusHistory: JobStatusHistoryEntry[];
   workers: WorkerOption[];
+  tenantSkills: TenantSkillRow[];
   mapData?: JobDetailMapData | null;
   /** Set when the job report card should render, or when status is completed (completion section). */
   industryData?: unknown;
   completionNotes?: string;
   /** Before/after image attachments from `job_attachments` for this job. */
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
+  isNetworkOriginView?: boolean;
+  receivingBusinessName?: string | null;
 }
 
 export function JobDetailView({
   job,
   statusHistory,
   workers,
+  tenantSkills,
   mapData,
   industryData,
   completionNotes,
   attachmentPhotos,
+  isNetworkOriginView = false,
+  receivingBusinessName = null,
 }: JobDetailViewProps) {
   const isCompleted = job.status === 'completed';
   const hasPhotoGroups =
@@ -68,6 +76,13 @@ export function JobDetailView({
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
       {/* Left column */}
       <div className="space-y-6">
+        {isNetworkOriginView && (
+          <Alert className="border-primary/20 bg-primary/5 text-primary">
+            <AlertDescription>
+              This job is being handled by {receivingBusinessName ?? 'the receiving business'}.
+            </AlertDescription>
+          </Alert>
+        )}
         <JobDetailDetailsCard
           address={job.address}
           postcode={job.postcode}
@@ -118,6 +133,7 @@ export function JobDetailView({
           </Card>
         )}
         <JobDetailSkillsCard
+          tenantSkills={tenantSkills}
           requiredSkills={job.required_skills ?? []}
           workerSkills={job.worker?.skills}
           hasWorker={!!job.assigned_worker_id}
@@ -151,12 +167,14 @@ export function JobDetailView({
             status={job.status}
             worker={job.worker}
             workers={workers}
+            readOnly={isNetworkOriginView}
           />
         </div>
         <JobDetailActionsCard
           jobId={job.id}
           status={job.status}
           hasWorker={!!job.worker}
+          isNetworkOriginView={isNetworkOriginView}
         />
       </div>
     </div>

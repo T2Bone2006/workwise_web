@@ -5,7 +5,9 @@ export type JobStatus =
   | 'pending_send'
   | 'assigned'
   | 'in_progress'
+  | 'paused'
   | 'completed'
+  | 'declined'
   | 'cancelled';
 export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -14,6 +16,7 @@ export interface JobsFilters {
   status?: JobStatus | JobStatus[];
   priority?: JobPriority;
   customer_id?: string;
+  import_source_id?: string;
   date_from?: string;
   date_to?: string;
   sort?: 'created_at' | 'reference_number' | 'status' | 'priority' | 'scheduled_date' | 'customer_name';
@@ -193,6 +196,13 @@ export async function getJobsForTenant(
         query = query.eq('customer_id', filters.customer_id);
       }
     }
+    if (filters.import_source_id) {
+      if (filters.import_source_id === 'ungrouped') {
+        query = query.is('import_source_id', null);
+      } else {
+        query = query.eq('import_source_id', filters.import_source_id);
+      }
+    }
     if (filters.date_from) {
       query = query.gte('scheduled_date', filters.date_from);
     }
@@ -337,6 +347,174 @@ export interface CustomerJobCount {
   count: number;
 }
 
+export interface ImportBatchRow {
+  id: string;
+  file_name: string | null;
+  started_at: string | null;
+  rows_imported: number;
+  import_source_id: string | null;
+  pending: number;
+  pending_send: number;
+  assigned: number;
+  in_progress: number;
+  completed: number;
+}
+
+export async function getImportBatchesForTenant(
+  tenantId: string
+): Promise<{ batches: ImportBatchRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data: historyRows, error: historyError } = await supabase
+      .from('import_history')
+      .select('id, file_name, started_at, rows_imported, import_source_id')
+      .eq('tenant_id', tenantId)
+      .order('started_at', { ascending: false });
+
+    if (historyError) {
+      console.error('[getImportBatchesForTenant] import_history', historyError);
+      return { batches: [], error: new Error(historyError.message ?? 'Failed to load import batches') };
+    }
+
+    const rows = Array.isArray(historyRows) ? historyRows : [];
+    const importSourceIds = rows
+      .map((row) => (row as { import_source_id?: string | null }).import_source_id ?? null)
+      .filter((id): id is string => !!id);
+
+    const countsBySource = new Map<
+      string,
+      { pending: number; pending_send: number; assigned: number; in_progress: number; completed: number }
+    >();
+
+    if (importSourceIds.length > 0) {
+      const { data: jobRows, error: jobsError } = await supabase
+        .from('jobs')
+        .select('import_source_id, status')
+        .eq('tenant_id', tenantId)
+        .in('import_source_id', importSourceIds)
+        .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'completed']);
+
+      if (jobsError) {
+        console.error('[getImportBatchesForTenant] jobs', jobsError);
+        return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
+      }
+
+      for (const row of Array.isArray(jobRows) ? jobRows : []) {
+        const sourceId = (row as { import_source_id?: string | null }).import_source_id ?? null;
+        const status = (row as { status?: JobStatus | null }).status ?? null;
+        if (!sourceId || !status) continue;
+        if (!countsBySource.has(sourceId)) {
+          countsBySource.set(sourceId, {
+            pending: 0,
+            pending_send: 0,
+            assigned: 0,
+            in_progress: 0,
+            completed: 0,
+          });
+        }
+        const counts = countsBySource.get(sourceId)!;
+        if (status === 'pending') counts.pending += 1;
+        if (status === 'pending_send') counts.pending_send += 1;
+        if (status === 'assigned') counts.assigned += 1;
+        if (status === 'in_progress') counts.in_progress += 1;
+        if (status === 'completed') counts.completed += 1;
+      }
+    }
+
+    const { data: ungroupedRows, error: ungroupedError } = await supabase
+      .from('jobs')
+      .select('status')
+      .eq('tenant_id', tenantId)
+      .is('import_source_id', null)
+      .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'completed']);
+
+    if (ungroupedError) {
+      console.error('[getImportBatchesForTenant] ungrouped jobs', ungroupedError);
+      return { batches: [], error: new Error(ungroupedError.message ?? 'Failed to load ungrouped job counts') };
+    }
+
+    const ungroupedCounts = {
+      pending: 0,
+      pending_send: 0,
+      assigned: 0,
+      in_progress: 0,
+      completed: 0,
+    };
+    for (const row of Array.isArray(ungroupedRows) ? ungroupedRows : []) {
+      const status = (row as { status?: JobStatus | null }).status ?? null;
+      if (!status) continue;
+      if (status === 'pending') ungroupedCounts.pending += 1;
+      if (status === 'pending_send') ungroupedCounts.pending_send += 1;
+      if (status === 'assigned') ungroupedCounts.assigned += 1;
+      if (status === 'in_progress') ungroupedCounts.in_progress += 1;
+      if (status === 'completed') ungroupedCounts.completed += 1;
+    }
+
+    const batches: ImportBatchRow[] = rows.map((row) => {
+      const r = row as {
+        id: string;
+        file_name?: string | null;
+        started_at?: string | null;
+        rows_imported?: number | null;
+        import_source_id?: string | null;
+      };
+      const sourceId = r.import_source_id ?? null;
+      const counts = sourceId
+        ? countsBySource.get(sourceId) ?? {
+            pending: 0,
+            pending_send: 0,
+            assigned: 0,
+            in_progress: 0,
+            completed: 0,
+          }
+        : {
+            pending: 0,
+            pending_send: 0,
+            assigned: 0,
+            in_progress: 0,
+            completed: 0,
+          };
+      return {
+        id: r.id,
+        file_name: r.file_name ?? null,
+        started_at: r.started_at ?? null,
+        rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
+        import_source_id: sourceId,
+        pending: counts.pending,
+        pending_send: counts.pending_send,
+        assigned: counts.assigned,
+        in_progress: counts.in_progress,
+        completed: counts.completed,
+      };
+    });
+    batches.push({
+      id: 'ungrouped',
+      file_name: 'Manual & ungrouped jobs',
+      started_at: null,
+      rows_imported:
+        ungroupedCounts.pending +
+        ungroupedCounts.pending_send +
+        ungroupedCounts.assigned +
+        ungroupedCounts.in_progress +
+        ungroupedCounts.completed,
+      import_source_id: null,
+      pending: ungroupedCounts.pending,
+      pending_send: ungroupedCounts.pending_send,
+      assigned: ungroupedCounts.assigned,
+      in_progress: ungroupedCounts.in_progress,
+      completed: ungroupedCounts.completed,
+    });
+
+    return { batches, error: null };
+  } catch (err) {
+    console.error('[getImportBatchesForTenant]', err);
+    return {
+      batches: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
 /**
  * Returns distinct customers that have jobs for this tenant, with job counts.
  * Used for the customer filter dropdown ("ABC Property Management (234 jobs)").
@@ -400,76 +578,6 @@ export async function getCustomerJobCounts(
     console.error('[getCustomerJobCounts]', err);
     return {
       customers: [],
-      error: err instanceof Error ? err : new Error(String(err)),
-    };
-  }
-}
-
-/**
- * Total jobs and completed count for a single customer (or no customer when filter is "none").
- * Used for "X of Y jobs completed" when the jobs list is filtered by customer.
- */
-export async function getCustomerJobsCompletionSummary(
-  tenantId: string,
-  customerFilter: string
-): Promise<{ total: number; completed: number; error: Error | null }> {
-  try {
-    const supabase = await createClient();
-    const base = () => {
-      let q = supabase.from('jobs').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId);
-      if (customerFilter === 'none') {
-        q = q.is('customer_id', null);
-      } else {
-        q = q.eq('customer_id', customerFilter);
-      }
-      return q;
-    };
-
-    const [{ count: total, error: totalErr }, { count: completed, error: completedErr }] =
-      await Promise.all([
-        base(),
-        (() => {
-          let q = supabase
-            .from('jobs')
-            .select('id', { count: 'exact', head: true })
-            .eq('tenant_id', tenantId)
-            .eq('status', 'completed');
-          if (customerFilter === 'none') {
-            q = q.is('customer_id', null);
-          } else {
-            q = q.eq('customer_id', customerFilter);
-          }
-          return q;
-        })(),
-      ]);
-
-    if (totalErr) {
-      console.error('[getCustomerJobsCompletionSummary] total', totalErr);
-      return {
-        total: 0,
-        completed: 0,
-        error: new Error(totalErr.message ?? 'Failed to load job counts'),
-      };
-    }
-    if (completedErr) {
-      console.error('[getCustomerJobsCompletionSummary] completed', completedErr);
-      return {
-        total: 0,
-        completed: 0,
-        error: new Error(completedErr.message ?? 'Failed to load job counts'),
-      };
-    }
-
-    return {
-      total: total ?? 0,
-      completed: completed ?? 0,
-      error: null,
-    };
-  } catch (err) {
-    console.error('[getCustomerJobsCompletionSummary]', err);
-    return {
-      total: 0,
-      completed: 0,
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }

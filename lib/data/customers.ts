@@ -76,25 +76,31 @@ export async function getCustomersForTenant(
 export interface CustomersListFilters {
   search?: string;
   type?: 'bulk_client' | 'individual';
+  sort?: 'name' | 'email' | 'jobs';
+  sort_dir?: 'asc' | 'desc';
 }
 
+const PAGE_SIZE = 50;
+
 /**
- * Fetches all customers for the tenant with job count, for the customers list page.
- * Supports search (name, email, phone) and type filter.
+ * Paginated customers list with job counts (via customers_with_job_counts view).
  */
 export async function getCustomersForTenantList(
   tenantId: string,
-  filters: CustomersListFilters = {}
-): Promise<{ customers: CustomerListRow[]; error: Error | null }> {
+  filters: CustomersListFilters & { page?: number } = {}
+): Promise<{ customers: CustomerListRow[]; totalCount: number; error: Error | null }> {
   try {
     const supabase = await createClient();
+    const page = Math.max(1, filters.page ?? 1);
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
     let query = supabase
-      .from('customers')
-      .select(
-        'id, tenant_id, name, type, email, phone, notes, created_at, updated_at, jobs(count)'
-      )
-      .eq('tenant_id', tenantId)
-      .order('name', { ascending: true });
+      .from('customers_with_job_counts')
+      .select('id, tenant_id, name, type, email, phone, notes, created_at, updated_at, job_count', {
+        count: 'exact',
+      })
+      .eq('tenant_id', tenantId);
 
     if (filters.type) {
       query = query.eq('type', filters.type);
@@ -106,24 +112,32 @@ export async function getCustomersForTenantList(
       );
     }
 
-    const { data, error } = await query;
+    const sortCol = filters.sort ?? 'name';
+    const sortAsc = filters.sort_dir !== 'desc';
+    if (sortCol === 'email') {
+      query = query.order('email', { ascending: sortAsc, nullsFirst: false });
+    } else if (sortCol === 'jobs') {
+      query = query.order('job_count', { ascending: sortAsc, nullsFirst: false });
+    } else {
+      query = query.order('name', { ascending: sortAsc, nullsFirst: false });
+    }
+
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
 
     if (error) {
       console.error('[getCustomersForTenantList]', error);
       return {
         customers: [],
+        totalCount: 0,
         error: new Error(error.message ?? 'Failed to load customers'),
       };
     }
 
     const rows = Array.isArray(data) ? data : [];
     const customers: CustomerListRow[] = rows.map((row: Record<string, unknown>) => {
-      const jobsRel = row.jobs as { count: number }[] | { count: number } | null;
-      const jobCount = Array.isArray(jobsRel)
-        ? jobsRel[0]?.count ?? 0
-        : jobsRel && typeof jobsRel === 'object' && 'count' in jobsRel
-          ? (jobsRel as { count: number }).count
-          : 0;
+      const jobCount = row.job_count;
       return {
         id: row.id as string,
         tenant_id: row.tenant_id as string,
@@ -139,11 +153,16 @@ export async function getCustomersForTenantList(
       };
     });
 
-    return { customers, error: null };
+    return {
+      customers,
+      totalCount: typeof count === 'number' ? count : 0,
+      error: null,
+    };
   } catch (err) {
     console.error('[getCustomersForTenantList]', err);
     return {
       customers: [],
+      totalCount: 0,
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }

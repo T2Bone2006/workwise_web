@@ -1,4 +1,5 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
 import { redirect } from 'next/navigation';
 import { WorkerForm } from '@/components/workers/worker-form';
 import Link from 'next/link';
@@ -10,6 +11,8 @@ export default async function NewWorkerPage() {
   if (!tenantId) {
     redirect('/workers');
   }
+
+  const tenantSkills = await getTenantSkills(tenantId);
 
   return (
     <div className="space-y-6">
@@ -25,12 +28,12 @@ export default async function NewWorkerPage() {
           Add worker
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Onboard a new locksmith subcontractor
+          Onboard a new worker on your team
         </p>
       </div>
 
       <div className="max-w-xl">
-        <WorkerForm mode="create" tenantId={tenantId} />
+        <WorkerForm mode="create" tenantId={tenantId} tenantSkills={tenantSkills} />
       </div>
     </div>
   );

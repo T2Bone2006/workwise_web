@@ -21,7 +21,11 @@ export const createJobSchema = z.object({
   priority: z.enum(['low', 'normal', 'high', 'urgent']),
   scheduled_date: z.string().optional(),
   assigned_worker_id: z
-    .union([z.string().uuid(), z.literal('')])
+    .union([
+      z.string().uuid(),
+      z.string().regex(/^business:[0-9a-fA-F-]{36}$/, 'Invalid connected business'),
+      z.literal(''),
+    ])
     .optional(),
 });
 

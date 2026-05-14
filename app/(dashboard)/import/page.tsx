@@ -1,6 +1,7 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getImportSourcesForTenant } from '@/lib/data/import-sources';
 import { ImportWizard } from '@/components/import/import-wizard';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 export default async function ImportPage() {
   const tenantId = await getTenantIdForCurrentUser();
@@ -19,14 +20,10 @@ export default async function ImportPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          Import Jobs
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Upload CSV and map columns with AI or manually. Save mappings to reuse.
-        </p>
-      </div>
+      <PageGradientHeader
+        title="Import Jobs"
+        subtitle="Upload CSV and map columns with AI or manually. Save mappings to reuse."
+      />
       <ImportWizard tenantId={tenantId} initialSources={sources} />
     </div>
   );

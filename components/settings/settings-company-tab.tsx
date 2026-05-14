@@ -22,16 +22,23 @@ import {
 } from '@/components/ui/select';
 import { updateCompanySettings } from '@/lib/actions/settings';
 import type { SettingsPageData, IndustryOption } from '@/lib/data/settings-types';
+import type { TenantSkillRow } from '@/lib/actions/skills';
+import { SettingsSkillsSection } from './settings-skills-section';
 import { cn } from '@/lib/utils';
 
 const INDUSTRIES: IndustryOption[] = ['Locksmith', 'Plumbing', 'Electrical', 'HVAC', 'General'];
 
 interface SettingsCompanyTabProps {
   data: SettingsPageData;
+  initialTenantSkills: TenantSkillRow[];
   onSaved: () => void;
 }
 
-export function SettingsCompanyTab({ data, onSaved }: SettingsCompanyTabProps) {
+export function SettingsCompanyTab({
+  data,
+  initialTenantSkills,
+  onSaved,
+}: SettingsCompanyTabProps) {
   const [saving, setSaving] = useState(false);
   const tenant = data.tenant;
   const company = tenant?.settings?.company ?? {};
@@ -185,6 +192,12 @@ export function SettingsCompanyTab({ data, onSaved }: SettingsCompanyTabProps) {
         </CardContent>
       </Card>
     </form>
+
+      <SettingsSkillsSection
+        tenantId={tenant.id}
+        initialSkills={initialTenantSkills}
+        onSaved={onSaved}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
+  ArrowLeft,
   Edit,
   Phone,
   Mail,
@@ -21,6 +22,7 @@ import {
   Clock,
 } from 'lucide-react';
 import Link from 'next/link';
+import { WorkerAutoAssignToggle } from '@/components/workers/worker-auto-assign-toggle';
 
 interface WorkerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -54,6 +56,13 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
     .eq('id', id)
     .eq('primary_tenant_id', tenantId)
     .single();
+
+  const { data: workerTenant } = await supabase
+    .from('worker_tenants')
+    .select('exclude_from_auto_assign')
+    .eq('worker_id', id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
 
   if (workerError || !worker) {
     notFound();
@@ -161,19 +170,26 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
   return (
     <div className="space-y-6 p-8">
       <div className="flex items-start justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-3">
-            <h1 className="text-3xl font-bold">{worker.full_name}</h1>
-            <Badge className={workerStatusClass}>{workerStatus.label}</Badge>
-            <Badge className={workerTypeClass}>{workerTypeLabel}</Badge>
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <Button variant="ghost" size="icon" asChild aria-label="Back to workers">
+            <Link href="/workers">
+              <ArrowLeft className="size-4" />
+            </Link>
+          </Button>
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex items-center gap-3">
+              <h1 className="text-3xl font-bold">{worker.full_name}</h1>
+              <Badge className={workerStatusClass}>{workerStatus.label}</Badge>
+              <Badge className={workerTypeClass}>{workerTypeLabel}</Badge>
+            </div>
+            <p className="text-muted-foreground">
+              Member since{' '}
+              {new Date(worker.created_at).toLocaleDateString('en-GB', {
+                month: 'long',
+                year: 'numeric',
+              })}
+            </p>
           </div>
-          <p className="text-muted-foreground">
-            Member since{' '}
-            {new Date(worker.created_at).toLocaleDateString('en-GB', {
-              month: 'long',
-              year: 'numeric',
-            })}
-          </p>
         </div>
         <Link href={`/workers/${id}/edit`}>
           <Button>
@@ -432,6 +448,12 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              <div className="mb-3 rounded-lg border border-border/70 p-3">
+                <WorkerAutoAssignToggle
+                  workerId={worker.id}
+                  initialExcluded={Boolean(workerTenant?.exclude_from_auto_assign)}
+                />
+              </div>
               <Link href={`/jobs/new?worker=${id}`} className="block">
                 <Button
                   variant="outline"

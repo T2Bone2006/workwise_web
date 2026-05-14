@@ -10,6 +10,7 @@ import {
   XCircle,
   RotateCcw,
   Send,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -22,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { updateJobStatus, sendJobToWorker } from '@/lib/actions/jobs';
+import { updateJobStatus, sendJobToWorker, autoAllocateJob } from '@/lib/actions/jobs';
 import { cn } from '@/lib/utils';
 import type { JobStatus } from '@/lib/data/jobs';
 
@@ -30,13 +31,17 @@ interface JobDetailActionsCardProps {
   jobId: string;
   status: JobStatus;
   hasWorker: boolean;
+  isNetworkOriginView?: boolean;
 }
 
 export function JobDetailActionsCard({
   jobId,
   status,
   hasWorker,
+  isNetworkOriginView = false,
 }: JobDetailActionsCardProps) {
+  if (isNetworkOriginView) return null;
+
   const router = useRouter();
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -64,6 +69,7 @@ export function JobDetailActionsCard({
   const isAssigned = status === 'assigned';
   const isInProgress = status === 'in_progress';
   const isCompleted = status === 'completed';
+  const isDeclined = status === 'declined';
   const isCancelled = status === 'cancelled';
 
   return (
@@ -112,7 +118,7 @@ export function JobDetailActionsCard({
             <Button
               variant="gradient"
               size="default"
-              className="w-full gap-2 shadow-[var(--shadow-btn-glow-value)] hover:shadow-glow-md"
+              className="w-full gap-2"
               onClick={async () => {
                 setLoadingAction('send');
                 try {
@@ -155,7 +161,7 @@ export function JobDetailActionsCard({
             <Button
               variant="gradient"
               size="default"
-              className="w-full gap-2 shadow-[var(--shadow-btn-glow-value)] hover:shadow-glow-md"
+              className="w-full gap-2"
               onClick={() => handleStatusChange('in_progress')}
               disabled={!!loadingAction}
             >
@@ -183,7 +189,7 @@ export function JobDetailActionsCard({
             <Button
               variant="gradient"
               size="default"
-              className="w-full gap-2 shadow-[var(--shadow-btn-glow-value)] hover:shadow-glow-md"
+              className="w-full gap-2"
               onClick={() => handleStatusChange('completed')}
               disabled={!!loadingAction}
             >
@@ -220,6 +226,39 @@ export function JobDetailActionsCard({
               <RotateCcw className="size-4" />
             )}
             Reopen Job
+          </Button>
+        )}
+        {isDeclined && (
+          <Button
+            variant="destructive"
+            size="default"
+            className="w-full gap-2"
+            onClick={async () => {
+              setLoadingAction('reassign');
+              try {
+                const result = await autoAllocateJob(jobId);
+                if (result.success) {
+                  toast.success(
+                    `Allocated to ${result.workerName} (${result.distance}km away). Send from Jobs when ready.`
+                  );
+                  router.refresh();
+                } else {
+                  toast.error(result.error ?? 'Auto-assignment failed');
+                }
+              } catch {
+                toast.error('Failed to auto-assign');
+              } finally {
+                setLoadingAction(null);
+              }
+            }}
+            disabled={!!loadingAction}
+          >
+            {loadingAction === 'reassign' ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Sparkles className="size-4" />
+            )}
+            Reassign
           </Button>
         )}
         {isCancelled && (

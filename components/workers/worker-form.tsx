@@ -9,7 +9,7 @@ import { Loader2, ArrowLeft, X, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { workerSchema, type WorkerFormInput } from '@/lib/validations/worker';
 import { createWorker, updateWorker } from '@/lib/actions/workers';
-import { SKILL_LABELS, SKILL_KEYS } from '@/lib/constants/skills';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { validatePostcode } from '@/lib/utils/postcode';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,10 +67,11 @@ const MAX_SKILLS = 10;
 interface WorkerFormProps {
   mode: 'create' | 'edit';
   tenantId: string;
+  tenantSkills: TenantSkillRow[];
   worker?: WorkerRow | null;
 }
 
-export function WorkerForm({ mode, tenantId, worker }: WorkerFormProps) {
+export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [postcodeValidation, setPostcodeValidation] = useState<{
@@ -117,9 +118,10 @@ export function WorkerForm({ mode, tenantId, worker }: WorkerFormProps) {
     }
   }, [postcode]);
 
-  const filteredSkills = SKILL_KEYS.filter((key) => {
-    const label = (SKILL_LABELS[key] ?? key).toLowerCase();
-    return label.includes(skillSearch.toLowerCase());
+  const q = skillSearch.toLowerCase();
+  const filteredSkills = tenantSkills.filter((skill) => {
+    const hay = `${skill.label} ${skill.key}`.toLowerCase();
+    return hay.includes(q);
   });
 
   const addSkill = (key: string) => {
@@ -388,42 +390,46 @@ export function WorkerForm({ mode, tenantId, worker }: WorkerFormProps) {
                         className="mb-2 h-8"
                       />
                       <div className="max-h-48 overflow-y-auto space-y-0.5">
-                        {filteredSkills.map((key) => (
+                        {filteredSkills.map((skill) => (
                           <button
-                            key={key}
+                            key={skill.key}
                             type="button"
-                            onClick={() => addSkill(key)}
-                            disabled={skills.includes(key)}
+                            onClick={() => addSkill(skill.key)}
+                            disabled={skills.includes(skill.key)}
                             className={cn(
                               'flex w-full items-center rounded-md px-2 py-1.5 text-sm text-left',
-                              skills.includes(key)
+                              skills.includes(skill.key)
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
                                 : 'hover:bg-muted'
                             )}
                           >
-                            {SKILL_LABELS[key] ?? key}
+                            {skill.label}
                           </button>
                         ))}
                       </div>
                     </PopoverContent>
                   </Popover>
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {skills.map((key) => (
-                      <span
-                        key={key}
-                        className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 pl-2 pr-1 py-0.5 text-xs"
-                      >
-                        {SKILL_LABELS[key] ?? key}
-                        <button
-                          type="button"
-                          onClick={() => removeSkill(key)}
-                          className="rounded p-0.5 hover:bg-muted"
-                          aria-label={`Remove ${SKILL_LABELS[key] ?? key}`}
+                    {skills.map((key) => {
+                      const display =
+                        tenantSkills.find((s) => s.key === key)?.label ?? key;
+                      return (
+                        <span
+                          key={key}
+                          className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 pl-2 pr-1 py-0.5 text-xs"
                         >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ))}
+                          {display}
+                          <button
+                            type="button"
+                            onClick={() => removeSkill(key)}
+                            className="rounded p-0.5 hover:bg-muted"
+                            aria-label={`Remove ${display}`}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
                   <FormMessage />
                 </FormItem>

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 const actions = [
   { href: '/jobs/new', label: 'Create Job', icon: Plus, gradient: 'from-blue-500 to-blue-600', available: true },
   { href: '/import', label: 'Import Jobs', icon: Upload, gradient: 'from-violet-500 to-violet-600', available: true },
-  { href: '/workers/new', label: 'Add Worker', icon: UserPlus, gradient: 'from-emerald-500 to-emerald-600', available: true },
+  { href: '/workers', label: 'Workers', icon: UserPlus, gradient: 'from-emerald-500 to-emerald-600', available: true },
   { href: '/jobs/review', label: 'Review queue', icon: ClipboardList, gradient: 'from-sky-500 to-sky-600', available: true },
 ] as const;
 

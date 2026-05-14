@@ -11,7 +11,6 @@ CREATE TABLE public.customers (
   type USER-DEFINED NOT NULL DEFAULT 'individual'::customer_type,
   company_name text,
   billing_address text,
-  portal_token text UNIQUE,
   portal_last_accessed_at timestamp with time zone,
   total_jobs integer DEFAULT 0,
   last_job_date date,

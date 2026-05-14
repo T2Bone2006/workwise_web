@@ -6,13 +6,7 @@ import { User, Phone, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { assignJob, autoAllocateJob } from '@/lib/actions/jobs';
 import type { JobStatus } from '@/lib/data/jobs';
 import { cn } from '@/lib/utils';
@@ -27,9 +21,10 @@ interface JobDetailWorkerCardProps {
   status: JobStatus;
   worker: { id: string; full_name: string; phone: string | null } | null;
   workers: WorkerOption[];
+  readOnly?: boolean;
 }
 
-const EDITABLE_STATUSES: readonly JobStatus[] = ['pending', 'pending_send'];
+const EDITABLE_STATUSES: readonly JobStatus[] = ['pending', 'pending_send', 'declined'];
 
 function canEditWorkerAssignment(status: JobStatus) {
   return EDITABLE_STATUSES.includes(status);
@@ -40,12 +35,13 @@ export function JobDetailWorkerCard({
   status,
   worker,
   workers,
+  readOnly = false,
 }: JobDetailWorkerCardProps) {
   const router = useRouter();
   const [isAssigning, setIsAssigning] = useState(false);
   const [isAutoAssigning, setIsAutoAssigning] = useState(false);
 
-  const editable = canEditWorkerAssignment(status);
+  const editable = !readOnly && canEditWorkerAssignment(status);
 
   async function handleWorkerChange(workerId: string) {
     if (workerId === worker?.id) return;
@@ -103,29 +99,21 @@ export function JobDetailWorkerCard({
               <label htmlFor={`assign-worker-${jobId}`} className="sr-only">
                 Assigned worker
               </label>
-              <Select
+              <SearchableSelect
                 value={worker?.id}
                 onValueChange={handleWorkerChange}
                 disabled={isAssigning || workers.length === 0}
-              >
-                <SelectTrigger
-                  id={`assign-worker-${jobId}`}
-                  className={cn(
-                    'w-full border-border/80 bg-background/50 backdrop-blur-sm',
-                    'focus:ring-primary/20 focus:border-primary/40'
-                  )}
-                  aria-label={worker ? 'Change assigned worker' : 'Assign worker'}
-                >
-                  <SelectValue placeholder="Assign worker" />
-                </SelectTrigger>
-                <SelectContent>
-                  {workers.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.full_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Assign worker"
+                searchPlaceholder="Search worker..."
+                className={cn(
+                  'w-full border-border/80 bg-background/50 backdrop-blur-sm',
+                  'focus:ring-primary/20 focus:border-primary/40'
+                )}
+                options={workers.map((w) => ({
+                  value: w.id,
+                  label: w.full_name,
+                }))}
+              />
               {isAssigning && (
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" />

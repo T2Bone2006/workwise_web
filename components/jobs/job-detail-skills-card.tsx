@@ -2,20 +2,25 @@
 
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { SKILL_LABELS } from '@/lib/constants/skills';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { cn } from '@/lib/utils';
 
 interface JobDetailSkillsCardProps {
+  tenantSkills: TenantSkillRow[];
   requiredSkills: string[];
   workerSkills?: string[] | null;
   hasWorker: boolean;
 }
 
 export function JobDetailSkillsCard({
+  tenantSkills,
   requiredSkills,
   workerSkills,
   hasWorker,
 }: JobDetailSkillsCardProps) {
+  const skillLabel = (key: string) =>
+    tenantSkills.find((s) => s.key === key)?.label ?? key;
+
   const workerSet = new Set(workerSkills ?? []);
   const missing = requiredSkills.filter((s) => !workerSet.has(s));
   const allMatch = requiredSkills.length === 0 || missing.length === 0;
@@ -38,7 +43,7 @@ export function JobDetailSkillsCard({
                 key={s}
                 className="inline-flex rounded-md border border-emerald-400/40 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 shadow-[0_0_8px_-2px_rgba(16,185,129,0.2)]"
               >
-                {SKILL_LABELS[s] ?? s}
+                {skillLabel(s)}
               </span>
             ))}
           </div>
@@ -57,7 +62,7 @@ export function JobDetailSkillsCard({
                       key={s}
                       className="inline-flex rounded-md border border-sky-400/40 bg-sky-500/10 px-2 py-1 text-xs font-medium text-sky-700 dark:text-sky-400"
                     >
-                      {SKILL_LABELS[s] ?? s}
+                      {skillLabel(s)}
                     </span>
                   ))}
                 </div>
@@ -84,7 +89,7 @@ export function JobDetailSkillsCard({
                   <>
                     <AlertTriangle className="size-4 shrink-0" />
                     <span>
-                      Missing skills: {missing.map((s) => SKILL_LABELS[s] ?? s).join(', ')}
+                      Missing skills: {missing.map((s) => skillLabel(s)).join(', ')}
                     </span>
                   </>
                 )}

@@ -1,5 +1,5 @@
 /**
- * Parsed shape of `jobs.industry_data` (JSON) for locksmith / completion reporting.
+ * Parsed shape of `jobs.industry_data` (JSON) for trade-specific completion reporting.
  * Keys may be omitted; values may come from mobile as booleans or strings.
  */
 export type JobIndustryData = {

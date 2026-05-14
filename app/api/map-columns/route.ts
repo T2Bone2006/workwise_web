@@ -75,7 +75,7 @@ Rules:
         prompt,
         inputData: {
           columnNames,
-          job_type: 'locksmith',
+          job_type: 'csv_column_mapping',
         },
         importSourceId,
         max_tokens: 1500,

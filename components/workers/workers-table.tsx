@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Plus,
   UserPlus,
   Search,
   MoreHorizontal,
@@ -15,6 +14,8 @@ import {
   Trash2,
   Loader2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Filter,
   X,
   Check,
@@ -58,7 +59,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { SKILL_LABELS } from '@/lib/constants/skills';
 import type {
   WorkerRow as WorkerRowType,
   WorkerInviteStatus,
@@ -67,9 +67,15 @@ import type {
   WorkerType,
 } from '@/lib/types/worker';
 import { deleteWorker, bulkUpdateWorkerStatus, bulkDeleteWorkers, getWorkerActiveJobCount } from '@/lib/actions/workers';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { InviteWorkerDialog } from '@/components/workers/invite-worker-dialog';
 import { cn } from '@/lib/utils';
 
+function skillDisplayLabel(key: string, tenantSkills: TenantSkillRow[]): string {
+  return tenantSkills.find((s) => s.key === key)?.label ?? key;
+}
+
+const PAGE_SIZE = 50;
 const DEBOUNCE_MS = 300;
 
 const STATUS_OPTIONS: { value: WorkerStatus; label: string }[] = [
@@ -156,7 +162,13 @@ function WorkerTypeBadge({ type }: { type: WorkerType | null }) {
   );
 }
 
-function SkillsBadges({ skills }: { skills: string[] | null }) {
+function SkillsBadges({
+  skills,
+  tenantSkills,
+}: {
+  skills: string[] | null;
+  tenantSkills: TenantSkillRow[];
+}) {
   if (!skills?.length) return <span className="text-muted-foreground">—</span>;
   const show = skills.slice(0, 3);
   const rest = skills.length - 3;
@@ -167,7 +179,7 @@ function SkillsBadges({ skills }: { skills: string[] | null }) {
           key={key}
           className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-xs"
         >
-          {SKILL_LABELS[key] ?? key}
+          {skillDisplayLabel(key, tenantSkills)}
         </span>
       ))}
       {rest > 0 && (
@@ -179,15 +191,19 @@ function SkillsBadges({ skills }: { skills: string[] | null }) {
 
 export interface WorkersTableProps {
   workers: WorkerRowType[];
-  initialFilters: WorkersFilters;
+  totalCount: number;
+  initialFilters: WorkersFilters & { page?: number };
   allSkillsInUse: string[];
+  tenantSkills: TenantSkillRow[];
   fetchError: Error | null;
 }
 
 export function WorkersTable({
   workers,
+  totalCount,
   initialFilters,
   allSkillsInUse,
+  tenantSkills,
   fetchError,
 }: WorkersTableProps) {
   const router = useRouter();
@@ -240,6 +256,11 @@ export function WorkersTable({
   }, [initialFilters.search]);
 
   useEffect(() => {
+    const valid = new Set(workers.map((w) => w.id));
+    setSelectedIds((prev) => new Set([...prev].filter((id) => valid.has(id))));
+  }, [workers]);
+
+  useEffect(() => {
     if (fetchError) {
       toast.error('Failed to load workers', { description: fetchError.message });
     }
@@ -248,6 +269,8 @@ export function WorkersTable({
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
       const next = new URLSearchParams(searchParams.toString());
+      const hasFilterChange = Object.keys(updates).some((k) => k !== 'page');
+      if (hasFilterChange) next.delete('page');
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined || value === '') {
           next.delete(key);
@@ -361,7 +384,7 @@ export function WorkersTable({
       w.home_postcode ?? '',
       w.worker_type ?? '',
       w.status ?? '',
-      (w.skills ?? []).map((s) => SKILL_LABELS[s] ?? s).join('; '),
+      (w.skills ?? []).map((s) => skillDisplayLabel(s, tenantSkills)).join('; '),
     ]);
     const csv = [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -375,6 +398,9 @@ export function WorkersTable({
   };
 
   const isEmpty = workers.length === 0 && !fetchError;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  const currentPage = Math.min(Math.max(1, initialFilters.page ?? 1), totalPages);
+  const showPagination = totalCount > PAGE_SIZE;
 
   // Measure table content width for floating horizontal scrollbar
   useEffect(() => {
@@ -406,13 +432,13 @@ export function WorkersTable({
 
   const skillsForFilter = useMemo(() => {
     const set = new Set<string>(allSkillsInUse);
-    SKILL_LABELS && Object.keys(SKILL_LABELS).forEach((k) => set.add(k));
+    tenantSkills.forEach((t) => set.add(t.key));
     return Array.from(set);
-  }, [allSkillsInUse]);
+  }, [allSkillsInUse, tenantSkills]);
 
   return (
     <div className="space-y-4">
-      {/* Filters + Add Worker */}
+      {/* Filters */}
       <Card
         className={cn(
           'glass-card overflow-hidden border-border/80 transition-all duration-300',
@@ -424,14 +450,24 @@ export function WorkersTable({
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[180px] sm:max-w-[260px]">
-                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
                 <Input
                   placeholder="Name, phone, email..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-9"
+                  className="pl-9 pr-9"
                   aria-label="Search workers"
                 />
+                {searchInput.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchInput('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-foreground"
+                    aria-label="Clear search"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
               </div>
               <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
                 <PopoverTrigger asChild>
@@ -510,7 +546,7 @@ export function WorkersTable({
                         )}
                       >
                         {hasSkillsArray.includes(key) ? '✓ ' : ''}
-                        {SKILL_LABELS[key] ?? key}
+                        {skillDisplayLabel(key, tenantSkills)}
                       </button>
                     ))
                   )}
@@ -529,18 +565,12 @@ export function WorkersTable({
                 </Button>
               )}
               <div className="ml-auto flex shrink-0 flex-wrap gap-2">
-                <InviteWorkerDialog>
+                <InviteWorkerDialog tenantSkills={tenantSkills}>
                   <Button variant="outline" size="default" className="gap-1.5">
                     <UserPlus className="size-4" />
                     Invite worker
                   </Button>
                 </InviteWorkerDialog>
-                <Button variant="gradient" size="default" asChild>
-                  <Link href="/workers/new">
-                    <Plus className="size-4" />
-                    Add Worker
-                  </Link>
-                </Button>
               </div>
             </div>
           </div>
@@ -605,21 +635,15 @@ export function WorkersTable({
               <p className="mt-2 max-w-sm text-sm text-muted-foreground">
                 {hasFilters
                   ? 'Try clearing filters or changing your criteria.'
-                  : 'Add your first worker to start assigning jobs.'}
+                  : 'Invite your first worker to start assigning jobs.'}
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
-                <InviteWorkerDialog>
-                  <Button variant="outline" size="lg" className="gap-1.5">
+                <InviteWorkerDialog tenantSkills={tenantSkills}>
+                  <Button variant="gradient" size="lg" className="gap-1.5">
                     <UserPlus className="size-4" />
                     Invite worker
                   </Button>
                 </InviteWorkerDialog>
-                <Button variant="gradient" size="lg" asChild>
-                  <Link href="/workers/new">
-                    <Plus className="size-4" />
-                    Add Worker
-                  </Link>
-                </Button>
               </div>
             </div>
           </div>
@@ -825,7 +849,7 @@ export function WorkersTable({
                       </TableCell>
                       <TableCell>{worker.home_postcode ?? '—'}</TableCell>
                       <TableCell>
-                        <SkillsBadges skills={worker.skills} />
+                        <SkillsBadges skills={worker.skills} tenantSkills={tenantSkills} />
                       </TableCell>
                       <TableCell>
                         <WorkerTypeBadge type={worker.worker_type} />
@@ -941,11 +965,43 @@ export function WorkersTable({
                     )}
                   </div>
                   <div className="pl-7">
-                    <SkillsBadges skills={worker.skills} />
+                    <SkillsBadges skills={worker.skills} tenantSkills={tenantSkills} />
                   </div>
                 </div>
               ))}
             </div>
+            {showPagination && (
+              <div className="flex items-center justify-between border-t border-border/80 px-4 py-3">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage <= 1}
+                    onClick={() =>
+                      updateParams({
+                        page: currentPage > 2 ? String(currentPage - 1) : undefined,
+                      })
+                    }
+                  >
+                    <ChevronLeft className="size-4" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => updateParams({ page: String(currentPage + 1) })}
+                  >
+                    Next
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </Card>

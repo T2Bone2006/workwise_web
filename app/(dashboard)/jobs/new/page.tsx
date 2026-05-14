@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
 import { getCustomersForTenant } from '@/lib/data/customers';
 import { getWorkersForTenant } from '@/lib/data/workers';
+import { getConnectionsForTenant } from '@/lib/data/network';
 import { JobForm } from '@/components/jobs/job-form';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -39,7 +41,7 @@ function NoCustomersEmptyState() {
       <p className="mt-2 max-w-sm text-sm text-muted-foreground">
         Create a customer before creating jobs. You need at least one customer to assign jobs to.
       </p>
-      <Button variant="gradient" size="lg" className="mt-8 shadow-[var(--shadow-btn-glow-value)]" asChild>
+      <Button variant="gradient" size="lg" className="mt-8" asChild>
         <Link href="/customers/new">
           Create Customer
         </Link>
@@ -57,13 +59,18 @@ export default async function NewJobPage({ searchParams }: NewJobPageProps) {
     return <NoTenantMessage />;
   }
 
-  const [customersResult, workersResult] = await Promise.all([
+  const [customersResult, workersResult, connectionsResult, tenantSkills] = await Promise.all([
     getCustomersForTenant(tenantId),
     getWorkersForTenant(tenantId),
+    getConnectionsForTenant(tenantId),
+    getTenantSkills(tenantId),
   ]);
 
   const customers = customersResult.customers ?? [];
   const workers = workersResult.workers ?? [];
+  const activeConnections = (connectionsResult.connections ?? []).filter(
+    (connection) => connection.status === 'active'
+  );
 
   return (
     <div className="space-y-6">
@@ -89,6 +96,8 @@ export default async function NewJobPage({ searchParams }: NewJobPageProps) {
         <JobForm
           customers={customers}
           workers={workers}
+          tenantSkills={tenantSkills}
+          activeConnections={activeConnections}
           defaultCustomerId={defaultCustomerId}
         />
       )}

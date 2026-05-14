@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, UserPlus, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -14,13 +14,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { assignJob, autoAllocateJob } from '@/lib/actions/jobs';
 import { cn } from '@/lib/utils';
 
@@ -97,7 +91,7 @@ export function AssignWorkerDialog({
         <Button
           variant="outline"
           size="sm"
-          className="w-full sm:w-auto border-border/80 hover:bg-primary/5 hover:border-primary/30 hover:shadow-[0_0_12px_-2px_var(--glow-primary)]"
+          className="w-full sm:w-auto border-border/80 hover:bg-primary/5 hover:border-primary/30"
         >
           {triggerLabel}
         </Button>
@@ -119,7 +113,7 @@ export function AssignWorkerDialog({
             type="button"
             variant="gradient"
             size="lg"
-            className="w-full gap-2 shadow-[var(--shadow-btn-glow-value)] hover:shadow-glow-md"
+            className="w-full gap-2"
             onClick={handleAutoAssign}
             disabled={isAutoAssigning || isAssigning || workers.length === 0}
           >
@@ -141,30 +135,21 @@ export function AssignWorkerDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Select
+            <SearchableSelect
               value={selectedWorkerId}
               onValueChange={setSelectedWorkerId}
               disabled={workers.length === 0}
-            >
-              <SelectTrigger
-                className={cn(
-                  'w-full border-border/80 bg-background/50 backdrop-blur-sm',
-                  'focus:ring-primary/20 focus:border-primary/40'
-                )}
-              >
-                <SelectValue placeholder="Select a worker" />
-              </SelectTrigger>
-              <SelectContent>
-                {workers.map((w) => (
-                  <SelectItem key={w.id} value={w.id}>
-                    <span className="flex items-center gap-2">
-                      <UserPlus className="size-3.5 text-muted-foreground" />
-                      {w.full_name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Select a worker"
+              searchPlaceholder="Search worker..."
+              className={cn(
+                'w-full border-border/80 bg-background/50 backdrop-blur-sm',
+                'focus:ring-primary/20 focus:border-primary/40'
+              )}
+              options={workers.map((w) => ({
+                value: w.id,
+                label: w.full_name,
+              }))}
+            />
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
@@ -176,7 +161,6 @@ export function AssignWorkerDialog({
           </Button>
           <Button
             variant="gradient"
-            className="shadow-[var(--shadow-btn-glow-value)]"
             onClick={handleAssign}
             disabled={!selectedWorkerId || isAssigning || isAutoAssigning}
           >

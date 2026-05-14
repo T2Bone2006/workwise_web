@@ -528,7 +528,7 @@ export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
                     size="lg"
                     onClick={handleAiMapping}
                     disabled={isAiMapping || !csvHeaders.length}
-                    className="gap-2 shadow-[var(--shadow-btn-glow-value)]"
+                    className="gap-2"
                   >
                     {isAiMapping ? (
                       <Loader2 className="size-5 animate-spin" />
@@ -688,7 +688,7 @@ export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
               variant="gradient"
               onClick={handleImport}
               disabled={isImporting}
-              className="gap-2 shadow-[var(--shadow-btn-glow-value)]"
+              className="gap-2"
             >
               {isImporting ? (
                 <Loader2 className="size-5 animate-spin" />

@@ -1,4 +1,5 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
 import { redirect } from 'next/navigation';
 import { WorkerForm } from '@/components/workers/worker-form';
 import { WorkerDeleteButton } from '@/components/workers/worker-delete-button';
@@ -56,6 +57,8 @@ export default async function WorkerEditPage({ params }: WorkerEditPageProps) {
     redirect('/workers?error=Worker+not+found');
   }
 
+  const tenantSkills = await getTenantSkills(tenantId);
+
   return (
     <div className="space-y-6">
       <div>
@@ -75,7 +78,7 @@ export default async function WorkerEditPage({ params }: WorkerEditPageProps) {
       </div>
 
       <div className="max-w-xl space-y-6">
-        <WorkerForm mode="edit" tenantId={tenantId} worker={worker} />
+        <WorkerForm mode="edit" tenantId={tenantId} tenantSkills={tenantSkills} worker={worker} />
         <div className="pt-4 border-t border-border/80">
           <WorkerDeleteButton workerId={worker.id} workerName={worker.full_name} />
         </div>

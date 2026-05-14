@@ -1,52 +1,54 @@
 /**
- * AI-powered skill detection for locksmith jobs.
+ * AI-powered skill detection from job text.
  * Uses centralized AI logger for all interactions (training data).
  */
 
 import { callAIWithLogging, type AICallResult } from './services/ai-logger';
 
-const VALID_SKILLS = new Set([
-  'residential_locks',
-  'commercial_locks',
-  'safe_installation',
-  'high_security_locks',
-  'emergency_callout',
-  'lock_fitting',
-  'key_cutting',
-  'master_key_systems',
-  'automotive_locks',
-  'access_control',
-]);
+export type DetectSkillsTenantSkill = { key: string; label: string };
 
 export type DetectSkillsInput = {
   description: string;
   address?: string;
   priority?: string;
+  tenantSkills: DetectSkillsTenantSkill[];
 };
 
-const SKILLS_PROMPT = `Analyze this locksmith job and detect required skills.
+/** Template: {{skills_bullets}} injected from tenantSkills. */
+const SKILLS_PROMPT_TEMPLATE = `Analyze this job and detect required skills from the description.
 
 Job description: "{{description}}"
 Address: {{address}}
 Priority: {{priority}}
 
 Available skills:
-- residential_locks: Standard home locks
-- commercial_locks: Business/office locks
-- safe_installation: Safes and vaults
-- high_security_locks: Advanced security systems
-- emergency_callout: Urgent/out-of-hours work
-- lock_fitting: New lock installation
-- key_cutting: Key duplication/creation
-- master_key_systems: Complex key systems
-- automotive_locks: Car/vehicle locks
-- access_control: Electronic access systems
+{{skills_bullets}}
 
-Return ONLY a JSON array of required skills. Examples:
-- "Emergency safe won't open at office" → ["safe_installation", "commercial_locks", "emergency_callout"]
-- "New locks for house" → ["residential_locks", "lock_fitting"]
+Return ONLY a JSON array of required skill keys. Each key MUST be copied exactly from the list above (the part before each colon).
 
-Return empty array [] if no specific skills required.`;
+Example: If the description clearly needs skills from the list, return something like ["one_key_here", "another_key"] using only keys that appear above.
+
+Return empty array [] if no skills from the list apply, or if no skills are configured.`;
+
+function normaliseTenantSkills(skills: DetectSkillsTenantSkill[]): DetectSkillsTenantSkill[] {
+  const seen = new Set<string>();
+  const out: DetectSkillsTenantSkill[] = [];
+  for (const raw of skills) {
+    const key = typeof raw.key === 'string' ? raw.key.trim() : '';
+    const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, label: label || key });
+  }
+  return out;
+}
+
+function buildSkillsBullets(skills: DetectSkillsTenantSkill[]): string {
+  if (skills.length === 0) {
+    return '(No skills are configured — return []).';
+  }
+  return skills.map((s) => `- ${s.key}: ${s.label}`).join('\n');
+}
 
 /**
  * Detect required skills from job description using Claude.
@@ -62,13 +64,22 @@ export async function detectSkills(
     return { data: [], interactionId: '', cost: 0, latency: 0 };
   }
 
+  const tenantSkills = normaliseTenantSkills(input.tenantSkills ?? []);
+  if (tenantSkills.length === 0) {
+    return { data: [], interactionId: '', cost: 0, latency: 0 };
+  }
+
+  const validSkills = new Set(tenantSkills.map((s) => s.key));
+
   const description = (input.description || '').slice(0, 2000);
   const address = input.address ?? '';
   const priority = input.priority ?? 'normal';
 
-  const prompt = SKILLS_PROMPT.replace('{{description}}', description)
+  const bullets = buildSkillsBullets(tenantSkills);
+  const prompt = SKILLS_PROMPT_TEMPLATE.replace('{{description}}', description)
     .replace('{{address}}', address)
-    .replace('{{priority}}', priority);
+    .replace('{{priority}}', priority)
+    .replace('{{skills_bullets}}', bullets);
 
   try {
     const result = await callAIWithLogging(
@@ -79,7 +90,8 @@ export async function detectSkills(
           description,
           address,
           priority,
-          job_type: 'locksmith',
+          job_type: 'skill_detection',
+          tenant_skill_keys: tenantSkills.map((s) => s.key),
         },
         jobId,
       },
@@ -89,7 +101,8 @@ export async function detectSkills(
         if (!Array.isArray(parsed)) return [];
         const skills = parsed
           .filter((s): s is string => typeof s === 'string')
-          .filter((s) => VALID_SKILLS.has(s));
+          .filter((s) => validSkills.has(s.trim()))
+          .map((s) => s.trim());
         return [...new Set(skills)];
       }
     );

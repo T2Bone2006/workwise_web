@@ -9,12 +9,14 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { SettingsCompanyTab } from './settings-company-tab';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 
 interface SettingsViewProps {
   initialData: SettingsPageData;
+  initialTenantSkills: TenantSkillRow[];
 }
 
 const tabs = [
@@ -23,7 +25,7 @@ const tabs = [
   { value: 'danger', label: 'Danger Zone', icon: AlertTriangle },
 ] as const;
 
-export function SettingsView({ initialData }: SettingsViewProps) {
+export function SettingsView({ initialData, initialTenantSkills }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
 
@@ -65,7 +67,11 @@ export function SettingsView({ initialData }: SettingsViewProps) {
 
       <div className="flex-1 min-w-0">
         <TabsContent value="company" className="mt-0 outline-none">
-          <SettingsCompanyTab data={initialData} onSaved={onSaved} />
+          <SettingsCompanyTab
+            data={initialData}
+            initialTenantSkills={initialTenantSkills}
+            onSaved={onSaved}
+          />
         </TabsContent>
         <TabsContent value="profile" className="mt-0 outline-none">
           <SettingsUserTab data={initialData} onSaved={onSaved} />

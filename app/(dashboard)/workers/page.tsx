@@ -1,48 +1,10 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
+import { getWorkersListForTenant, getWorkerSkillsInUseForTenant } from '@/lib/data/workers';
 import { WorkersTable } from '@/components/workers/workers-table';
 import { WorkersPageErrorToast } from '@/components/workers/workers-page-error-toast';
-import type {
-  WorkerInviteStatus,
-  WorkerRow,
-  WorkersFilters,
-  WorkerStatus,
-  WorkerType,
-} from '@/lib/types/worker';
-
-async function getWorkersForTenant(tenantId: string) {
-  const { createClient } = await import('@/lib/supabase/server');
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('workers')
-    .select('*')
-    .eq('primary_tenant_id', tenantId)
-    .order('full_name', { ascending: true });
-
-  if (error) {
-    console.error('[WorkersPage] getWorkers error:', error);
-    return { workers: [], error: new Error(error.message) };
-  }
-
-  const workers: WorkerRow[] = (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    primary_tenant_id: String(row.primary_tenant_id),
-    full_name: String(row.full_name ?? ''),
-    phone: row.phone != null ? String(row.phone) : null,
-    email: row.email != null ? String(row.email) : null,
-    invite_status:
-      row.invite_status === 'pending' ? 'pending' : ('active' as WorkerInviteStatus),
-    home_postcode: row.home_postcode != null ? String(row.home_postcode) : null,
-    home_lat: typeof row.home_lat === 'number' ? row.home_lat : null,
-    home_lng: typeof row.home_lng === 'number' ? row.home_lng : null,
-    worker_type: (row.worker_type as WorkerType) ?? null,
-    status: (row.status as WorkerStatus) ?? null,
-    skills: Array.isArray(row.skills) ? (row.skills as string[]) : null,
-    created_at: row.created_at != null ? String(row.created_at) : undefined,
-    updated_at: row.updated_at != null ? String(row.updated_at) : undefined,
-  }));
-
-  return { workers, error: null };
-}
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import type { WorkerStatus, WorkerType, WorkersFilters } from '@/lib/types/worker';
 
 const VALID_STATUSES: WorkerStatus[] = ['available', 'busy', 'unavailable', 'off_duty'];
 const VALID_WORKER_TYPES: WorkerType[] = ['company_subcontractor', 'platform_solo', 'both'];
@@ -55,11 +17,14 @@ interface WorkersPageProps {
     has_skills?: string;
     sort?: string;
     sort_dir?: string;
+    page?: string;
     error?: string;
   }>;
 }
 
-function parseSearchParams(raw: Awaited<WorkersPageProps['searchParams']>): WorkersFilters {
+function parseSearchParams(
+  raw: Awaited<WorkersPageProps['searchParams']>
+): WorkersFilters & { page?: number } {
   const search = raw.search?.trim() || undefined;
   const statusRaw = raw.status?.trim();
   const status: WorkersFilters['status'] = statusRaw
@@ -69,9 +34,10 @@ function parseSearchParams(raw: Awaited<WorkersPageProps['searchParams']>): Work
         ? (statusRaw as WorkerStatus)
         : undefined
     : undefined;
-  const worker_type = raw.worker_type && VALID_WORKER_TYPES.includes(raw.worker_type as WorkerType)
-    ? (raw.worker_type as WorkerType)
-    : undefined;
+  const worker_type =
+    raw.worker_type && VALID_WORKER_TYPES.includes(raw.worker_type as WorkerType)
+      ? (raw.worker_type as WorkerType)
+      : undefined;
   const has_skills = raw.has_skills?.trim()
     ? raw.has_skills.split(',').map((s) => s.trim()).filter(Boolean)
     : undefined;
@@ -80,78 +46,9 @@ function parseSearchParams(raw: Awaited<WorkersPageProps['searchParams']>): Work
       ? raw.sort
       : undefined;
   const sort_dir = raw.sort_dir === 'asc' || raw.sort_dir === 'desc' ? raw.sort_dir : undefined;
+  const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : undefined;
 
-  return { search, status, worker_type, has_skills, sort, sort_dir };
-}
-
-function applyFilters(
-  workers: WorkerRow[],
-  filters: WorkersFilters
-): WorkerRow[] {
-  let list = [...workers];
-
-  if (filters.search) {
-    const q = filters.search.toLowerCase();
-    list = list.filter(
-      (w) =>
-        w.full_name.toLowerCase().includes(q) ||
-        (w.phone ?? '').toLowerCase().includes(q) ||
-        (w.email ?? '').toLowerCase().includes(q)
-    );
-  }
-
-  if (filters.status) {
-    const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
-    list = list.filter((w) => w.status && statuses.includes(w.status));
-  }
-
-  if (filters.worker_type) {
-    list = list.filter((w) => w.worker_type === filters.worker_type);
-  }
-
-  const hasSkillsArr = Array.isArray(filters.has_skills)
-    ? filters.has_skills
-    : filters.has_skills
-      ? [filters.has_skills]
-      : [];
-  if (hasSkillsArr.length) {
-    list = list.filter(
-      (w) =>
-        w.skills?.length &&
-        hasSkillsArr.some((s) => w.skills!.includes(s))
-    );
-  }
-
-  const sort = filters.sort ?? 'full_name';
-  const dir = filters.sort_dir ?? 'asc';
-  list.sort((a, b) => {
-    let aVal: string | null = null;
-    let bVal: string | null = null;
-    if (sort === 'full_name') {
-      aVal = a.full_name;
-      bVal = b.full_name;
-    } else if (sort === 'phone') {
-      aVal = a.phone;
-      bVal = b.phone;
-    } else if (sort === 'status') {
-      aVal = a.status ?? '';
-      bVal = b.status ?? '';
-    }
-    if (aVal === null) aVal = '';
-    if (bVal === null) bVal = '';
-    const cmp = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
-    return dir === 'asc' ? cmp : -cmp;
-  });
-
-  return list;
-}
-
-function collectAllSkillsInUse(workers: WorkerRow[]): string[] {
-  const set = new Set<string>();
-  workers.forEach((w) => {
-    w.skills?.forEach((s) => set.add(s));
-  });
-  return Array.from(set);
+  return { search, status, worker_type, has_skills, sort, sort_dir, page };
 }
 
 export default async function WorkersPage({ searchParams }: WorkersPageProps) {
@@ -170,29 +67,33 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
 
   const rawParams = await searchParams;
   const filters = parseSearchParams(rawParams);
-  const { workers: rawWorkers, error } = await getWorkersForTenant(tenantId);
-  const workers = applyFilters(rawWorkers, filters);
-  const allSkillsInUse = collectAllSkillsInUse(rawWorkers);
+  const [
+    { workers, totalCount, error },
+    { skills: allSkillsInUse, error: skillsError },
+    tenantSkills,
+  ] = await Promise.all([
+    getWorkersListForTenant(tenantId, filters),
+    getWorkerSkillsInUseForTenant(tenantId),
+    getTenantSkills(tenantId),
+  ]);
+
+  const fetchError = error ?? skillsError;
 
   return (
     <div className="space-y-6">
       <WorkersPageErrorToast error={rawParams.error ?? null} />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Workers
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manage locksmith subcontractors and assign jobs
-          </p>
-        </div>
-      </div>
+      <PageGradientHeader
+        title="Workers"
+        subtitle="Manage workers and assign jobs"
+      />
 
       <WorkersTable
         workers={workers}
+        totalCount={totalCount}
         initialFilters={filters}
         allSkillsInUse={allSkillsInUse}
-        fetchError={error}
+        tenantSkills={tenantSkills}
+        fetchError={fetchError}
       />
     </div>
   );

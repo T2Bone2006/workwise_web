@@ -13,7 +13,9 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   pending_send: 'Ready to send',
   assigned: 'Assigned',
   in_progress: 'In progress',
+  paused: 'Paused',
   completed: 'Completed',
+  declined: 'Declined',
   cancelled: 'Cancelled',
 };
 
@@ -24,10 +26,14 @@ const STATUS_BADGE_CLASS: Record<JobStatus, string> = {
     'border-cyan-400/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 shadow-[0_0_12px_-2px_rgba(6,182,212,0.25)]',
   assigned:
     'border-blue-400/60 bg-blue-500/10 text-blue-700 dark:text-blue-400 shadow-[0_0_12px_-2px_rgba(59,130,246,0.25)]',
+  paused:
+    'border-amber-200/80 bg-[#FEF3C7] text-[#B45309]',
   in_progress:
     'border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-400 shadow-[0_0_12px_-2px_rgba(139,92,246,0.25)]',
   completed:
     'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
+  declined:
+    'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90 shadow-[0_0_8px_-2px_rgba(239,68,68,0.2)]',
   cancelled:
     'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90 shadow-[0_0_8px_-2px_rgba(239,68,68,0.2)]',
 };
@@ -53,6 +59,7 @@ interface JobDetailHeaderProps {
   status: JobStatus;
   priority: JobPriority;
   createdAt: string;
+  hideDeleteAction?: boolean;
 }
 
 export function JobDetailHeader({
@@ -61,6 +68,7 @@ export function JobDetailHeader({
   status,
   priority,
   createdAt,
+  hideDeleteAction = false,
 }: JobDetailHeaderProps) {
   const createdRelative = (() => {
     try {
@@ -110,7 +118,7 @@ export function JobDetailHeader({
             </span>
           )}
         </div>
-        <JobDetailDeleteButton jobId={jobId} status={status} />
+        {!hideDeleteAction && <JobDetailDeleteButton jobId={jobId} status={status} />}
       </div>
     </div>
   );

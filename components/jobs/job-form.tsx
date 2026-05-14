@@ -17,7 +17,9 @@ import { toast } from 'sonner';
 import { createJobSchema, type CreateJobInput } from '@/lib/validations/job';
 import { createJob, autoAllocateJob, type OverrideSkillsPayload } from '@/lib/actions/jobs';
 import type { CustomerRow } from '@/lib/data/customers';
+import type { NetworkConnectionRow } from '@/lib/data/network';
 import type { WorkerRow } from '@/lib/data/workers';
+import type { TenantSkillRow } from '@/lib/actions/skills';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -32,10 +34,14 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -54,26 +60,21 @@ const priorityBadgeClass: Record<string, string> = {
   urgent: 'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400',
 };
 
-const SKILL_OPTIONS: { value: string; label: string }[] = [
-  { value: 'residential_locks', label: 'Residential locks' },
-  { value: 'commercial_locks', label: 'Commercial locks' },
-  { value: 'safe_installation', label: 'Safe installation' },
-  { value: 'high_security_locks', label: 'High security locks' },
-  { value: 'emergency_callout', label: 'Emergency callout' },
-  { value: 'lock_fitting', label: 'Lock fitting' },
-  { value: 'key_cutting', label: 'Key cutting' },
-  { value: 'master_key_systems', label: 'Master key systems' },
-  { value: 'automotive_locks', label: 'Automotive locks' },
-  { value: 'access_control', label: 'Access control' },
-];
-
 interface JobFormProps {
   customers: CustomerRow[];
   workers: WorkerRow[];
+  tenantSkills: TenantSkillRow[];
+  activeConnections?: NetworkConnectionRow[];
   defaultCustomerId?: string;
 }
 
-export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps) {
+export function JobForm({
+  customers,
+  workers,
+  tenantSkills,
+  activeConnections = [],
+  defaultCustomerId,
+}: JobFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -94,6 +95,8 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
       assigned_worker_id: '',
     },
   });
+  const selectedAssignee = form.watch('assigned_worker_id') ?? '';
+  const isBusinessAssignee = selectedAssignee.startsWith('business:');
 
   async function handleDetectSkills() {
     const description = form.getValues('description')?.trim();
@@ -110,6 +113,7 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
           description,
           address: form.getValues('address') ?? '',
           priority: form.getValues('priority') ?? 'normal',
+          tenantSkills: tenantSkills.map(({ key, label }) => ({ key, label })),
         }),
       });
       if (!res.ok) throw new Error('Detect skills failed');
@@ -231,35 +235,22 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
                     <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
                       Customer
                     </FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger
-                          className={cn(
-                            'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
-                            'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
-                          )}
-                        >
-                          <SelectValue placeholder="Select customer" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {customers.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            <span className="flex items-center gap-2">
-                              {c.name}
-                              {c.type === 'bulk_client' && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Bulk
-                                </Badge>
-                              )}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <SearchableSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        placeholder="Select customer"
+                        searchPlaceholder="Search customer..."
+                        className={cn(
+                          'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                          'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
+                        )}
+                        options={customers.map((c) => ({
+                          value: c.id,
+                          label: c.type === 'bulk_client' ? `${c.name} (Bulk)` : c.name,
+                        }))}
+                      />
+                    </FormControl>
                     <FormMessage className="text-destructive text-xs" />
                   </FormItem>
                 )}
@@ -380,7 +371,8 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
               )}
             />
 
-            <div className="space-y-2">
+            {!isBusinessAssignee && (
+              <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium">Required skills (optional)</span>
                 <Button
@@ -410,14 +402,22 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
                     <SelectValue placeholder="Add skill" />
                   </SelectTrigger>
                   <SelectContent>
-                    {SKILL_OPTIONS.filter((o) => !selectedSkills.includes(o.value)).map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                    {SKILL_OPTIONS.every((o) => selectedSkills.includes(o.value)) && (
+                    {tenantSkills
+                      .filter((skill) => !selectedSkills.includes(skill.key))
+                      .map((skill) => (
+                        <SelectItem key={skill.key} value={skill.key}>
+                          {skill.label}
+                        </SelectItem>
+                      ))}
+                    {tenantSkills.length > 0 &&
+                      tenantSkills.every((skill) => selectedSkills.includes(skill.key)) && (
+                        <SelectItem value="_none" disabled>
+                          All added
+                        </SelectItem>
+                      )}
+                    {tenantSkills.length === 0 && (
                       <SelectItem value="_none" disabled>
-                        All added
+                        No skills configured (add skills in Settings)
                       </SelectItem>
                     )}
                   </SelectContent>
@@ -431,7 +431,7 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
                       variant="secondary"
                       className="pl-2 pr-1 py-0.5 text-xs font-normal gap-1"
                     >
-                      {SKILL_OPTIONS.find((o) => o.value === skill)?.label ?? skill}
+                      {tenantSkills.find((s) => s.key === skill)?.label ?? skill}
                       <button
                         type="button"
                         onClick={() => setSelectedSkills((prev) => prev.filter((s) => s !== skill))}
@@ -444,7 +444,8 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
                   ))}
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
             <div className="grid gap-6 sm:grid-cols-2">
               <FormField
@@ -514,35 +515,32 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
                 name="assigned_worker_id"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Assigned Worker (optional)</FormLabel>
-                    <Select
-                      onValueChange={(v) => field.onChange(v === 'auto' ? '' : v)}
-                      value={field.value && field.value.length > 0 ? field.value : 'auto'}
-                    >
-                      <FormControl>
-                        <SelectTrigger
-                          className={cn(
-                            'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
-                            'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
-                          )}
-                        >
-                          <SelectValue placeholder="Auto-assign" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="auto">Auto-assign</SelectItem>
-                        {workers.map((w) => (
-                          <SelectItem key={w.id} value={w.id}>
-                            {w.full_name}
-                          </SelectItem>
-                        ))}
-                        {workers.length === 0 && (
-                          <SelectItem value="unassigned" disabled>
-                            Unassigned (no workers)
-                          </SelectItem>
+                    <FormLabel>Assignment (optional)</FormLabel>
+                    <FormControl>
+                      <SearchableSelect
+                        value={field.value && field.value.length > 0 ? field.value : 'auto'}
+                        onValueChange={(v) => field.onChange(v === 'auto' ? '' : v)}
+                        placeholder="Auto-assign"
+                        searchPlaceholder="Search assignee..."
+                        className={cn(
+                          'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                          'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
                         )}
-                      </SelectContent>
-                    </Select>
+                        options={[
+                          { value: 'auto', label: 'Auto-assign' },
+                          ...workers.map((w) => ({
+                            value: w.id,
+                            label: w.full_name,
+                            group: 'Workers',
+                          })),
+                          ...activeConnections.map((connection) => ({
+                            value: `business:${connection.id}`,
+                            label: connection.other_tenant_name ?? 'Connected business',
+                            group: 'Connected businesses',
+                          })),
+                        ]}
+                      />
+                    </FormControl>
                     <FormMessage className="text-destructive text-xs" />
                   </FormItem>
                 )}
@@ -564,7 +562,7 @@ export function JobForm({ customers, workers, defaultCustomerId }: JobFormProps)
               <Button
                 type="submit"
                 variant="gradient"
-                className="shadow-[var(--shadow-btn-glow-value)] order-1 sm:order-2"
+                className="order-1 sm:order-2"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
