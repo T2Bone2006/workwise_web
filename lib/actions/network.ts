@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 
@@ -65,7 +66,11 @@ export async function createConnection(
     }
 
     const supabase = await createClient();
-    const { data: invitedUser, error: invitedUserError } = await supabase
+    const adminSupabase = createSupabaseAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data: invitedUser, error: invitedUserError } = await adminSupabase
       .from('users')
       .select('tenant_id')
       .eq('email', trimmedEmail)
