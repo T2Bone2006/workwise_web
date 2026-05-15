@@ -236,23 +236,26 @@ export async function getNetworkInbox(
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
-      .from('network_job_dispatches')
+      .from('jobs')
       .select(
         `
         id,
-        connection_id,
-        canonical_job_id,
-        originating_tenant_id,
-        originating_reference_number,
-        originating_customer_snapshot,
-        created_at,
-        originating_tenant:tenants!network_job_dispatches_originating_tenant_id_fkey(name),
-        canonical_job:jobs!network_job_dispatches_canonical_job_id_fkey(status)
+        network_dispatch_id,
+        network_dispatch:network_job_dispatches!jobs_network_dispatch_id_fkey(
+          id,
+          connection_id,
+          originating_tenant_id,
+          originating_reference_number,
+          originating_customer_snapshot,
+          created_at,
+          originating_tenant:tenants!network_job_dispatches_originating_tenant_id_fkey(name)
+        )
       `
       )
-      .eq('receiving_tenant_id', tenantId)
-      .eq('canonical_job.status', 'pending')
-      .order('created_at', { ascending: false });
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending_send')
+      .not('network_dispatch_id', 'is', null)
+      .order('created_at', { ascending: false, foreignTable: 'network_job_dispatches' });
 
     if (error) {
       console.error('[getNetworkInbox]', error);
@@ -260,17 +263,24 @@ export async function getNetworkInbox(
     }
 
     const inbox: NetworkInboxRow[] = (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => {
-      const originatingTenant = row.originating_tenant as { name?: string } | null;
+      const dispatch = row.network_dispatch as {
+        connection_id?: string | null;
+        originating_tenant_id?: string | null;
+        originating_reference_number?: string | null;
+        originating_customer_snapshot?: Record<string, unknown> | null;
+        created_at?: string | null;
+        originating_tenant?: { name?: string } | null;
+      } | null;
+      const originatingTenant = dispatch?.originating_tenant ?? null;
       return {
-        id: row.id as string,
-        connection_id: (row.connection_id as string | null) ?? null,
-        canonical_job_id: (row.canonical_job_id as string | null) ?? null,
-        originating_tenant_id: (row.originating_tenant_id as string | null) ?? null,
+        id: row.network_dispatch_id as string,
+        connection_id: dispatch?.connection_id ?? null,
+        canonical_job_id: row.id as string,
+        originating_tenant_id: dispatch?.originating_tenant_id ?? null,
         originating_tenant_name: originatingTenant?.name ?? null,
-        originating_reference_number: (row.originating_reference_number as string | null) ?? null,
-        originating_customer_snapshot:
-          (row.originating_customer_snapshot as Record<string, unknown> | null) ?? null,
-        created_at: (row.created_at as string | null) ?? null,
+        originating_reference_number: dispatch?.originating_reference_number ?? null,
+        originating_customer_snapshot: dispatch?.originating_customer_snapshot ?? null,
+        created_at: dispatch?.created_at ?? null,
       };
     });
 
