@@ -24,6 +24,7 @@ interface JobOriginRealtimeViewProps {
   completionNotes?: string;
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
   receivingBusinessName?: string | null;
+  isNetworkDispatched?: boolean;
 }
 
 export function JobOriginRealtimeView({
@@ -36,6 +37,7 @@ export function JobOriginRealtimeView({
   completionNotes,
   attachmentPhotos,
   receivingBusinessName,
+  isNetworkDispatched = false,
 }: JobOriginRealtimeViewProps) {
   const [job, setJob] = useState<JobDetailJob>(initialJob);
   const [statusHistory, setStatusHistory] = useState<JobStatusHistoryEntry[]>(initialStatusHistory);
@@ -118,7 +120,7 @@ export function JobOriginRealtimeView({
         status={job.status}
         priority={job.priority}
         createdAt={job.created_at}
-        hideDeleteAction={true}
+        hideDeleteAction={isNetworkDispatched}
       />
       <JobDetailView
         job={job}
@@ -131,6 +133,7 @@ export function JobOriginRealtimeView({
         attachmentPhotos={attachmentPhotos}
         isNetworkOriginView={true}
         receivingBusinessName={receivingBusinessName}
+        isNetworkDispatched={isNetworkDispatched}
       />
     </div>
   );

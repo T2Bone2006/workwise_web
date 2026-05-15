@@ -17,6 +17,7 @@ import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
+import { cn } from '@/lib/utils';
 
 const JobLocationMap = dynamic(
   () => import('@/components/maps/job-location-map').then((mod) => mod.JobLocationMap),
@@ -52,6 +53,8 @@ interface JobDetailViewProps {
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
   isNetworkOriginView?: boolean;
   receivingBusinessName?: string | null;
+  /** Originating tenant view of a job dispatched to the network (read-only assignment/actions). */
+  isNetworkDispatched?: boolean;
 }
 
 export function JobDetailView({
@@ -65,6 +68,7 @@ export function JobDetailView({
   attachmentPhotos,
   isNetworkOriginView = false,
   receivingBusinessName = null,
+  isNetworkDispatched = false,
 }: JobDetailViewProps) {
   const isCompleted = job.status === 'completed';
   const hasPhotoGroups =
@@ -162,20 +166,43 @@ export function JobDetailView({
           />
         )}
         <div id="assignment">
-          <JobDetailWorkerCard
+          {isNetworkDispatched ? (
+            <Card
+              className={cn(
+                'glass-card overflow-hidden border-border/80',
+                'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+              )}
+            >
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Assignment</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Alert className="border-primary/20 bg-primary/5 text-foreground">
+                  <AlertDescription>
+                    This job has been dispatched to a network partner and is awaiting their
+                    action.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          ) : (
+            <JobDetailWorkerCard
+              jobId={job.id}
+              status={job.status}
+              worker={job.worker}
+              workers={workers}
+              readOnly={isNetworkOriginView}
+            />
+          )}
+        </div>
+        {!isNetworkDispatched && (
+          <JobDetailActionsCard
             jobId={job.id}
             status={job.status}
-            worker={job.worker}
-            workers={workers}
-            readOnly={isNetworkOriginView}
+            hasWorker={!!job.worker}
+            isNetworkOriginView={isNetworkOriginView}
           />
-        </div>
-        <JobDetailActionsCard
-          jobId={job.id}
-          status={job.status}
-          hasWorker={!!job.worker}
-          isNetworkOriginView={isNetworkOriginView}
-        />
+        )}
       </div>
     </div>
   );

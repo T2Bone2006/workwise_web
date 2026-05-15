@@ -421,6 +421,16 @@ export async function dispatchJobToNetwork(
       return { success: false, error: mirroredJobError.message ?? 'Failed to create receiving tenant job.' };
     }
 
+    const { error: sourceJobLinkError } = await adminSupabase
+      .from('jobs')
+      .update({ network_dispatch_id: dispatch.id })
+      .eq('id', sourceJob.id);
+
+    if (sourceJobLinkError) {
+      console.error('[dispatchJobToNetwork] source job link', sourceJobLinkError);
+      return { success: false, error: sourceJobLinkError.message ?? 'Failed to link job to network dispatch.' };
+    }
+
     revalidatePath('/jobs');
     revalidatePath('/network');
     return { success: true, data: dispatch as DispatchRow };

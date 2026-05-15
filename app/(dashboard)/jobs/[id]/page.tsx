@@ -92,6 +92,9 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     }
   }
 
+  const isNetworkDispatched =
+    Boolean(jobRow.network_dispatch_id) && networkOriginatingTenantId === tenantId;
+
   if (!isLocalTenantJob && !isNetworkOriginView) {
     redirect('/jobs?error=not_found');
   }
@@ -293,6 +296,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         }
         attachmentPhotos={jobPhotosSplit}
         receivingBusinessName={receivingBusinessName}
+        isNetworkDispatched={isNetworkDispatched}
       />
     );
   }
@@ -305,6 +309,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         status={job.status}
         priority={job.priority}
         createdAt={job.created_at}
+        hideDeleteAction={isNetworkDispatched}
       />
       <JobDetailView
         job={jobForView}
@@ -323,6 +328,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         attachmentPhotos={jobPhotosSplit}
         isNetworkOriginView={false}
         receivingBusinessName={null}
+        isNetworkDispatched={isNetworkDispatched}
       />
     </div>
   );
