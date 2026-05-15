@@ -24,6 +24,7 @@ import {
   respondToConnection,
   revokeConnection,
   declineEntireDispatch,
+  updateConnectionSettings,
 } from '@/lib/actions/network';
 import { updateJobStatus } from '@/lib/actions/jobs';
 import type { NetworkConnectionRow, NetworkInboxRow } from '@/lib/data/network';
@@ -69,6 +70,12 @@ export function NetworkView({
     open: false,
     dispatchId: null,
   });
+  const [settingsDialog, setSettingsDialog] = useState<{
+    open: boolean;
+    connectionId: string | null;
+    tradeTypes: string[];
+    radiusMiles: number;
+  }>({ open: false, connectionId: null, tradeTypes: [], radiusMiles: 50 });
 
   const pendingSentInvites = useMemo(
     () =>
@@ -175,6 +182,25 @@ export function NetworkView({
         toast.error(result.error ?? 'Unable to decline network job.');
       } else {
         toast.success('Network job declined.');
+        router.refresh();
+      }
+      setBusyKey(null);
+    });
+  };
+
+  const handleSaveSettings = () => {
+    if (!settingsDialog.connectionId) return;
+    setBusyKey('settings-save');
+    startTransition(async () => {
+      const result = await updateConnectionSettings(settingsDialog.connectionId!, {
+        trade_types: settingsDialog.tradeTypes,
+        coverage_radius_miles: settingsDialog.radiusMiles,
+      });
+      if (!result.success) {
+        toast.error(result.error ?? 'Unable to save settings.');
+      } else {
+        toast.success('Settings saved.');
+        setSettingsDialog({ open: false, connectionId: null, tradeTypes: [], radiusMiles: 50 });
         router.refresh();
       }
       setBusyKey(null);
@@ -381,14 +407,30 @@ export function NetworkView({
                           Coverage radius: {connection.coverage_radius_miles ?? '—'} miles
                         </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRevoke(connection.id)}
-                        disabled={isPending && busyKey === `revoke-${connection.id}`}
-                      >
-                        Revoke
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setSettingsDialog({
+                              open: true,
+                              connectionId: connection.id,
+                              tradeTypes: [...(connection.trade_types ?? [])],
+                              radiusMiles: connection.coverage_radius_miles ?? 50,
+                            })
+                          }
+                        >
+                          Settings
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRevoke(connection.id)}
+                          disabled={isPending && busyKey === `revoke-${connection.id}`}
+                        >
+                          Revoke
+                        </Button>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {(connection.trade_types ?? []).length === 0 && (
@@ -543,6 +585,106 @@ export function NetworkView({
                 <Loader2 className="size-4 animate-spin" />
               ) : null}
               Decline all
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={settingsDialog.open}
+        onOpenChange={(open) =>
+          setSettingsDialog((prev) => ({
+            open,
+            connectionId: open ? prev.connectionId : null,
+            tradeTypes: open ? prev.tradeTypes : [],
+            radiusMiles: open ? prev.radiusMiles : 50,
+          }))
+        }
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Connection settings</DialogTitle>
+            <DialogDescription>
+              Update coverage radius and trade types for this connection.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="settings-radius">Coverage radius (miles)</Label>
+              <Input
+                id="settings-radius"
+                type="number"
+                min={1}
+                value={settingsDialog.radiusMiles}
+                onChange={(e) =>
+                  setSettingsDialog((prev) => ({
+                    ...prev,
+                    radiusMiles: Number(e.target.value) || 50,
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-trade-type">Trade types</Label>
+              <Input
+                id="settings-trade-type"
+                placeholder="Type a trade and press Enter"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  const value = e.currentTarget.value.trim();
+                  if (!value) return;
+                  setSettingsDialog((prev) =>
+                    prev.tradeTypes.includes(value)
+                      ? prev
+                      : { ...prev, tradeTypes: [...prev.tradeTypes, value] }
+                  );
+                  e.currentTarget.value = '';
+                }}
+              />
+              <div className="flex flex-wrap gap-2">
+                {settingsDialog.tradeTypes.map((trade) => (
+                  <Badge key={trade} variant="secondary" className="gap-1 pr-1">
+                    {trade}
+                    <button
+                      type="button"
+                      className="ml-1 rounded-sm hover:bg-muted"
+                      onClick={() =>
+                        setSettingsDialog((prev) => ({
+                          ...prev,
+                          tradeTypes: prev.tradeTypes.filter((t) => t !== trade),
+                        }))
+                      }
+                      aria-label={`Remove ${trade}`}
+                    >
+                      ×
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setSettingsDialog({
+                  open: false,
+                  connectionId: null,
+                  tradeTypes: [],
+                  radiusMiles: 50,
+                })
+              }
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveSettings}
+              disabled={!settingsDialog.connectionId || (isPending && busyKey === 'settings-save')}
+            >
+              {isPending && busyKey === 'settings-save' && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
