@@ -365,6 +365,17 @@ export async function dispatchJobToNetwork(
       }
     }
 
+    const { data: existingDispatch } = await supabase
+      .from('network_job_dispatches')
+      .select('id')
+      .eq('canonical_job_id', sourceJob.id)
+      .eq('connection_id', connectionId)
+      .maybeSingle();
+
+    if (existingDispatch) {
+      return { success: false, error: 'This job has already been dispatched to this connection.' };
+    }
+
     const { data: dispatch, error: dispatchError } = await supabase
       .from('network_job_dispatches')
       .insert({
@@ -384,7 +395,11 @@ export async function dispatchJobToNetwork(
       return { success: false, error: dispatchError?.message ?? 'Failed to create network dispatch.' };
     }
 
-    const { error: mirroredJobError } = await supabase.from('jobs').insert({
+    const adminSupabase = createSupabaseAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { error: mirroredJobError } = await adminSupabase.from('jobs').insert({
       tenant_id: receivingTenantId,
       reference_number: sourceJob.reference_number,
       customer_id: null,
@@ -526,6 +541,100 @@ export async function handleNetworkJobDeclined(
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to handle network decline.',
+    };
+  }
+}
+
+export type NetworkInboxActionResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function acceptNetworkJob(dispatchId: string): Promise<NetworkInboxActionResult> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const { data: job, error: jobError } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('network_dispatch_id', dispatchId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (jobError) {
+      console.error('[acceptNetworkJob] job lookup', jobError);
+      return { success: false, error: jobError.message ?? 'Failed to find network job.' };
+    }
+    if (!job?.id) {
+      return { success: false, error: 'Network job not found or access denied.' };
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('id', job.id)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      console.error('[acceptNetworkJob] update', updateError);
+      return { success: false, error: updateError.message ?? 'Failed to accept network job.' };
+    }
+
+    revalidatePath('/network');
+    return { success: true };
+  } catch (err) {
+    console.error('[acceptNetworkJob]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to accept network job.',
+    };
+  }
+}
+
+export async function declineNetworkJob(dispatchId: string): Promise<NetworkInboxActionResult> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const { data: job, error: jobError } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('network_dispatch_id', dispatchId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (jobError) {
+      console.error('[declineNetworkJob] job lookup', jobError);
+      return { success: false, error: jobError.message ?? 'Failed to find network job.' };
+    }
+    if (!job?.id) {
+      return { success: false, error: 'Network job not found or access denied.' };
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({ status: 'declined', updated_at: new Date().toISOString() })
+      .eq('id', job.id)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      console.error('[declineNetworkJob] update', updateError);
+      return { success: false, error: updateError.message ?? 'Failed to decline network job.' };
+    }
+
+    revalidatePath('/network');
+    return { success: true };
+  } catch (err) {
+    console.error('[declineNetworkJob]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to decline network job.',
     };
   }
 }

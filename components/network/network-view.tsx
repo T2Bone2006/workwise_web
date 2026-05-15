@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2, Mail, ShieldCheck, Inbox, Building2 } from 'lucide-react';
@@ -20,13 +20,14 @@ import {
 } from '@/components/ui/dialog';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import {
+  acceptNetworkJob,
   createConnection,
   respondToConnection,
   revokeConnection,
   declineEntireDispatch,
+  declineNetworkJob,
   updateConnectionSettings,
 } from '@/lib/actions/network';
-import { updateJobStatus } from '@/lib/actions/jobs';
 import type { NetworkConnectionRow, NetworkInboxRow } from '@/lib/data/network';
 
 interface NetworkViewProps {
@@ -76,30 +77,35 @@ export function NetworkView({
     tradeTypes: string[];
     radiusMiles: number;
   }>({ open: false, connectionId: null, tradeTypes: [], radiusMiles: 50 });
+  const [connections, setConnections] = useState(initialConnections);
+
+  useEffect(() => {
+    setConnections(initialConnections);
+  }, [initialConnections]);
 
   const pendingSentInvites = useMemo(
     () =>
-      initialConnections.filter(
+      connections.filter(
         (connection) =>
           connection.status === 'pending' &&
           connection.invited_by_tenant_id === currentTenantId
       ),
-    [initialConnections, currentTenantId]
+    [connections, currentTenantId]
   );
 
   const pendingReceivedInvites = useMemo(
     () =>
-      initialConnections.filter(
+      connections.filter(
         (connection) =>
           connection.status === 'pending' &&
           connection.invited_by_tenant_id !== currentTenantId
       ),
-    [initialConnections, currentTenantId]
+    [connections, currentTenantId]
   );
 
   const activeConnections = useMemo(
-    () => initialConnections.filter((connection) => connection.status === 'active'),
-    [initialConnections]
+    () => connections.filter((connection) => connection.status === 'active'),
+    [connections]
   );
 
   const handleInviteSubmit = (e: React.FormEvent) => {
@@ -153,17 +159,13 @@ export function NetworkView({
   };
 
   const handleInboxAccept = (row: NetworkInboxRow) => {
-    if (!row.canonical_job_id) {
-      toast.error('This dispatch is missing a canonical job reference.');
-      return;
-    }
     setBusyKey(`inbox-accept-${row.id}`);
     startTransition(async () => {
-      const result = await updateJobStatus(row.canonical_job_id!, 'pending_send');
+      const result = await acceptNetworkJob(row.id);
       if (!result.success) {
         toast.error(result.error ?? 'Unable to accept network job.');
       } else {
-        toast.success('Network job accepted and sent to pending_send.');
+        toast.success('Network job accepted.');
         router.refresh();
       }
       setBusyKey(null);
@@ -171,13 +173,9 @@ export function NetworkView({
   };
 
   const handleInboxDecline = (row: NetworkInboxRow) => {
-    if (!row.canonical_job_id) {
-      toast.error('This dispatch is missing a canonical job reference.');
-      return;
-    }
     setBusyKey(`inbox-decline-${row.id}`);
     startTransition(async () => {
-      const result = await updateJobStatus(row.canonical_job_id!, 'declined');
+      const result = await declineNetworkJob(row.id);
       if (!result.success) {
         toast.error(result.error ?? 'Unable to decline network job.');
       } else {
@@ -200,6 +198,18 @@ export function NetworkView({
         toast.error(result.error ?? 'Unable to save settings.');
       } else {
         toast.success('Settings saved.');
+        const connectionId = settingsDialog.connectionId!;
+        setConnections((prev) =>
+          prev.map((connection) =>
+            connection.id === connectionId
+              ? {
+                  ...connection,
+                  trade_types: result.data.trade_types,
+                  coverage_radius_miles: result.data.coverage_radius_miles,
+                }
+              : connection
+          )
+        );
         setSettingsDialog({ open: false, connectionId: null, tradeTypes: [], radiusMiles: 50 });
         router.refresh();
       }
