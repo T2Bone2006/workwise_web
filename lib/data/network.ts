@@ -63,6 +63,44 @@ function toError(err: unknown): Error {
   return new Error(String(err));
 }
 
+export async function getNetworkNotificationCounts(
+  tenantId: string
+): Promise<{ pendingConnections: number; inboxJobs: number }> {
+  try {
+    const supabase = await createClient();
+    const [pendingResult, inboxResult] = await Promise.all([
+      supabase
+        .from('tenant_network_connections')
+        .select('id', { count: 'exact', head: true })
+        .or(`tenant_id_a.eq.${tenantId},tenant_id_b.eq.${tenantId}`)
+        .eq('status', 'pending')
+        .neq('invited_by_tenant_id', tenantId),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending_send')
+        .not('network_dispatch_id', 'is', null),
+    ]);
+
+    if (pendingResult.error) {
+      console.error('[getNetworkNotificationCounts] pending', pendingResult.error);
+    }
+    if (inboxResult.error) {
+      console.error('[getNetworkNotificationCounts] inbox', inboxResult.error);
+    }
+
+    return {
+      pendingConnections:
+        pendingResult.error || typeof pendingResult.count !== 'number' ? 0 : pendingResult.count,
+      inboxJobs: inboxResult.error || typeof inboxResult.count !== 'number' ? 0 : inboxResult.count,
+    };
+  } catch (err) {
+    console.error('[getNetworkNotificationCounts]', err);
+    return { pendingConnections: 0, inboxJobs: 0 };
+  }
+}
+
 export async function getConnectionsForTenant(
   tenantId: string
 ): Promise<{ connections: NetworkConnectionRow[]; error: Error | null }> {

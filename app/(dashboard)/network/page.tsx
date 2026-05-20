@@ -1,5 +1,9 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { getConnectionsForTenant, getNetworkInbox } from '@/lib/data/network';
+import {
+  getConnectionsForTenant,
+  getNetworkInbox,
+  getNetworkNotificationCounts,
+} from '@/lib/data/network';
 import { NetworkView } from '@/components/network/network-view';
 
 function NoTenantMessage() {
@@ -27,9 +31,14 @@ export default async function NetworkPage() {
     const tenantId = await getTenantIdForCurrentUser();
     if (!tenantId) return <NoTenantMessage />;
 
-    const [{ connections, error: connectionsError }, { inbox, error: inboxError }] = await Promise.all([
+    const [
+      { connections, error: connectionsError },
+      { inbox, error: inboxError },
+      notificationCounts,
+    ] = await Promise.all([
       getConnectionsForTenant(tenantId),
       getNetworkInbox(tenantId),
+      getNetworkNotificationCounts(tenantId),
     ]);
 
     if (connectionsError) {
@@ -40,7 +49,13 @@ export default async function NetworkPage() {
     }
 
     return (
-      <NetworkView currentTenantId={tenantId} initialConnections={connections} initialInbox={inbox} />
+      <NetworkView
+        currentTenantId={tenantId}
+        initialConnections={connections}
+        initialInbox={inbox}
+        pendingConnections={notificationCounts.pendingConnections}
+        inboxJobs={notificationCounts.inboxJobs}
+      />
     );
   } catch (err) {
     return (

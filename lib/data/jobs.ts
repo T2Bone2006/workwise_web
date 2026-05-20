@@ -277,6 +277,7 @@ export async function getJobsForTenant(
 
 /**
  * Fetches jobs that need manual assignment (pending, no worker assigned).
+ * Excludes jobs dispatched to a network partner (`network_dispatch_id` set).
  * Ordered by created_at ascending (oldest first) for review flow.
  */
 export async function getUnassignedJobsForTenant(
@@ -297,6 +298,7 @@ export async function getUnassignedJobsForTenant(
       .eq('tenant_id', tenantId)
       .eq('status', 'pending')
       .is('assigned_worker_id', null)
+      .is('network_dispatch_id', null)
       .order('created_at', { ascending: true })
       .limit(limit);
 

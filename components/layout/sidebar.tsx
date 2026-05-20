@@ -45,9 +45,11 @@ interface SidebarProps {
   mobileOpen: boolean;
   onMobileClose: () => void;
   isAdmin?: boolean;
+  /** When > 0, shows a dot next to Network (or on the icon when sidebar is collapsed). */
+  networkBadge?: number;
 }
 
-export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false }: SidebarProps) {
+export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBadge }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -68,23 +70,50 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false }: SidebarP
     if (mounted) localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
   };
 
-  const linkContent = (item: (typeof navItems)[number], isMobile = false) => (
-    <Link
-      href={item.href}
-      onClick={isMobile ? onMobileClose : undefined}
-      className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
-        'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-        pathname === item.href
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
-          : 'text-sidebar-foreground/90'
-      )}
-    >
-      <item.icon className="size-5 shrink-0" aria-hidden />
-      {(!collapsed || isMobile) && <span>{item.label}</span>}
-    </Link>
-  );
+  const linkContent = (item: (typeof navItems)[number], isMobile = false) => {
+    const showNetworkDot =
+      item.href === '/network' && networkBadge != null && networkBadge > 0;
+    const labelVisible = !collapsed || isMobile;
+    const dotOnIcon = showNetworkDot && !labelVisible;
+    const dotAfterLabel = showNetworkDot && labelVisible;
+    const dotStyleClass =
+      'size-[8px] animate-pulse rounded-full [background-image:radial-gradient(circle_at_center,#a78bfa,#6366f1)] [box-shadow:0_0_6px_1px_rgba(139,92,246,0.7)]';
+
+    return (
+      <Link
+        href={item.href}
+        onClick={isMobile ? onMobileClose : undefined}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+          'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+          pathname === item.href
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+            : 'text-sidebar-foreground/90'
+        )}
+      >
+        {dotOnIcon ? (
+          <span className="relative inline-flex shrink-0">
+            <item.icon className="size-5" aria-hidden />
+            <span
+              className={cn('absolute right-0 top-0', dotStyleClass)}
+              aria-hidden
+            />
+          </span>
+        ) : (
+          <item.icon className="size-5 shrink-0" aria-hidden />
+        )}
+        {labelVisible && (
+          <span className="inline-flex min-w-0 items-center">
+            <span>{item.label}</span>
+            {dotAfterLabel && (
+              <span className={cn('ml-2 shrink-0', dotStyleClass)} aria-hidden />
+            )}
+          </span>
+        )}
+      </Link>
+    );
+  };
 
   const sidebarContent = (isMobile: boolean) => (
     <>

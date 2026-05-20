@@ -11,6 +11,8 @@ interface DashboardShellProps {
   tenantName: string;
   userEmail: string | undefined;
   isAdmin?: boolean;
+  /** Sum of pending network notifications; sidebar shows a dot when > 0. */
+  networkBadge?: number;
 }
 
 /**
@@ -21,6 +23,7 @@ export function DashboardShell({
   tenantName,
   userEmail,
   isAdmin = false,
+  networkBadge,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -32,6 +35,7 @@ export function DashboardShell({
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
         isAdmin={isAdmin}
+        networkBadge={networkBadge}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Topbar

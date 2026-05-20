@@ -34,6 +34,8 @@ interface NetworkViewProps {
   currentTenantId: string;
   initialConnections: NetworkConnectionRow[];
   initialInbox: NetworkInboxRow[];
+  pendingConnections?: number;
+  inboxJobs?: number;
 }
 
 function formatDate(value: string | null): string {
@@ -61,6 +63,8 @@ export function NetworkView({
   currentTenantId,
   initialConnections,
   initialInbox,
+  pendingConnections = 0,
+  inboxJobs = 0,
 }: NetworkViewProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -256,10 +260,20 @@ export function NetworkView({
             <TabsTrigger value="connections" className="gap-2">
               <ShieldCheck className="size-4" />
               Connections
+              {pendingConnections > 0 && (
+                <span className="inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#a78bfa] to-[#6366f1] px-1.5 py-0.5 text-xs font-semibold leading-none text-white tabular-nums shadow-[0_0_8px_rgba(139,92,246,0.5)]">
+                  {pendingConnections}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="inbox" className="gap-2">
               <Inbox className="size-4" />
               Inbox
+              {inboxJobs > 0 && (
+                <span className="inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#a78bfa] to-[#6366f1] px-1.5 py-0.5 text-xs font-semibold leading-none text-white tabular-nums shadow-[0_0_8px_rgba(139,92,246,0.5)]">
+                  {inboxJobs}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 
