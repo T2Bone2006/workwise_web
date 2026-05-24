@@ -3,6 +3,9 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { customerSchema } from '@/lib/validations/customer';
+import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
+import { getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 
 function getRawFormData(formData: FormData) {
@@ -287,12 +290,14 @@ export async function inviteCustomerToPortal(customerId: string) {
     return { success: false, error: 'No tenant found' };
   }
 
+  const tenantId = userData.tenant_id;
+
   const { data: customer, error: customerError } = await supabase
     .from('customers')
-    .select('id, email')
+    .select('id, name, email')
     .eq('id', customerId)
-    .eq('tenant_id', userData.tenant_id)
-    .maybeSingle<{ id: string; email: string | null }>();
+    .eq('tenant_id', tenantId)
+    .maybeSingle<{ id: string; name: string; email: string | null }>();
 
   if (customerError) {
     return { success: false, error: customerError.message };
@@ -303,18 +308,10 @@ export async function inviteCustomerToPortal(customerId: string) {
 
   const email = customer.email?.trim().toLowerCase();
   if (!email) {
-    return { success: false, error: 'Customer must have an email address' };
-  }
-
-  const { data: existingPortalUser } = await supabase
-    .from('customer_portal_users')
-    .select('user_id')
-    .eq('customer_id', customerId)
-    .limit(1)
-    .maybeSingle<{ user_id: string }>();
-
-  if (existingPortalUser?.user_id) {
-    return { success: false, error: 'Customer already has a portal user' };
+    return {
+      success: false,
+      error: 'This customer has no email address. Add one before inviting.',
+    };
   }
 
   let admin;
@@ -327,39 +324,89 @@ export async function inviteCustomerToPortal(customerId: string) {
     };
   }
 
-  const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
+  const { data: inviteData, error: inviteError } = await admin.auth.admin.generateLink({
+    type: 'invite',
     email,
-    {
-      redirectTo: 'https://app.joinworkwise.com/accept-invite',
+    options: {
       data: {
         role: 'customer_portal',
         customer_id: customerId,
       },
-    }
-  );
+    },
+  });
 
   if (inviteError) {
-    console.error('[inviteCustomerToPortal] inviteUserByEmail:', inviteError);
+    console.error('[inviteCustomerToPortal] generateLink:', inviteError);
     return { success: false, error: inviteError.message };
   }
 
-  const invitedUserId = inviteData.user?.id;
+  const invitedUserId = inviteData?.user?.id;
   if (!invitedUserId) {
     return { success: false, error: 'Failed to resolve invited user id' };
   }
 
-  const { error: insertError } = await supabase.from('customer_portal_users').insert({
-    user_id: invitedUserId,
+  const { data: existingPortalUser } = await supabase
+    .from('customer_portal_users')
+    .select('user_id')
+    .eq('customer_id', customerId)
+    .limit(1)
+    .maybeSingle<{ user_id: string }>();
+
+  if (existingPortalUser) {
+    const { error: updatePortalError } = await supabase
+      .from('customer_portal_users')
+      .update({ user_id: invitedUserId })
+      .eq('customer_id', customerId);
+
+    if (updatePortalError) {
+      console.error('[inviteCustomerToPortal] update customer_portal_users:', updatePortalError);
+      return { success: false, error: updatePortalError.message };
+    }
+  } else {
+    const { error: insertPortalError } = await supabase.from('customer_portal_users').insert({
+      customer_id: customerId,
+      user_id: invitedUserId,
+    });
+
+    if (insertPortalError) {
+      console.error('[inviteCustomerToPortal] insert customer_portal_users:', insertPortalError);
+      return { success: false, error: insertPortalError.message };
+    }
+  }
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { error: inviteTokenError } = await admin.from('customer_invites').insert({
+    token,
     customer_id: customerId,
+    tenant_id: tenantId,
+    email,
+    expires_at: expiresAt,
   });
 
-  if (insertError) {
-    console.error('[inviteCustomerToPortal] insert customer_portal_users:', insertError);
-    const { error: rollbackError } = await admin.auth.admin.deleteUser(invitedUserId);
-    if (rollbackError) {
-      console.error('[inviteCustomerToPortal] rollback deleteUser:', rollbackError);
-    }
-    return { success: false, error: insertError.message };
+  if (inviteTokenError) {
+    console.error('[inviteCustomerToPortal] customer_invites insert:', inviteTokenError);
+    return { success: false, error: inviteTokenError.message };
+  }
+
+  const tenantName = await getTenantNameForCurrentUser();
+  const inviteUrl = `https://app.joinworkwise.com/portal/accept-invite?token=${token}`;
+  const { subject, html } = buildCustomerInviteEmail({
+    customerName: customer.name?.trim() || 'there',
+    inviteUrl,
+    tenantName,
+  });
+
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email,
+      subject,
+      html,
+    });
+  } catch (e) {
+    console.error('[inviteCustomerToPortal] resend:', e);
   }
 
   revalidatePath('/customers');

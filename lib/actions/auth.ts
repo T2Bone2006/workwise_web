@@ -40,6 +40,24 @@ export async function login(
       return result;
     }
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle<{ role: string | null }>();
+
+      revalidatePath('/', 'layout');
+
+      if (profile?.role === 'customer_portal') {
+        redirect('/portal');
+      }
+    }
+
     revalidatePath('/', 'layout');
     redirect('/dashboard');
   } catch (err) {

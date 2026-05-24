@@ -32,10 +32,17 @@ export async function middleware(request: NextRequest) {
     pathname === '/accept-invite' || pathname.startsWith('/accept-invite');
   const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard');
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
+  const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
+  const isPortalLogin = pathname === '/portal/login';
 
-  // Not authenticated + trying to access /dashboard → redirect to /login
-  if (!isAuthenticated && (isDashboard || isPortalPage)) {
+  if (!isAuthenticated && isDashboard) {
     const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
+    copyCookiesToResponse(response, redirectResponse);
+    return redirectResponse;
+  }
+
+  if (!isAuthenticated && isPortalPage && !isPortalAcceptInvite && !isPortalLogin) {
+    const redirectResponse = NextResponse.redirect(new URL('/portal/login', request.url));
     copyCookiesToResponse(response, redirectResponse);
     return redirectResponse;
   }
@@ -64,17 +71,28 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .maybeSingle<{ role: string | null }>();
 
-      if (profile?.role === 'customer_portal' && !isPortalPage && !isAcceptInvitePage) {
+      const isCustomerPortal = profile?.role === 'customer_portal';
+
+      if (isCustomerPortal && !isPortalPage && !isPortalAcceptInvite) {
+        const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
+        copyCookiesToResponse(response, redirectResponse);
+        return redirectResponse;
+      }
+
+      if (isAuthenticated && isLoginPage) {
+        const destination = isCustomerPortal ? '/portal' : '/dashboard';
+        const redirectResponse = NextResponse.redirect(new URL(destination, request.url));
+        copyCookiesToResponse(response, redirectResponse);
+        return redirectResponse;
+      }
+
+      if (isAuthenticated && isPortalLogin && isCustomerPortal) {
         const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
         copyCookiesToResponse(response, redirectResponse);
         return redirectResponse;
       }
     }
-  }
-
-  // Authenticated + trying to access /login → redirect to /dashboard
-  // (allow /accept-invite so invited workers can set their password)
-  if (isAuthenticated && isLoginPage) {
+  } else if (isAuthenticated && isLoginPage) {
     const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
     copyCookiesToResponse(response, redirectResponse);
     return redirectResponse;
