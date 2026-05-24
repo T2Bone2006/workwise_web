@@ -173,14 +173,9 @@ export async function inviteWorker(formData: FormData) {
 
   const tenantId = userData.tenant_id;
 
-  const inviteRedirectTo =
-    process.env.NODE_ENV === 'development'
-      ? 'http://localhost:3000/accept-invite'
-      : 'https://app.joinworkwise.com/accept-invite';
-
   const { data: inviteData, error: inviteError } =
     await admin.auth.admin.inviteUserByEmail(emailNorm, {
-      redirectTo: inviteRedirectTo,
+      redirectTo: 'https://app.joinworkwise.com/accept-invite',
       data: {
         full_name: parsed.data.full_name,
         primary_tenant_id: tenantId,

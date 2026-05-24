@@ -330,6 +330,7 @@ export async function inviteCustomerToPortal(customerId: string) {
   const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
     email,
     {
+      redirectTo: 'https://app.joinworkwise.com/accept-invite',
       data: {
         role: 'customer_portal',
         customer_id: customerId,
