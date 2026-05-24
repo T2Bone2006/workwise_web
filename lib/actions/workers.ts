@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { workerSchema } from '@/lib/validations/worker';
 import { inviteWorkerPayloadSchema } from '@/lib/validations/worker-invite';
+import { buildWorkerInviteEmail } from '@/lib/emails/worker-invite';
+import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
@@ -173,19 +175,23 @@ export async function inviteWorker(formData: FormData) {
 
   const tenantId = userData.tenant_id;
 
-  const { data: inviteData, error: inviteError } =
-    await admin.auth.admin.inviteUserByEmail(emailNorm, {
-      redirectTo: 'https://app.joinworkwise.com/accept-invite',
+  const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink({
+    type: 'invite',
+    email: emailNorm,
+    options: {
       data: {
         full_name: parsed.data.full_name,
         primary_tenant_id: tenantId,
       },
-    });
+    },
+  });
 
   if (inviteError) {
-    console.error('[inviteWorker] inviteUserByEmail:', inviteError);
+    console.error('[inviteWorker] generateLink:', inviteError);
     return { success: false, error: inviteError.message };
   }
+
+  const newUserId = linkData?.user?.id;
 
   const { data: inserted, error: insertError } = await supabase
     .from('workers')
@@ -210,7 +216,6 @@ export async function inviteWorker(formData: FormData) {
 
   if (insertError || !inserted) {
     console.error('[inviteWorker] insert:', insertError);
-    const newUserId = inviteData.user?.id;
     if (newUserId) {
       const { error: delErr } = await admin.auth.admin.deleteUser(newUserId);
       if (delErr) console.error('[inviteWorker] rollback deleteUser:', delErr);
@@ -219,6 +224,45 @@ export async function inviteWorker(formData: FormData) {
       success: false,
       error: insertError?.message ?? 'Failed to create worker record',
     };
+  }
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { error: inviteTokenError } = await admin.from('worker_invites').insert({
+    token,
+    worker_id: inserted.id,
+    tenant_id: tenantId,
+    email: emailNorm,
+    expires_at: expiresAt,
+  });
+
+  if (inviteTokenError) {
+    console.error('[inviteWorker] worker_invites insert:', inviteTokenError);
+  }
+
+  const { data: tenantData } = await supabase
+    .from('tenants')
+    .select('name')
+    .eq('id', tenantId)
+    .single();
+
+  const inviteUrl = `https://app.joinworkwise.com/accept-invite?token=${token}`;
+  const { subject, html } = buildWorkerInviteEmail({
+    workerName: parsed.data.full_name,
+    inviteUrl,
+    tenantName: tenantData?.name ?? 'WorkWise',
+  });
+
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: emailNorm,
+      subject,
+      html,
+    });
+  } catch (e) {
+    console.error('[inviteWorker] resend:', e);
   }
 
   revalidatePath('/workers');

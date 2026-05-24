@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
 import {
@@ -16,47 +16,79 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
-export default function AcceptInvitePage() {
-  const router = useRouter();
-  const [sessionReady, setSessionReady] = useState(false);
-  const [hasSession, setHasSession] = useState(false);
+const DEFAULT_ERROR_MESSAGE =
+  'Your invite link is invalid or has expired. Please ask your manager for a new invite.';
+
+type PagePhase = 'loading' | 'error' | 'form' | 'success';
+
+function AcceptInviteContent() {
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token');
+
+  const [phase, setPhase] = useState<PagePhase>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const sessionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const supabase = createBrowserClient();
+    if (token) {
+      let cancelled = false;
 
-    function clearSessionTimeout() {
-      if (sessionTimeoutRef.current !== null) {
-        clearTimeout(sessionTimeoutRef.current);
-        sessionTimeoutRef.current = null;
+      async function validateToken() {
+        try {
+          const res = await fetch('/api/invite/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+
+          const data = (await res.json()) as { magicLinkUrl?: string; error?: string };
+
+          if (cancelled) return;
+
+          if (!res.ok) {
+            setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
+            setPhase('error');
+            return;
+          }
+
+          if (!data.magicLinkUrl) {
+            setErrorMessage(DEFAULT_ERROR_MESSAGE);
+            setPhase('error');
+            return;
+          }
+
+          window.location.href = data.magicLinkUrl;
+        } catch {
+          if (!cancelled) {
+            setErrorMessage(DEFAULT_ERROR_MESSAGE);
+            setPhase('error');
+          }
+        }
       }
+
+      void validateToken();
+
+      return () => {
+        cancelled = true;
+      };
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
-        clearSessionTimeout();
-        setHasSession(true);
-        setSessionReady(true);
+    const supabase = createBrowserClient();
+
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setPhase('form');
+      } else {
+        setErrorMessage(null);
+        setPhase('error');
       }
     });
-
-    // Fallback — if no session after 4 seconds, stop loading (hasSession stays false)
-    sessionTimeoutRef.current = setTimeout(() => {
-      sessionTimeoutRef.current = null;
-      setSessionReady(true);
-    }, 4000);
-
-    return () => {
-      subscription.unsubscribe();
-      clearSessionTimeout();
-    };
-  }, []);
+  }, [token]);
 
   function validate(): boolean {
     let valid = true;
@@ -94,9 +126,17 @@ export default function AcceptInvitePage() {
       return;
     }
 
-    router.push('/dashboard');
-    router.refresh();
+    setPhase('success');
   }
+
+  const description =
+    phase === 'success'
+      ? "You're all set! Open the WorkWise app on your phone to sign in."
+      : phase === 'error'
+        ? errorMessage ?? DEFAULT_ERROR_MESSAGE
+        : phase === 'form'
+          ? 'Create a password to finish setting up your account'
+          : 'Setting up your account…';
 
   return (
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
@@ -114,19 +154,15 @@ export default function AcceptInvitePage() {
         <CardTitle className="text-2xl font-semibold tracking-tight">
           Welcome to WorkWise
         </CardTitle>
-        <CardDescription>
-          {sessionReady && !hasSession
-            ? 'Your invite link is invalid or has expired. Please ask your manager for a new invite.'
-            : 'Create a password to finish setting up your account'}
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        {!sessionReady ? (
+        {phase === 'loading' ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
             <p className="text-sm text-muted-foreground">Setting up your account…</p>
           </div>
-        ) : hasSession ? (
+        ) : phase === 'success' ? null : phase === 'form' ? (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -188,5 +224,42 @@ export default function AcceptInvitePage() {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function AcceptInviteLoadingCard() {
+  return (
+    <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
+      <CardHeader className="space-y-1 text-center">
+        <div className="flex justify-center mb-6">
+          <Image
+            src="/workwise_logo.png"
+            alt="WorkWise"
+            width={120}
+            height={120}
+            className="h-auto w-[120px] object-contain"
+            priority
+          />
+        </div>
+        <CardTitle className="text-2xl font-semibold tracking-tight">
+          Welcome to WorkWise
+        </CardTitle>
+        <CardDescription>Setting up your account…</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center justify-center gap-3 py-8">
+          <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
+          <p className="text-sm text-muted-foreground">Setting up your account…</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={<AcceptInviteLoadingCard />}>
+      <AcceptInviteContent />
+    </Suspense>
   );
 }
