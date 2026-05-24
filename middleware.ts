@@ -28,6 +28,8 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');
+  const isAcceptInvitePage =
+    pathname === '/accept-invite' || pathname.startsWith('/accept-invite');
   const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard');
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
 
@@ -62,7 +64,7 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .maybeSingle<{ role: string | null }>();
 
-      if (profile?.role === 'customer_portal' && !isPortalPage) {
+      if (profile?.role === 'customer_portal' && !isPortalPage && !isAcceptInvitePage) {
         const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
         copyCookiesToResponse(response, redirectResponse);
         return redirectResponse;
@@ -71,6 +73,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Authenticated + trying to access /login → redirect to /dashboard
+  // (allow /accept-invite so invited workers can set their password)
   if (isAuthenticated && isLoginPage) {
     const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
     copyCookiesToResponse(response, redirectResponse);
