@@ -83,15 +83,39 @@ function AcceptInviteContent() {
     }
 
     const supabase = createBrowserClient();
+    let resolved = false;
 
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setPhase('form');
-      } else {
-        setErrorMessage(null);
-        setPhase('error');
+    const resolve = (sessionFound: boolean) => {
+      if (!resolved) {
+        resolved = true;
+        if (sessionFound) {
+          setPhase('form');
+        } else {
+          setErrorMessage(null);
+          setPhase('error');
+        }
       }
+    };
+
+    // Check immediately in case session is already in cookies
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) resolve(true);
     });
+
+    // Listen for SIGNED_IN which fires when hash tokens are processed
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (session) resolve(true);
+      }
+    );
+
+    // Fallback after 6 seconds
+    const timeout = setTimeout(() => resolve(false), 6000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, [token]);
 
   function validate(): boolean {
