@@ -29,17 +29,29 @@ export default function AcceptInvitePage() {
 
   useEffect(() => {
     const supabase = createBrowserClient();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'INITIAL_SESSION') {
-        setHasSession(!!session);
+  
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setHasSession(true);
+        setSessionReady(true);
+      } else if (event === 'INITIAL_SESSION' && session) {
+        setHasSession(true);
         setSessionReady(true);
       }
     });
-
-    return () => subscription.unsubscribe();
+  
+    // Fallback — if nothing fires after 4 seconds, show the error
+    const timeout = setTimeout(() => {
+      setSessionReady((prev) => {
+        if (!prev) setHasSession(false);
+        return true;
+      });
+    }, 4000);
+  
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   function validate(): boolean {
