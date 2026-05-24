@@ -48,14 +48,14 @@ import type { ImportSourceRow } from '@/lib/data/import-sources';
 import type { CustomerImportOption } from '@/lib/data/customers';
 
 const SCHEMA_FIELDS = [
-  { key: 'customer_name', label: 'Customer name', required: true },
-  { key: 'address', label: 'Address', required: true },
-  { key: 'postcode', label: 'Postcode', required: true },
-  { key: 'description', label: 'Description', required: false },
-  { key: 'priority', label: 'Priority', required: true },
-  { key: 'reference_number', label: 'Reference number', required: false },
-  { key: 'scheduled_date', label: 'Scheduled date', required: false },
-  { key: 'worker_name', label: 'Worker name', required: false },
+  { key: 'customer_name', label: 'Customer name' },
+  { key: 'address', label: 'Address' },
+  { key: 'postcode', label: 'Postcode' },
+  { key: 'description', label: 'Description' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'reference_number', label: 'Reference number' },
+  { key: 'scheduled_date', label: 'Scheduled date' },
+  { key: 'worker_name', label: 'Worker name' },
 ] as const;
 
 const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'urgent'];
@@ -113,10 +113,6 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
 
   const canGoStep2 = sourceId !== null || sourceName.trim().length > 0;
   const canGoStep3 = csvFile && csvHeaders.length > 0 && csvData.length > 0;
-  const hasRequiredMapping =
-    columnMapping.address &&
-    columnMapping.postcode &&
-    columnMapping.customer_name;
   const priorityMapped = columnMapping.priority ?? 'normal';
 
   const handleFile = useCallback((file: File) => {
@@ -241,8 +237,8 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
   });
 
   const handleImport = async () => {
-    if (!hasRequiredMapping || !csvData.length) {
-      toast.error('Complete column mapping and ensure CSV has data.');
+    if (!csvData.length) {
+      toast.error('Ensure CSV has data.');
       return;
     }
     setIsImporting(true);
@@ -580,11 +576,10 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {SCHEMA_FIELDS.map(({ key, label, required }) => (
+                        {SCHEMA_FIELDS.map(({ key, label }) => (
                           <TableRow key={key} className={cn(key !== 'priority' && 'bg-muted/20')}>
                             <TableCell className="font-medium">
                               {label}
-                              {required && <span className="text-destructive"> *</span>}
                             </TableCell>
                             <TableCell className="text-muted-foreground">←</TableCell>
                             <TableCell>
@@ -662,7 +657,6 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             {(!hasSavedMapping || showRemap) && (
               <Button
                 onClick={() => setStep(4)}
-                disabled={!hasRequiredMapping}
                 className="gap-2"
               >
                 Next <ArrowRight className="size-4" />
