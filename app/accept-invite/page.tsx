@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -26,31 +26,35 @@ export default function AcceptInvitePage() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const sessionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
-  
+
+    function clearSessionTimeout() {
+      if (sessionTimeoutRef.current !== null) {
+        clearTimeout(sessionTimeoutRef.current);
+        sessionTimeoutRef.current = null;
+      }
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        setHasSession(true);
-        setSessionReady(true);
-      } else if (event === 'INITIAL_SESSION' && session) {
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+        clearSessionTimeout();
         setHasSession(true);
         setSessionReady(true);
       }
     });
-  
-    // Fallback — if nothing fires after 4 seconds, show the error
-    const timeout = setTimeout(() => {
-      setSessionReady((prev) => {
-        if (!prev) setHasSession(false);
-        return true;
-      });
+
+    // Fallback — if no session after 4 seconds, stop loading (hasSession stays false)
+    sessionTimeoutRef.current = setTimeout(() => {
+      sessionTimeoutRef.current = null;
+      setSessionReady(true);
     }, 4000);
-  
+
     return () => {
       subscription.unsubscribe();
-      clearTimeout(timeout);
+      clearSessionTimeout();
     };
   }, []);
 
