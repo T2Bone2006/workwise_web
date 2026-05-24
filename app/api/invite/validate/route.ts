@@ -52,6 +52,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to generate sign in link' }, { status: 500 });
   }
 
+  console.log('[validate] magicLinkUrl:', data.properties.action_link);
+
+  const magicLinkUrl = data.properties?.action_link;
+  if (!magicLinkUrl) {
+    return NextResponse.json(
+      { error: 'No action link returned from Supabase' },
+      { status: 500 }
+    );
+  }
+
   const { error: markUsedError } = await admin
     .from('worker_invites')
     .update({ used_at: new Date().toISOString() })
@@ -59,11 +69,6 @@ export async function POST(req: Request) {
 
   if (markUsedError) {
     console.error('[invite/validate] mark used:', markUsedError);
-  }
-
-  const magicLinkUrl = data.properties?.action_link;
-  if (!magicLinkUrl) {
-    return NextResponse.json({ error: 'Failed to generate sign in link' }, { status: 500 });
   }
 
   return NextResponse.json({ magicLinkUrl });

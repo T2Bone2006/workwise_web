@@ -56,13 +56,17 @@ function AcceptInviteContent() {
             return;
           }
 
-          if (!data.magicLinkUrl) {
-            setErrorMessage(DEFAULT_ERROR_MESSAGE);
+          const magicLinkUrl =
+            typeof data.magicLinkUrl === 'string' ? data.magicLinkUrl.trim() : '';
+
+          if (!magicLinkUrl) {
+            setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
             setPhase('error');
             return;
           }
 
-          window.location.href = data.magicLinkUrl;
+          console.log('[accept-invite] redirecting to:', magicLinkUrl);
+          window.location.href = magicLinkUrl;
         } catch {
           if (!cancelled) {
             setErrorMessage(DEFAULT_ERROR_MESSAGE);
