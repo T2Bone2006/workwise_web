@@ -35,86 +35,61 @@ function AcceptInviteContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (token) {
-      let cancelled = false;
-
-      async function validateToken() {
-        try {
-          const res = await fetch('/api/invite/validate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token }),
-          });
-
-          const data = (await res.json()) as { magicLinkUrl?: string; error?: string };
-
-          if (cancelled) return;
-
-          if (!res.ok) {
-            setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
-            setPhase('error');
-            return;
-          }
-
-          const magicLinkUrl =
-            typeof data.magicLinkUrl === 'string' ? data.magicLinkUrl.trim() : '';
-
-          if (!magicLinkUrl) {
-            setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
-            setPhase('error');
-            return;
-          }
-
-          console.log('[accept-invite] redirecting to:', magicLinkUrl);
-          window.location.href = magicLinkUrl;
-        } catch {
-          if (!cancelled) {
-            setErrorMessage(DEFAULT_ERROR_MESSAGE);
-            setPhase('error');
-          }
-        }
-      }
-
-      void validateToken();
-
-      return () => {
-        cancelled = true;
-      };
+    if (!token) {
+      setErrorMessage(null);
+      setPhase('error');
+      return;
     }
 
-    const supabase = createBrowserClient();
-    let resolved = false;
+    let cancelled = false;
 
-    const resolve = (sessionFound: boolean) => {
-      if (!resolved) {
-        resolved = true;
-        if (sessionFound) {
-          setPhase('form');
-        } else {
-          setErrorMessage(null);
+    async function validateToken() {
+      try {
+        const res = await fetch('/api/invite/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+
+        const data = (await res.json()) as {
+          email?: string;
+          tempPassword?: string;
+          error?: string;
+        };
+
+        if (cancelled) return;
+
+        if (!res.ok) {
+          setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
+          setPhase('error');
+          return;
+        }
+
+        const supabase = createBrowserClient();
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: data.email!,
+          password: data.tempPassword!,
+        });
+
+        if (signInError) {
+          setErrorMessage(DEFAULT_ERROR_MESSAGE);
+          setPhase('error');
+          return;
+        }
+
+        setPhase('form');
+      } catch {
+        if (!cancelled) {
+          setErrorMessage(DEFAULT_ERROR_MESSAGE);
           setPhase('error');
         }
       }
-    };
+    }
 
-    // Check immediately in case session is already in cookies
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) resolve(true);
-    });
-
-    // Listen for SIGNED_IN which fires when hash tokens are processed
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (session) resolve(true);
-      }
-    );
-
-    // Fallback after 6 seconds
-    const timeout = setTimeout(() => resolve(false), 6000);
+    void validateToken();
 
     return () => {
-      subscription.unsubscribe();
-      clearTimeout(timeout);
+      cancelled = true;
     };
   }, [token]);
 

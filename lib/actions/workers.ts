@@ -175,7 +175,7 @@ export async function inviteWorker(formData: FormData) {
 
   const tenantId = userData.tenant_id;
 
-  const { data: linkData, error: inviteError } = await admin.auth.admin.generateLink({
+  const { data: inviteData, error: inviteError } = await admin.auth.admin.generateLink({
     type: 'invite',
     email: emailNorm,
     options: {
@@ -191,7 +191,7 @@ export async function inviteWorker(formData: FormData) {
     return { success: false, error: inviteError.message };
   }
 
-  const newUserId = linkData?.user?.id;
+  const newUserId = inviteData?.user?.id;
 
   const { data: inserted, error: insertError } = await supabase
     .from('workers')
@@ -207,7 +207,7 @@ export async function inviteWorker(formData: FormData) {
       status: parsed.data.status,
       skills: parsed.data.skills,
       invite_status: 'pending',
-      user_id: null,
+      user_id: inviteData.user?.id ?? null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

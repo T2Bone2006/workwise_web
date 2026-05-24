@@ -14,15 +14,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid or expired invite link' }, { status: 400 });
   }
 
-  let admin;
+  let adminClient;
   try {
-    admin = createAdminClient();
+    adminClient = createAdminClient();
   } catch (e) {
     console.error('[invite/validate] admin client:', e);
     return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   }
 
-  const { data: record, error: lookupError } = await admin
+  const { data: record, error: lookupError } = await adminClient
     .from('worker_invites')
     .select('*')
     .eq('token', token)
@@ -39,37 +39,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid or expired invite link' }, { status: 400 });
   }
 
-  const { data, error } = await admin.auth.admin.generateLink({
-    type: 'magiclink',
-    email: record.email,
-    options: {
-      redirectTo: 'https://app.joinworkwise.com/accept-invite',
-    },
-  });
+  const { data: workerData } = await adminClient
+    .from('workers')
+    .select('user_id')
+    .eq('email', record.email)
+    .maybeSingle();
 
-  if (error) {
-    console.error('[invite/validate] generateLink:', error);
-    return NextResponse.json({ error: 'Failed to generate sign in link' }, { status: 500 });
+  if (!workerData?.user_id) {
+    return Response.json({ error: 'Worker account not found' }, { status: 500 });
   }
 
-  console.log('[validate] magicLinkUrl:', data.properties.action_link);
+  const tempPassword = crypto.randomUUID();
 
-  const magicLinkUrl = data.properties?.action_link;
-  if (!magicLinkUrl) {
-    return NextResponse.json(
-      { error: 'No action link returned from Supabase' },
-      { status: 500 }
-    );
+  const { error: updateError } = await adminClient.auth.admin.updateUserById(
+    workerData.user_id,
+    { password: tempPassword }
+  );
+
+  if (updateError) {
+    return Response.json({ error: 'Failed to prepare account' }, { status: 500 });
   }
 
-  const { error: markUsedError } = await admin
+  await adminClient
     .from('worker_invites')
     .update({ used_at: new Date().toISOString() })
     .eq('token', token);
 
-  if (markUsedError) {
-    console.error('[invite/validate] mark used:', markUsedError);
-  }
-
-  return NextResponse.json({ magicLinkUrl });
+  return Response.json({
+    email: record.email,
+    tempPassword,
+  });
 }
