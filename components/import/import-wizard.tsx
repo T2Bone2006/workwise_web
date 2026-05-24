@@ -41,9 +41,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { importJobs } from '@/lib/actions/import';
 import type { ImportSourceRow } from '@/lib/data/import-sources';
+import type { CustomerImportOption } from '@/lib/data/customers';
 
 const SCHEMA_FIELDS = [
   { key: 'customer_name', label: 'Customer name', required: true },
@@ -86,13 +88,15 @@ function xlsxWorkbookToRowRecords(wb: XLSX.WorkBook): Record<string, string>[] {
 interface ImportWizardProps {
   tenantId: string;
   initialSources: ImportSourceRow[];
+  customers: CustomerImportOption[];
 }
 
-export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
+export function ImportWizard({ tenantId, initialSources, customers }: ImportWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState('');
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<Record<string, string>[]>([]);
@@ -253,6 +257,7 @@ export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
       const result = await importJobs({
         sourceId,
         sourceName: sourceId ? sources.find((s) => s.id === sourceId)?.source_name ?? sourceName : sourceName,
+        customerId: customerId ?? undefined,
         columnMapping: mapping,
         valueTransforms,
         csvData,
@@ -347,9 +352,13 @@ export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
                   setSourceId(v === 'new' ? null : v);
                   if (v !== 'new') {
                     const s = sources.find((x) => x.id === v);
-                    if (s) setSourceName(s.source_name);
+                    if (s) {
+                      setSourceName(s.source_name);
+                      setCustomerId(s.customer_id ?? null);
+                    }
                   } else {
                     setSourceName('');
+                    setCustomerId(null);
                   }
                 }}
               >
@@ -377,6 +386,24 @@ export function ImportWizard({ tenantId, initialSources }: ImportWizardProps) {
                 />
               </div>
             )}
+            <div className="space-y-2">
+              <Label>Link to customer (optional)</Label>
+              <SearchableSelect
+                value={customerId ?? '__NONE__'}
+                onValueChange={(v) => setCustomerId(v === '__NONE__' ? null : v)}
+                placeholder="No customer"
+                searchPlaceholder="Search customer..."
+                className="max-w-md"
+                options={[
+                  { value: '__NONE__', label: 'No customer' },
+                  ...customers.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
+              <p className="text-sm text-muted-foreground">
+                All jobs from this import will be linked to the selected customer and will appear
+                in their portal.
+              </p>
+            </div>
           </CardContent>
           <CardFooter>
             <Button onClick={() => setStep(2)} disabled={!canGoStep2} className="gap-2">

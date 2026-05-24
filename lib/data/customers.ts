@@ -35,6 +35,47 @@ export interface CustomerJobStats {
   cancelled: number;
 }
 
+export interface CustomerImportOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Active customers for the import wizard dropdown (id + name, ordered by name).
+ */
+export async function getCustomersForImport(
+  tenantId: string
+): Promise<{ customers: CustomerImportOption[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) {
+      console.error('[getCustomersForImport]', error);
+      return { customers: [], error: new Error(error.message ?? 'Failed to load customers') };
+    }
+
+    const customers: CustomerImportOption[] = (Array.isArray(data) ? data : []).map(
+      (row: { id: string; name: string }) => ({
+        id: row.id,
+        name: row.name ?? '',
+      })
+    );
+    return { customers, error: null };
+  } catch (err) {
+    console.error('[getCustomersForImport]', err);
+    return {
+      customers: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
 /**
  * Fetches customers for the given tenant (for dropdowns, etc.).
  * Returns id, name, type. Never throws - returns empty array on error.

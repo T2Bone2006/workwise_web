@@ -60,24 +60,42 @@ export async function createWorker(formData: FormData) {
     };
   }
 
-  const { error } = await supabase.from('workers').insert({
-    primary_tenant_id: userData.tenant_id,
-    full_name: validated.full_name,
-    phone: validated.phone,
-    email: validated.email || null,
-    home_postcode: validated.home_postcode,
-    home_lat: coords.lat,
-    home_lng: coords.lng,
-    worker_type: validated.worker_type,
-    status: validated.status,
-    skills: validated.skills,
-    created_at: new Date().toISOString(),
+  const { data: inserted, error } = await supabase
+    .from('workers')
+    .insert({
+      primary_tenant_id: userData.tenant_id,
+      full_name: validated.full_name,
+      phone: validated.phone,
+      email: validated.email || null,
+      home_postcode: validated.home_postcode,
+      home_lat: coords.lat,
+      home_lng: coords.lng,
+      worker_type: validated.worker_type,
+      status: validated.status,
+      skills: validated.skills,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+
+  if (error || !inserted) {
+    console.error('Create worker error:', error);
+    return { success: false, error: error?.message ?? 'Failed to create worker record' };
+  }
+
+  const tenantId = userData.tenant_id;
+  const { error: junctionError } = await supabase.from('worker_tenants').insert({
+    worker_id: inserted.id,
+    tenant_id: tenantId,
+    status: 'active',
+    is_primary: true,
+    added_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
 
-  if (error) {
-    console.error('Create worker error:', error);
-    return { success: false, error: error.message };
+  if (junctionError) {
+    console.error('[createWorker] worker_tenants insert:', junctionError);
   }
 
   revalidatePath('/workers');
@@ -224,6 +242,19 @@ export async function inviteWorker(formData: FormData) {
       success: false,
       error: insertError?.message ?? 'Failed to create worker record',
     };
+  }
+
+  const { error: junctionError } = await supabase.from('worker_tenants').insert({
+    worker_id: inserted.id,
+    tenant_id: tenantId,
+    status: 'active',
+    is_primary: true,
+    added_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (junctionError) {
+    console.error('[inviteWorker] worker_tenants insert:', junctionError);
   }
 
   const token = crypto.randomUUID();

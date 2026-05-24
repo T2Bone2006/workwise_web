@@ -1,11 +1,15 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getImportSourcesForTenant } from '@/lib/data/import-sources';
+import { getCustomersForImport } from '@/lib/data/customers';
 import { ImportWizard } from '@/components/import/import-wizard';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 export default async function ImportPage() {
   const tenantId = await getTenantIdForCurrentUser();
-  const { sources } = await getImportSourcesForTenant(tenantId ?? '');
+  const [{ sources }, { customers }] = await Promise.all([
+    getImportSourcesForTenant(tenantId ?? ''),
+    getCustomersForImport(tenantId ?? ''),
+  ]);
 
   if (!tenantId) {
     return (
@@ -24,7 +28,7 @@ export default async function ImportPage() {
         title="Import Jobs"
         subtitle="Upload CSV and map columns with AI or manually. Save mappings to reuse."
       />
-      <ImportWizard tenantId={tenantId} initialSources={sources} />
+      <ImportWizard tenantId={tenantId} initialSources={sources} customers={customers} />
     </div>
   );
 }

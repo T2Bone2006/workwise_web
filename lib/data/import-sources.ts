@@ -7,6 +7,7 @@ export interface ImportSourceRow {
   mapped_by: string;
   last_used_at: string | null;
   times_used: number;
+  customer_id: string | null;
 }
 
 /**
@@ -19,7 +20,7 @@ export async function getImportSourcesForTenant(
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('import_sources')
-      .select('id, source_name, column_mapping, mapped_by, last_used_at, times_used')
+      .select('id, source_name, column_mapping, mapped_by, last_used_at, times_used, customer_id')
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .order('last_used_at', { ascending: false });
@@ -37,6 +38,7 @@ export async function getImportSourcesForTenant(
         mapped_by: string;
         last_used_at: string | null;
         times_used: number;
+        customer_id: string | null;
       }) => ({
         id: row.id,
         source_name: row.source_name ?? '',
@@ -44,6 +46,7 @@ export async function getImportSourcesForTenant(
         mapped_by: row.mapped_by ?? 'manual',
         last_used_at: row.last_used_at ?? null,
         times_used: row.times_used ?? 0,
+        customer_id: row.customer_id ?? null,
       })
     );
     return { sources, error: null };

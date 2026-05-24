@@ -62,6 +62,7 @@ function formatUnmappedCsvColumns(
 export async function importJobs(params: {
   sourceId: string | null;
   sourceName: string;
+  customerId?: string;
   columnMapping: Record<string, string>;
   valueTransforms?: Record<string, Record<string, string>>;
   csvData: Record<string, string>[];
@@ -105,6 +106,7 @@ export async function importJobs(params: {
         .from('import_sources')
         .update({
           column_mapping: params.columnMapping,
+          customer_id: params.customerId ?? null,
           last_used_at: new Date().toISOString(),
           times_used: nextTimesUsed,
         })
@@ -116,6 +118,7 @@ export async function importJobs(params: {
           tenant_id: tenantId,
           source_name: params.sourceName.trim() || 'Unnamed source',
           column_mapping: params.columnMapping,
+          customer_id: params.customerId ?? null,
           mapped_by: 'manual',
           times_used: 1,
           last_used_at: new Date().toISOString(),
@@ -189,9 +192,11 @@ export async function importJobs(params: {
         continue;
       }
 
-      const customerId = customerName
-        ? customerByName.get(customerName.toLowerCase()) ?? null
-        : null;
+      const customerId = params.customerId
+        ? params.customerId
+        : customerName
+          ? customerByName.get(customerName.toLowerCase()) ?? null
+          : null;
       const assignedWorkerId = workerName
         ? workerByName.get(workerName.toLowerCase()) ?? null
         : null;
