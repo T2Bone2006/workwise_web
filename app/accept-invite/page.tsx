@@ -52,8 +52,8 @@ function AcceptInviteContent() {
         });
 
         const data = (await res.json()) as {
-          email?: string;
-          tempPassword?: string;
+          access_token?: string;
+          refresh_token?: string;
           error?: string;
         };
 
@@ -66,12 +66,12 @@ function AcceptInviteContent() {
         }
 
         const supabase = createBrowserClient();
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: data.email!,
-          password: data.tempPassword!,
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.access_token!,
+          refresh_token: data.refresh_token!,
         });
 
-        if (signInError) {
+        if (sessionError) {
           setErrorMessage(DEFAULT_ERROR_MESSAGE);
           setPhase('error');
           return;

@@ -49,15 +49,14 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Worker account not found' }, { status: 500 });
   }
 
-  const tempPassword = crypto.randomUUID();
+  const { data: sessionData, error: sessionError } = await (
+    adminClient.auth.admin as any
+  ).createSession({
+    user_id: workerData.user_id,
+  });
 
-  const { error: updateError } = await adminClient.auth.admin.updateUserById(
-    workerData.user_id,
-    { password: tempPassword }
-  );
-
-  if (updateError) {
-    return Response.json({ error: 'Failed to prepare account' }, { status: 500 });
+  if (sessionError || !sessionData?.session) {
+    return Response.json({ error: 'Failed to create session' }, { status: 500 });
   }
 
   await adminClient
@@ -66,7 +65,7 @@ export async function POST(req: Request) {
     .eq('token', token);
 
   return Response.json({
-    email: record.email,
-    tempPassword,
+    access_token: sessionData.session.access_token,
+    refresh_token: sessionData.session.refresh_token,
   });
 }
