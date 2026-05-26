@@ -1,3 +1,18 @@
+/** Valid UK postcode without spaces (M3, BL3, WN1, SW1A, etc.). */
+const UK_POSTCODE_REGEX = /^[A-Z]{1,2}\d{1,2}[A-Z]?\d[A-Z]{2}$/;
+
+/**
+ * Normalise a UK postcode to standard format (e.g. M3 2ER). Returns null if invalid.
+ */
+export function normalizeUkPostcode(raw: string): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const clean = trimmed.replace(/\s+/g, '').toUpperCase();
+  if (!UK_POSTCODE_REGEX.test(clean)) return null;
+  const match = clean.match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)(\d[A-Z]{2})$/);
+  return match ? `${match[1]} ${match[2]}` : null;
+}
+
 // Convert UK postcode to lat/lng using free postcodes.io API
 async function lookup(postcode: string): Promise<{ lat: number; lng: number } | null> {
   const response = await fetch(`https://api.postcodes.io/postcodes/${postcode}`);
@@ -11,16 +26,12 @@ async function lookup(postcode: string): Promise<{ lat: number; lng: number } | 
 
 export async function postcodeToLatLng(postcode: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const clean = postcode.replace(/\s/g, '').toUpperCase();
-    if (!clean.length) return null;
-    let result = await lookup(clean);
+    const normalized = normalizeUkPostcode(postcode);
+    if (!normalized) return null;
+    const compact = normalized.replace(/\s/g, '');
+    let result = await lookup(compact);
     if (result) return result;
-    // UK format: outcode + space + incode (e.g. SW1A 1AA). Try inserting space before last 3 chars.
-    if (clean.length > 3) {
-      const withSpace = `${clean.slice(0, -3)} ${clean.slice(-3)}`;
-      result = await lookup(withSpace);
-    }
-    return result;
+    return await lookup(normalized);
   } catch (error) {
     console.error('Postcode lookup failed:', error);
     return null;
@@ -40,9 +51,8 @@ export async function validatePostcode(
   postcode: string
 ): Promise<PostcodeValidationResult> {
   try {
-    const clean = postcode.replace(/\s/g, '').toUpperCase();
-    if (!clean.length) return { valid: false };
-    const normalized = clean.length > 3 ? `${clean.slice(0, -3)} ${clean.slice(-3)}` : clean;
+    const normalized = normalizeUkPostcode(postcode);
+    if (!normalized) return { valid: false };
     const response = await fetch(
       `https://api.postcodes.io/postcodes/${encodeURIComponent(normalized)}`
     );

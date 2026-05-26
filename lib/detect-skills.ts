@@ -96,8 +96,18 @@ export async function detectSkills(
         jobId,
       },
       (response) => {
-        const cleaned = response.replace(/```json|```/g, '').trim();
-        const parsed = JSON.parse(cleaned) as unknown;
+        const cleaned = response
+          .replace(/^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g, '')
+          .replace(/```json\s*/gi, '')
+          .replace(/```\s*/g, '')
+          .trim();
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch {
+          return [];
+        }
         if (!Array.isArray(parsed)) return [];
         const skills = parsed
           .filter((s): s is string => typeof s === 'string')

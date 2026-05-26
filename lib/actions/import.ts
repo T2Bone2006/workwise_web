@@ -6,6 +6,7 @@ import { autoAllocateJob } from '@/lib/actions/jobs';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
+import { normalizeUkPostcode } from '@/lib/utils/postcode';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
@@ -38,6 +39,31 @@ function toPriority(val: unknown): (typeof VALID_PRIORITIES)[number] {
 function toDbPriority(priority: (typeof VALID_PRIORITIES)[number]): DbPriority {
   if (priority === 'urgent') return 'high';
   return priority as DbPriority;
+}
+
+/** YYYY-MM-DD unchanged; DD/MM/YYYY or DD-MM-YYYY → ISO date; unparseable → null. */
+function parseImportScheduledDate(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (
+    Number.isNaN(d.getTime()) ||
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() + 1 !== month ||
+    d.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return iso;
 }
 
 /** CSV columns not assigned to any schema field, formatted for appending to job_description. */
@@ -174,7 +200,7 @@ export async function importJobs(params: {
     for (let i = 0; i < params.csvData.length; i++) {
       const row = params.csvData[i]!;
       const address = get(row, 'address');
-      const postcode = get(row, 'postcode').replace(/\s/g, '').toUpperCase();
+      const postcode = normalizeUkPostcode(get(row, 'postcode')) ?? '';
       const description = get(row, 'description');
       const customerName = get(row, 'customer_name');
       const workerName = get(row, 'worker_name');
@@ -210,7 +236,8 @@ export async function importJobs(params: {
       }
 
       const priority = toPriority(get(row, 'priority') || 'normal');
-      const scheduledDate = get(row, 'scheduled_date') || null;
+      let scheduledDate = get(row, 'scheduled_date') || null;
+      scheduledDate = parseImportScheduledDate(scheduledDate);
       const fullAddress = buildFullAddressString([address, postcode]);
 
       jobs.push({
@@ -220,7 +247,7 @@ export async function importJobs(params: {
         customer_id: customerId,
         assigned_worker_id: assignedWorkerId,
         address,
-        postcode: postcode.length >= 5 ? postcode : postcode.padEnd(5, ' '),
+        postcode,
         job_description: jobDescription,
         status: 'pending',
         priority: toDbPriority(priority),
@@ -237,41 +264,51 @@ export async function importJobs(params: {
       });
     }
 
-    for (let i = 0; i < jobs.length; i += GEOCODE_BATCH_SIZE) {
-      const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);
-      await Promise.all(
-        batch.map(async (job) => {
-          const fullAddress = (job as Record<string, unknown>)._fullAddress as string;
-          const geocoded = await geocodeAddress(fullAddress);
-          (job as Record<string, unknown>).lat = geocoded?.lat ?? null;
-          (job as Record<string, unknown>).lng = geocoded?.lng ?? null;
-        })
-      );
-      if (i + GEOCODE_BATCH_SIZE < jobs.length) {
-        await new Promise((r) => setTimeout(r, GEOCODE_DELAY_MS));
+    console.log('[importJobs] valid jobs ready to insert:', jobs.length);
+
+    try {
+      for (let i = 0; i < jobs.length; i += GEOCODE_BATCH_SIZE) {
+        const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (job) => {
+            const fullAddress = (job as Record<string, unknown>)._fullAddress as string;
+            const geocoded = await geocodeAddress(fullAddress);
+            (job as Record<string, unknown>).lat = geocoded?.lat ?? null;
+            (job as Record<string, unknown>).lng = geocoded?.lng ?? null;
+          })
+        );
+        if (i + GEOCODE_BATCH_SIZE < jobs.length) {
+          await new Promise((r) => setTimeout(r, GEOCODE_DELAY_MS));
+        }
       }
+    } catch (e) {
+      console.error('[importJobs] geocoding failed', e);
     }
 
-    for (let i = 0; i < jobs.length; i += SKILL_DETECT_BATCH_SIZE) {
-      const batch = jobs.slice(i, i + SKILL_DETECT_BATCH_SIZE);
-      await Promise.all(
-        batch.map(async (job) => {
-          const { data: skills } = await detectSkills({
-            description: (job as Record<string, unknown>)._description as string,
-            address: (job as Record<string, unknown>)._address as string,
-            priority: (job as Record<string, unknown>)._priority as string,
-            tenantSkills: tenantSkillsForDetect,
-          });
-          (job as Record<string, unknown>).required_skills = skills;
-          delete (job as Record<string, unknown>)._description;
-          delete (job as Record<string, unknown>)._address;
-          delete (job as Record<string, unknown>)._priority;
-          delete (job as Record<string, unknown>)._fullAddress;
-        })
-      );
-      if (i + SKILL_DETECT_BATCH_SIZE < jobs.length) {
-        await new Promise((r) => setTimeout(r, SKILL_DETECT_DELAY_MS));
+    try {
+      for (let i = 0; i < jobs.length; i += SKILL_DETECT_BATCH_SIZE) {
+        const batch = jobs.slice(i, i + SKILL_DETECT_BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (job) => {
+            const { data: skills } = await detectSkills({
+              description: (job as Record<string, unknown>)._description as string,
+              address: (job as Record<string, unknown>)._address as string,
+              priority: (job as Record<string, unknown>)._priority as string,
+              tenantSkills: tenantSkillsForDetect,
+            });
+            (job as Record<string, unknown>).required_skills = skills;
+            delete (job as Record<string, unknown>)._description;
+            delete (job as Record<string, unknown>)._address;
+            delete (job as Record<string, unknown>)._priority;
+            delete (job as Record<string, unknown>)._fullAddress;
+          })
+        );
+        if (i + SKILL_DETECT_BATCH_SIZE < jobs.length) {
+          await new Promise((r) => setTimeout(r, SKILL_DETECT_DELAY_MS));
+        }
       }
+    } catch (e) {
+      console.error('[importJobs] skill detection failed', e);
     }
 
     let imported = 0;
