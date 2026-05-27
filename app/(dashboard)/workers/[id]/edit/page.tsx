@@ -87,7 +87,11 @@ export default async function WorkerEditPage({ params }: WorkerEditPageProps) {
       <div className="max-w-xl space-y-6">
         <WorkerForm mode="edit" tenantId={tenantId} tenantSkills={tenantSkills} worker={worker} />
         <div className="pt-4 border-t border-border/80">
-          <WorkerDeleteButton workerId={worker.id} workerName={worker.full_name} />
+          <WorkerDeleteButton
+            workerId={worker.id}
+            workerName={worker.full_name}
+            user_id={worker.user_id}
+          />
         </div>
       </div>
     </div>
