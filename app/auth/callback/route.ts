@@ -29,6 +29,10 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(new URL(next, origin));
     }
+    console.error(
+      '[auth/callback] exchangeCodeForSession error:',
+      JSON.stringify(error)
+    );
   }
 
   return NextResponse.redirect(
