@@ -983,13 +983,3 @@ export async function bulkUpdateWorkerStatus(
   revalidatePath('/workers');
   return { success: true };
 }
-
-export async function resetWorkerPassword(email: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo:
-      'https://app.joinworkwise.com/auth/callback?next=/reset-password',
-  });
-  if (error) return { success: false, error: error.message };
-  return { success: true };
-}
