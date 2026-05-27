@@ -461,6 +461,11 @@ async function hardDeleteWorkerRecords(
     return { success: false as const, error: error.message };
   }
 
+  // Delete public.users row before auth user deletion
+  if (worker.user_id) {
+    await admin.from('users').delete().eq('id', worker.user_id);
+  }
+
   await deleteAuthUserForWorker(admin, {
     userId: worker.user_id,
     email: worker.email,
