@@ -1,9 +1,16 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { getWorkersListForTenant, getWorkerSkillsInUseForTenant } from '@/lib/data/workers';
+import {
+  getWorkerInvitesForTenant,
+  getDeactivatedWorkersForTenant,
+} from '@/lib/data/worker-invites';
 import { WorkersTable } from '@/components/workers/workers-table';
+import { InvitedWorkersTable } from '@/components/workers/invited-workers-table';
+import { InactiveWorkersTable } from '@/components/workers/inactive-workers-table';
 import { WorkersPageErrorToast } from '@/components/workers/workers-page-error-toast';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkerStatus, WorkerType, WorkersFilters } from '@/lib/types/worker';
 
 const VALID_STATUSES: WorkerStatus[] = ['available', 'busy', 'unavailable', 'off_duty'];
@@ -19,6 +26,7 @@ interface WorkersPageProps {
     sort_dir?: string;
     page?: string;
     error?: string;
+    tab?: string;
   }>;
 }
 
@@ -67,17 +75,24 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
 
   const rawParams = await searchParams;
   const filters = parseSearchParams(rawParams);
+  const defaultTab =
+    rawParams.tab === 'invited' || rawParams.tab === 'inactive' ? rawParams.tab : 'workers';
+
   const [
     { workers, totalCount, error },
     { skills: allSkillsInUse, error: skillsError },
     tenantSkills,
+    { invites, error: invitesError },
+    { workers: inactiveWorkers, error: inactiveError },
   ] = await Promise.all([
     getWorkersListForTenant(tenantId, filters),
     getWorkerSkillsInUseForTenant(tenantId),
     getTenantSkills(tenantId),
+    getWorkerInvitesForTenant(tenantId),
+    getDeactivatedWorkersForTenant(tenantId),
   ]);
 
-  const fetchError = error ?? skillsError;
+  const workersFetchError = error ?? skillsError;
 
   return (
     <div className="space-y-6">
@@ -87,14 +102,32 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
         subtitle="Manage workers and assign jobs"
       />
 
-      <WorkersTable
-        workers={workers}
-        totalCount={totalCount}
-        initialFilters={filters}
-        allSkillsInUse={allSkillsInUse}
-        tenantSkills={tenantSkills}
-        fetchError={fetchError}
-      />
+      <Tabs defaultValue={defaultTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="workers">Workers</TabsTrigger>
+          <TabsTrigger value="invited">Invited ({invites.length})</TabsTrigger>
+          <TabsTrigger value="inactive">Inactive ({inactiveWorkers.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="workers" className="mt-0">
+          <WorkersTable
+            workers={workers}
+            totalCount={totalCount}
+            initialFilters={filters}
+            allSkillsInUse={allSkillsInUse}
+            tenantSkills={tenantSkills}
+            fetchError={workersFetchError}
+          />
+        </TabsContent>
+
+        <TabsContent value="invited" className="mt-0">
+          <InvitedWorkersTable invites={invites} />
+        </TabsContent>
+
+        <TabsContent value="inactive" className="mt-0">
+          <InactiveWorkersTable workers={inactiveWorkers} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

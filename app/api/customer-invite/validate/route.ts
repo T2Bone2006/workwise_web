@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
   const { data: record, error: lookupError } = await adminClient
     .from('customer_invites')
-    .select('*')
+    .select('email, customer_id')
     .eq('token', token)
     .is('used_at', null)
     .gt('expires_at', new Date().toISOString())
@@ -39,37 +39,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid or expired invite link' }, { status: 400 });
   }
 
-  const { data: portalUser } = await adminClient
-    .from('customer_portal_users')
-    .select('user_id')
-    .eq('customer_id', record.customer_id)
-    .maybeSingle();
-
-  if (!portalUser?.user_id) {
-    return Response.json({ error: 'Customer portal account not found' }, { status: 500 });
-  }
-
-  const tempPassword = crypto.randomUUID();
-
-  const { error: updateError } = await adminClient.auth.admin.updateUserById(
-    portalUser.user_id,
-    {
-      password: tempPassword,
-      email_confirm: true,
-    }
-  );
-
-  if (updateError) {
-    return Response.json({ error: 'Failed to prepare account' }, { status: 500 });
-  }
-
-  await adminClient
-    .from('customer_invites')
-    .update({ used_at: new Date().toISOString() })
-    .eq('token', token);
-
-  return Response.json({
+  return NextResponse.json({
     email: record.email,
-    tempPassword,
+    customerId: record.customer_id,
   });
 }

@@ -16,6 +16,19 @@ function copyCookiesToResponse(
   });
 }
 
+const UNPROTECTED_PATHS = [
+  '/auth/callback',
+  '/forgot-password',
+  '/admin-reset-password',
+  '/reset-password',
+] as const;
+
+function isUnprotectedPath(pathname: string): boolean {
+  return UNPROTECTED_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`)
+  );
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -24,7 +37,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname === '/auth/callback' || pathname.startsWith('/auth/callback/')) {
+    return NextResponse.next();
+  }
+
+  const isPasswordResetPage = isUnprotectedPath(pathname);
+
   const { response, user } = await updateSession(request);
+
+  if (isPasswordResetPage) {
+    return response;
+  }
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');

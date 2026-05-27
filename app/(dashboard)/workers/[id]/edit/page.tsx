@@ -29,8 +29,15 @@ async function getWorkerById(
     full_name: String(row.full_name ?? ''),
     phone: row.phone != null ? String(row.phone) : null,
     email: row.email != null ? String(row.email) : null,
+    user_id: row.user_id != null ? String(row.user_id) : null,
     invite_status:
-      row.invite_status === 'pending' ? 'pending' : ('active' as WorkerInviteStatus),
+      row.invite_status === 'pending'
+        ? 'pending'
+        : row.invite_status === 'deactivated'
+          ? 'deactivated'
+          : row.invite_status === 'accepted'
+            ? 'accepted'
+            : ('active' as WorkerInviteStatus),
     home_postcode: row.home_postcode != null ? String(row.home_postcode) : null,
     home_lat: typeof row.home_lat === 'number' ? row.home_lat : null,
     home_lng: typeof row.home_lng === 'number' ? row.home_lng : null,

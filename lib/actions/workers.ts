@@ -9,6 +9,9 @@ import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+const ACTIVE_JOB_STATUSES = ['pending', 'pending_send', 'assigned', 'in_progress'] as const;
 
 function getRawFormData(formData: FormData) {
   return {
@@ -405,6 +408,364 @@ export async function updateWorkerAutoAssign(workerId: string, exclude: boolean)
   return { success: true, error: null };
 }
 
+async function findAuthUserIdByEmail(
+  admin: SupabaseClient,
+  email: string
+): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  let page = 1;
+  const perPage = 200;
+  while (page <= 10) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      console.error('[findAuthUserIdByEmail] listUsers:', error);
+      return null;
+    }
+    const match = data.users.find((u) => u.email?.toLowerCase() === normalized);
+    if (match) return match.id;
+    if (data.users.length < perPage) break;
+    page += 1;
+  }
+  return null;
+}
+
+async function deleteAuthUserForWorker(
+  admin: SupabaseClient,
+  opts: { userId: string | null; email: string | null }
+) {
+  const userId =
+    opts.userId ??
+    (opts.email ? await findAuthUserIdByEmail(admin, opts.email) : null);
+  if (!userId) return;
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) console.error('[deleteAuthUserForWorker]', error);
+}
+
+async function hardDeleteWorkerRecords(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  admin: SupabaseClient,
+  workerId: string,
+  tenantId: string,
+  worker: { user_id: string | null; email: string | null }
+) {
+  await admin.from('worker_invites').delete().eq('worker_id', workerId);
+  await supabase.from('worker_tenants').delete().eq('worker_id', workerId);
+
+  const { error } = await supabase
+    .from('workers')
+    .delete()
+    .eq('id', workerId)
+    .eq('primary_tenant_id', tenantId);
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  await deleteAuthUserForWorker(admin, {
+    userId: worker.user_id,
+    email: worker.email,
+  });
+
+  return { success: true as const };
+}
+
+export async function revokeWorkerInvite(inviteId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Server configuration error',
+    };
+  }
+
+  const { data: invite, error: inviteError } = await supabase
+    .from('worker_invites')
+    .select('id, worker_id, tenant_id, email, used_at')
+    .eq('id', inviteId)
+    .single();
+
+  if (inviteError || !invite || invite.tenant_id !== tenantId) {
+    return { success: false, error: 'Invite not found or access denied' };
+  }
+
+  if (invite.used_at) {
+    return {
+      success: false,
+      error:
+        'This worker has already accepted their invite. Use Deactivate instead.',
+    };
+  }
+
+  const { data: worker, error: workerError } = await supabase
+    .from('workers')
+    .select('id, user_id, email, primary_tenant_id, invite_status')
+    .eq('id', invite.worker_id)
+    .single();
+
+  if (workerError || !worker || worker.primary_tenant_id !== tenantId) {
+    return { success: false, error: 'Worker not found or access denied' };
+  }
+
+  if (worker.invite_status === 'deactivated' || worker.invite_status === 'accepted') {
+    return {
+      success: false,
+      error:
+        'This worker has already accepted their invite. Use Deactivate instead.',
+    };
+  }
+
+  const result = await hardDeleteWorkerRecords(supabase, admin, worker.id, tenantId, {
+    user_id: worker.user_id,
+    email: worker.email,
+  });
+
+  if (!result.success) {
+    return result;
+  }
+
+  revalidatePath('/workers');
+  return { success: true };
+}
+
+export async function resendWorkerInvite(inviteId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Server configuration error',
+    };
+  }
+
+  const { data: invite, error: inviteError } = await supabase
+    .from('worker_invites')
+    .select('id, worker_id, tenant_id, email')
+    .eq('id', inviteId)
+    .single();
+
+  if (inviteError || !invite || invite.tenant_id !== tenantId) {
+    return { success: false, error: 'Invite not found or access denied' };
+  }
+
+  const { data: worker, error: workerError } = await supabase
+    .from('workers')
+    .select('id, full_name, email, primary_tenant_id')
+    .eq('id', invite.worker_id)
+    .single();
+
+  if (workerError || !worker || worker.primary_tenant_id !== tenantId) {
+    return { success: false, error: 'Worker not found or access denied' };
+  }
+
+  const emailNorm = (worker.email ?? invite.email ?? '').trim().toLowerCase();
+  if (!emailNorm) {
+    return { success: false, error: 'Worker has no email address' };
+  }
+
+  const { data: tenantData } = await supabase
+    .from('tenants')
+    .select('name')
+    .eq('id', tenantId)
+    .single();
+
+  const { error: generateError } = await admin.auth.admin.generateLink({
+    type: 'invite',
+    email: emailNorm,
+    options: {
+      data: {
+        full_name: worker.full_name,
+        primary_tenant_id: tenantId,
+      },
+    },
+  });
+
+  if (generateError) {
+    console.error('[resendWorkerInvite] generateLink:', generateError);
+  }
+
+  const { error: deleteInviteError } = await admin
+    .from('worker_invites')
+    .delete()
+    .eq('id', inviteId);
+
+  if (deleteInviteError) {
+    console.error('[resendWorkerInvite] delete old invite:', deleteInviteError);
+    return { success: false, error: deleteInviteError.message };
+  }
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { error: insertError } = await admin.from('worker_invites').insert({
+    token,
+    worker_id: worker.id,
+    tenant_id: tenantId,
+    email: emailNorm,
+    expires_at: expiresAt,
+  });
+
+  if (insertError) {
+    console.error('[resendWorkerInvite] insert invite:', insertError);
+    return { success: false, error: insertError.message };
+  }
+
+  const inviteUrl = `https://app.joinworkwise.com/accept-invite?token=${token}`;
+  const { subject, html } = buildWorkerInviteEmail({
+    workerName: worker.full_name,
+    inviteUrl,
+    tenantName: tenantData?.name ?? 'WorkWise',
+  });
+
+  try {
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: emailNorm,
+      subject,
+      html,
+    });
+  } catch (e) {
+    console.error('[resendWorkerInvite] resend:', e);
+  }
+
+  revalidatePath('/workers');
+  return { success: true };
+}
+
+export async function deactivateWorker(workerId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+
+  const { data: worker, error: workerError } = await supabase
+    .from('workers')
+    .select('id, user_id, primary_tenant_id')
+    .eq('id', workerId)
+    .single();
+
+  if (workerError || !worker || worker.primary_tenant_id !== tenantId) {
+    return { success: false, error: 'Worker not found or access denied' };
+  }
+
+  const { data: activeJobs } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('assigned_worker_id', workerId)
+    .in('status', [...ACTIVE_JOB_STATUSES])
+    .limit(1);
+
+  if (activeJobs && activeJobs.length > 0) {
+    return {
+      success: false,
+      error: 'Worker has active jobs. Reassign or complete them first.',
+    };
+  }
+
+  if (worker.user_id) {
+    let admin: ReturnType<typeof createAdminClient>;
+    try {
+      admin = createAdminClient();
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Server configuration error',
+      };
+    }
+    const { error: banError } = await admin.auth.admin.updateUserById(worker.user_id, {
+      ban_duration: '876000h',
+    });
+    if (banError) {
+      console.error('[deactivateWorker] ban:', banError);
+      return { success: false, error: banError.message };
+    }
+  }
+
+  const { error } = await supabase
+    .from('workers')
+    .update({
+      status: 'off_duty',
+      invite_status: 'deactivated',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', workerId)
+    .eq('primary_tenant_id', tenantId);
+
+  if (error) {
+    console.error('[deactivateWorker]', error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath('/workers');
+  revalidatePath(`/workers/${workerId}`);
+  return { success: true };
+}
+
+export async function reactivateWorker(workerId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+
+  const { data: worker, error: workerError } = await supabase
+    .from('workers')
+    .select('id, user_id, primary_tenant_id')
+    .eq('id', workerId)
+    .single();
+
+  if (workerError || !worker || worker.primary_tenant_id !== tenantId) {
+    return { success: false, error: 'Worker not found or access denied' };
+  }
+
+  if (worker.user_id) {
+    let admin: ReturnType<typeof createAdminClient>;
+    try {
+      admin = createAdminClient();
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Server configuration error',
+      };
+    }
+    const { error: unbanError } = await admin.auth.admin.updateUserById(worker.user_id, {
+      ban_duration: '0',
+    });
+    if (unbanError) {
+      console.error('[reactivateWorker] unban:', unbanError);
+      return { success: false, error: unbanError.message };
+    }
+  }
+
+  const { error } = await supabase
+    .from('workers')
+    .update({
+      status: 'available',
+      invite_status: 'accepted',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', workerId)
+    .eq('primary_tenant_id', tenantId);
+
+  if (error) {
+    console.error('[reactivateWorker]', error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath('/workers');
+  revalidatePath(`/workers/${workerId}`);
+  return { success: true };
+}
+
 export async function deleteWorker(workerId: string) {
   const supabase = await createClient();
 
@@ -423,11 +784,29 @@ export async function deleteWorker(workerId: string) {
     return { success: false, error: 'No tenant found' };
   }
 
+  const { data: worker, error: workerError } = await supabase
+    .from('workers')
+    .select('id, user_id, email, primary_tenant_id')
+    .eq('id', workerId)
+    .single();
+
+  if (workerError || !worker || worker.primary_tenant_id !== userData.tenant_id) {
+    return { success: false, error: 'Worker not found or access denied' };
+  }
+
+  if (worker.user_id) {
+    return {
+      success: false,
+      error:
+        'This worker has accepted their invite. Use Deactivate instead of Delete to preserve job history.',
+    };
+  }
+
   const { data: activeJobs } = await supabase
     .from('jobs')
     .select('id')
     .eq('assigned_worker_id', workerId)
-    .in('status', ['pending', 'pending_send', 'assigned', 'in_progress'])
+    .in('status', [...ACTIVE_JOB_STATUSES])
     .limit(1);
 
   if (activeJobs && activeJobs.length > 0) {
@@ -438,15 +817,26 @@ export async function deleteWorker(workerId: string) {
     };
   }
 
-  const { error } = await supabase
-    .from('workers')
-    .delete()
-    .eq('id', workerId)
-    .eq('primary_tenant_id', userData.tenant_id);
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Server configuration error',
+    };
+  }
 
-  if (error) {
-    console.error('Delete worker error:', error);
-    return { success: false, error: error.message };
+  const result = await hardDeleteWorkerRecords(
+    supabase,
+    admin,
+    workerId,
+    userData.tenant_id,
+    { user_id: worker.user_id, email: worker.email }
+  );
+
+  if (!result.success) {
+    return result;
   }
 
   revalidatePath('/workers');
@@ -460,7 +850,7 @@ export async function getWorkerActiveJobCount(workerId: string): Promise<number>
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('assigned_worker_id', workerId)
-    .in('status', ['pending', 'pending_send', 'assigned', 'in_progress']);
+    .in('status', [...ACTIVE_JOB_STATUSES]);
   return count ?? 0;
 }
 
@@ -483,12 +873,30 @@ export async function bulkDeleteWorkers(workerIds: string[]) {
     return { success: false, error: 'No tenant or no workers selected' };
   }
 
+  const { data: workersToDelete, error: loadError } = await supabase
+    .from('workers')
+    .select('id, user_id')
+    .eq('primary_tenant_id', userData.tenant_id)
+    .in('id', workerIds);
+
+  if (loadError) {
+    return { success: false, error: loadError.message };
+  }
+
+  if (workersToDelete?.some((w) => w.user_id)) {
+    return {
+      success: false,
+      error:
+        'One or more selected workers have accepted their invite. Use Deactivate instead of Delete.',
+    };
+  }
+
   for (const workerId of workerIds) {
     const { data: active } = await supabase
       .from('jobs')
       .select('id')
       .eq('assigned_worker_id', workerId)
-      .in('status', ['pending', 'pending_send', 'assigned', 'in_progress'])
+      .in('status', [...ACTIVE_JOB_STATUSES])
       .limit(1)
       .maybeSingle();
     if (active) {
@@ -499,15 +907,32 @@ export async function bulkDeleteWorkers(workerIds: string[]) {
     }
   }
 
-  const { error } = await supabase
-    .from('workers')
-    .delete()
-    .eq('primary_tenant_id', userData.tenant_id)
-    .in('id', workerIds);
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Server configuration error',
+    };
+  }
 
-  if (error) {
-    console.error('Bulk delete workers error:', error);
-    return { success: false, error: error.message };
+  for (const workerId of workerIds) {
+    const { data: worker } = await supabase
+      .from('workers')
+      .select('user_id, email')
+      .eq('id', workerId)
+      .single();
+    const result = await hardDeleteWorkerRecords(
+      supabase,
+      admin,
+      workerId,
+      userData.tenant_id,
+      { user_id: worker?.user_id ?? null, email: worker?.email ?? null }
+    );
+    if (!result.success) {
+      return result;
+    }
   }
 
   revalidatePath('/workers');
@@ -556,5 +981,15 @@ export async function bulkUpdateWorkerStatus(
   }
 
   revalidatePath('/workers');
+  return { success: true };
+}
+
+export async function resetWorkerPassword(email: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo:
+      'https://app.joinworkwise.com/auth/callback?next=/reset-password',
+  });
+  if (error) return { success: false, error: error.message };
   return { success: true };
 }

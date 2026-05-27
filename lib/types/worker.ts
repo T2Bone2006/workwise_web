@@ -1,6 +1,6 @@
 export type WorkerStatus = 'available' | 'busy' | 'unavailable' | 'off_duty';
 export type WorkerType = 'company_subcontractor' | 'platform_solo' | 'both';
-export type WorkerInviteStatus = 'pending' | 'active';
+export type WorkerInviteStatus = 'pending' | 'active' | 'accepted' | 'deactivated';
 
 export interface WorkerRow {
   id: string;
@@ -8,6 +8,7 @@ export interface WorkerRow {
   full_name: string;
   phone: string | null;
   email: string | null;
+  user_id: string | null;
   invite_status: WorkerInviteStatus;
   home_postcode: string | null;
   home_lat: number | null;

@@ -1,7 +1,14 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getCustomersForTenantList, type CustomersListFilters } from '@/lib/data/customers';
+import {
+  getCustomerInvitesForTenant,
+  getCustomersWithPortalAccess,
+} from '@/lib/data/customer-invites';
 import { CustomersTable } from '@/components/customers/customers-table';
+import { CustomerInvitesTable } from '@/components/customers/customer-invites-table';
+import { CustomerPortalAccessTable } from '@/components/customers/customer-portal-access-table';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface CustomersPageProps {
   searchParams: Promise<{
@@ -10,6 +17,7 @@ interface CustomersPageProps {
     sort?: string;
     sort_dir?: string;
     page?: string;
+    tab?: string;
   }>;
 }
 
@@ -32,6 +40,9 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
   }
 
   const raw = await searchParams;
+  const defaultTab =
+    raw.tab === 'invites' || raw.tab === 'portal-access' ? raw.tab : 'customers';
+
   const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : undefined;
   const filters: CustomersListFilters & { page?: number } = {
     search: raw.search?.trim() || undefined,
@@ -44,7 +55,15 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
     page,
   };
 
-  const { customers, totalCount, error } = await getCustomersForTenantList(tenantId, filters);
+  const [
+    { customers, totalCount, error },
+    { invites },
+    { customers: portalCustomers },
+  ] = await Promise.all([
+    getCustomersForTenantList(tenantId, filters),
+    getCustomerInvitesForTenant(tenantId),
+    getCustomersWithPortalAccess(tenantId),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -53,12 +72,32 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
         subtitle="Manage bulk clients and individual customers"
       />
 
-      <CustomersTable
-        customers={customers}
-        totalCount={totalCount}
-        initialFilters={filters}
-        fetchError={error}
-      />
+      <Tabs defaultValue={defaultTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="customers">Customers</TabsTrigger>
+          <TabsTrigger value="invites">Portal Invites ({invites.length})</TabsTrigger>
+          <TabsTrigger value="portal-access">
+            Portal Access ({portalCustomers.length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="customers" className="mt-0">
+          <CustomersTable
+            customers={customers}
+            totalCount={totalCount}
+            initialFilters={filters}
+            fetchError={error}
+          />
+        </TabsContent>
+
+        <TabsContent value="invites" className="mt-0">
+          <CustomerInvitesTable invites={invites} />
+        </TabsContent>
+
+        <TabsContent value="portal-access" className="mt-0">
+          <CustomerPortalAccessTable customers={portalCustomers} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

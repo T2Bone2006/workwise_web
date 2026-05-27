@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { WorkerAutoAssignToggle } from '@/components/workers/worker-auto-assign-toggle';
+import { WorkerPasswordResetButton } from '@/components/workers/worker-password-reset-button';
 
 interface WorkerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -43,6 +44,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
       full_name,
       phone,
       email,
+      user_id,
       home_postcode,
       home_lat,
       home_lng,
@@ -484,6 +486,9 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
                   Edit Profile
                 </Button>
               </Link>
+              {worker.user_id && worker.email ? (
+                <WorkerPasswordResetButton email={worker.email} />
+              ) : null}
             </CardContent>
           </Card>
         </div>

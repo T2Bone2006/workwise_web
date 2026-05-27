@@ -21,14 +21,17 @@ const DEFAULT_ERROR_MESSAGE =
 
 const PORTAL_URL = 'https://portal.joinworkwise.com';
 
-type PagePhase = 'loading' | 'error' | 'form' | 'success';
+type PagePhase = 'interstitial' | 'loading' | 'form' | 'success' | 'error';
 
 function AcceptInviteContent() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token');
+  const tokenFromUrl = searchParams.get('token')?.trim() || null;
 
-  const [phase, setPhase] = useState<PagePhase>('loading');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [inviteToken] = useState(tokenFromUrl);
+  const [phase, setPhase] = useState<PagePhase>(tokenFromUrl ? 'interstitial' : 'error');
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    tokenFromUrl ? null : DEFAULT_ERROR_MESSAGE
+  );
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -37,71 +40,47 @@ function AcceptInviteContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!token) {
-      setErrorMessage(null);
-      setPhase('error');
-      return;
-    }
-
-    let cancelled = false;
-
-    async function validateToken() {
-      try {
-        const res = await fetch('/api/customer-invite/validate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-
-        const data = (await res.json()) as {
-          email?: string;
-          tempPassword?: string;
-          error?: string;
-        };
-
-        if (cancelled) return;
-
-        if (!res.ok) {
-          setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
-          setPhase('error');
-          return;
-        }
-
-        const supabase = createBrowserClient();
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: data.email!,
-          password: data.tempPassword!,
-        });
-
-        if (signInError) {
-          setErrorMessage(DEFAULT_ERROR_MESSAGE);
-          setPhase('error');
-          return;
-        }
-
-        setPhase('form');
-      } catch {
-        if (!cancelled) {
-          setErrorMessage(DEFAULT_ERROR_MESSAGE);
-          setPhase('error');
-        }
-      }
-    }
-
-    void validateToken();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  useEffect(() => {
     if (phase === 'success') {
       window.location.href = PORTAL_URL;
     }
   }, [phase]);
 
-  function validate(): boolean {
+  async function handleGetStarted() {
+    if (!inviteToken) {
+      setErrorMessage(DEFAULT_ERROR_MESSAGE);
+      setPhase('error');
+      return;
+    }
+
+    setPhase('loading');
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/customer-invite/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: inviteToken }),
+      });
+
+      const data = (await res.json()) as {
+        email?: string;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        setErrorMessage(data.error ?? DEFAULT_ERROR_MESSAGE);
+        setPhase('error');
+        return;
+      }
+
+      setPhase('form');
+    } catch {
+      setErrorMessage(DEFAULT_ERROR_MESSAGE);
+      setPhase('error');
+    }
+  }
+
+  function validatePasswords(): boolean {
     let valid = true;
     setPasswordError(null);
     setConfirmError(null);
@@ -122,32 +101,71 @@ function AcceptInviteContent() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validatePasswords() || !inviteToken) return;
 
     setIsSubmitting(true);
     setSubmitError(null);
 
-    const supabase = createBrowserClient();
-    const { error } = await supabase.auth.updateUser({ password });
+    try {
+      const res = await fetch('/api/customer-invite/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: inviteToken, password }),
+      });
 
-    setIsSubmitting(false);
+      const data = (await res.json()) as {
+        email?: string;
+        password?: string;
+        error?: string;
+      };
 
-    if (error) {
-      setSubmitError(error.message);
-      return;
+      if (!res.ok) {
+        setSubmitError(data.error ?? 'Failed to set password');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const supabase = createBrowserClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: data.email!,
+        password: data.password!,
+      });
+
+      if (signInError) {
+        setSubmitError(signInError.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      setPhase('success');
+    } catch {
+      setSubmitError('Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setPhase('success');
   }
 
+  const title =
+    phase === 'interstitial'
+      ? "You've been invited to the WorkWise Portal"
+      : phase === 'success'
+        ? "You're all set!"
+        : phase === 'error'
+          ? 'Invite link problem'
+          : 'Welcome to WorkWise';
+
   const description =
-    phase === 'success'
-      ? "You're all set! You can now sign in at portal.joinworkwise.com"
-      : phase === 'error'
-        ? errorMessage ?? DEFAULT_ERROR_MESSAGE
+    phase === 'interstitial'
+      ? 'View your jobs and track progress in real time.'
+      : phase === 'loading'
+        ? 'Setting up your account…'
         : phase === 'form'
           ? 'Create a password to finish setting up your account'
-          : 'Setting up your account…';
+          : phase === 'success'
+            ? "You're all set! Visit portal.joinworkwise.com to sign in any time."
+            : phase === 'error'
+              ? errorMessage ?? DEFAULT_ERROR_MESSAGE
+              : null;
 
   return (
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
@@ -162,18 +180,20 @@ function AcceptInviteContent() {
             priority
           />
         </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight">
-          Welcome to WorkWise
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
+        {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       <CardContent>
-        {phase === 'loading' ? (
+        {phase === 'interstitial' ? (
+          <Button variant="gradient" className="w-full" onClick={() => void handleGetStarted()}>
+            Get Started
+          </Button>
+        ) : phase === 'loading' ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
             <p className="text-sm text-muted-foreground">Setting up your account…</p>
           </div>
-        ) : phase === 'success' ? null : phase === 'form' ? (
+        ) : phase === 'form' ? (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -232,6 +252,10 @@ function AcceptInviteContent() {
               )}
             </Button>
           </form>
+        ) : phase === 'error' ? (
+          <p className="text-sm text-muted-foreground text-center">
+            Please contact your service provider for a new invitation.
+          </p>
         ) : null}
       </CardContent>
     </Card>
@@ -253,15 +277,16 @@ function AcceptInviteLoadingCard() {
           />
         </div>
         <CardTitle className="text-2xl font-semibold tracking-tight">
-          Welcome to WorkWise
+          You&apos;ve been invited to the WorkWise Portal
         </CardTitle>
-        <CardDescription>Setting up your account…</CardDescription>
+        <CardDescription>
+          View your jobs and track progress in real time.
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col items-center justify-center gap-3 py-8">
-          <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
-          <p className="text-sm text-muted-foreground">Setting up your account…</p>
-        </div>
+        <Button variant="gradient" className="w-full" disabled>
+          Get Started
+        </Button>
       </CardContent>
     </Card>
   );

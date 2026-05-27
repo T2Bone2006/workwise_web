@@ -81,6 +81,13 @@ export async function getWorkersForTenant(
   }
 }
 
+function mapInviteStatus(raw: unknown): WorkerInviteStatus {
+  if (raw === 'pending') return 'pending';
+  if (raw === 'deactivated') return 'deactivated';
+  if (raw === 'accepted') return 'accepted';
+  return 'active';
+}
+
 function mapAdminWorkerRow(row: Record<string, unknown>): AdminWorkerRow {
   const skillsRaw = row.skills;
   return {
@@ -89,8 +96,8 @@ function mapAdminWorkerRow(row: Record<string, unknown>): AdminWorkerRow {
     full_name: String(row.full_name ?? ''),
     phone: row.phone != null ? String(row.phone) : null,
     email: row.email != null ? String(row.email) : null,
-    invite_status:
-      row.invite_status === 'pending' ? 'pending' : ('active' as WorkerInviteStatus),
+    user_id: row.user_id != null ? String(row.user_id) : null,
+    invite_status: mapInviteStatus(row.invite_status),
     home_postcode: row.home_postcode != null ? String(row.home_postcode) : null,
     home_lat: typeof row.home_lat === 'number' ? row.home_lat : null,
     home_lng: typeof row.home_lng === 'number' ? row.home_lng : null,
@@ -150,7 +157,8 @@ export async function getWorkersListForTenant(
     let query = supabase
       .from('workers')
       .select('*', { count: 'exact' })
-      .eq('primary_tenant_id', tenantId);
+      .eq('primary_tenant_id', tenantId)
+      .neq('invite_status', 'deactivated');
 
     if (filters.search?.trim()) {
       const term = `%${filters.search.trim()}%`;
