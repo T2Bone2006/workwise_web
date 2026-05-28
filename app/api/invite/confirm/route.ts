@@ -79,6 +79,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
   }
 
+  const { error: workerStatusError } = await adminClient
+    .from('workers')
+    .update({ invite_status: 'accepted', updated_at: now })
+    .eq('user_id', userId);
+
+  if (workerStatusError) {
+    console.error('[invite/confirm] workers invite_status update:', workerStatusError);
+    return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
+  }
+
   const { error: upsertError } = await adminClient.from('users').upsert(
     {
       id: userId,
