@@ -488,7 +488,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
                 </Button>
               </Link>
               {worker.user_id && worker.email ? (
-                <WorkerPasswordResetButton email={worker.email} />
+                <WorkerPasswordResetButton workerId={worker.id} />
               ) : null}
               <WorkerDeactivateButton
                 workerId={worker.id}

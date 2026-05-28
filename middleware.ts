@@ -37,17 +37,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (pathname === '/auth/callback' || pathname.startsWith('/auth/callback/')) {
+  if (isUnprotectedPath(pathname)) {
     return NextResponse.next();
   }
 
-  const isPasswordResetPage = isUnprotectedPath(pathname);
-
   const { response, user } = await updateSession(request);
-
-  if (isPasswordResetPage) {
-    return response;
-  }
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');

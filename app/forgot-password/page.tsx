@@ -1,10 +1,8 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { createBrowserClient } from '@/lib/supabase/client';
+import { requestAdminPasswordReset } from '@/lib/actions/auth';
 import {
   Card,
   CardContent,
@@ -18,13 +16,7 @@ import { Label } from '@/components/ui/label';
 
 type Phase = 'form' | 'sent';
 
-const ADMIN_RESET_CALLBACK =
-  'https://app.joinworkwise.com/auth/callback?next=/admin-reset-password';
-
-function ForgotPasswordContent() {
-  const searchParams = useSearchParams();
-  const linkExpired = searchParams.get('error') === 'link_expired';
-
+export default function ForgotPasswordPage() {
   const [phase, setPhase] = useState<Phase>('form');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -35,19 +27,18 @@ function ForgotPasswordContent() {
     setError(null);
     setIsSubmitting(true);
 
-    const supabase = createBrowserClient();
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: ADMIN_RESET_CALLBACK,
-    });
-
-    setIsSubmitting(false);
-
-    if (resetError) {
-      setError(resetError.message);
-      return;
+    try {
+      const result = await requestAdminPasswordReset(email);
+      if (!result.success) {
+        setError(result.error ?? 'Failed to send reset link');
+        return;
+      }
+      setPhase('sent');
+    } catch {
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setPhase('sent');
   }
 
   if (phase === 'sent') {
@@ -68,7 +59,9 @@ function ForgotPasswordContent() {
             Check your email
           </CardTitle>
           <CardDescription className="space-y-2">
-            <span className="block">We&apos;ve sent a reset link to {email}.</span>
+            <span className="block">
+              If an account exists for {email}, we&apos;ve sent a reset link.
+            </span>
             <span className="block">
               Click the link in the email to set a new password.
             </span>
@@ -98,18 +91,10 @@ function ForgotPasswordContent() {
           Reset your password
         </CardTitle>
         <CardDescription>
-          Enter your account email and we&apos;ll send you a reset link
+          Enter your email and we&apos;ll send you a reset link
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {linkExpired ? (
-          <div
-            className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            role="alert"
-          >
-            Your reset link has expired. Request a new one below.
-          </div>
-        ) : null}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -136,21 +121,8 @@ function ForgotPasswordContent() {
           >
             {isSubmitting ? 'Sending…' : 'Send Reset Link'}
           </Button>
-          <p className="text-center text-sm text-muted-foreground">
-            <Link href="/login" className="hover:underline">
-              Back to sign in
-            </Link>
-          </p>
         </form>
       </CardContent>
     </Card>
-  );
-}
-
-export default function ForgotPasswordPage() {
-  return (
-    <Suspense>
-      <ForgotPasswordContent />
-    </Suspense>
   );
 }

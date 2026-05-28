@@ -4,32 +4,31 @@ import { useState } from 'react';
 import { KeyRound, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { createBrowserClient } from '@/lib/supabase/client';
+import { requestWorkerPasswordReset } from '@/lib/actions/auth';
 
 interface WorkerPasswordResetButtonProps {
-  email: string;
+  workerId: string;
 }
 
-export function WorkerPasswordResetButton({ email }: WorkerPasswordResetButtonProps) {
+export function WorkerPasswordResetButton({ workerId }: WorkerPasswordResetButtonProps) {
   const [isPending, setIsPending] = useState(false);
   const [sent, setSent] = useState(false);
 
   async function handleClick() {
     setIsPending(true);
-    const supabase = createBrowserClient();
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo:
-        'https://app.joinworkwise.com/auth/callback?next=/reset-password',
-    });
-    setIsPending(false);
-
-    if (error) {
-      toast.error(error.message ?? 'Failed to send password reset');
-      return;
+    try {
+      const result = await requestWorkerPasswordReset(workerId);
+      if (!result.success) {
+        toast.error(result.error ?? 'Failed to send password reset');
+        return;
+      }
+      setSent(true);
+      toast.success('Password reset email sent');
+    } catch {
+      toast.error('Failed to send password reset');
+    } finally {
+      setIsPending(false);
     }
-
-    setSent(true);
-    toast.success('Password reset email sent');
   }
 
   return (
