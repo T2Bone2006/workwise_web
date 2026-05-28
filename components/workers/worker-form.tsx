@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -93,6 +93,21 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
       skills: Array.isArray(worker?.skills) ? worker.skills : [],
     },
   });
+
+  useEffect(() => {
+    if (mode !== 'edit' || !worker) return;
+    form.reset({
+      full_name: worker.full_name ?? '',
+      phone: worker.phone ?? '',
+      email: worker.email ?? '',
+      home_postcode: worker.home_postcode ?? '',
+      worker_type:
+        (worker.worker_type as WorkerFormInput['worker_type']) ??
+        'company_subcontractor',
+      status: (worker.status as WorkerFormInput['status']) ?? 'available',
+      skills: Array.isArray(worker.skills) ? worker.skills : [],
+    });
+  }, [mode, worker, form]);
 
   const skills = form.watch('skills') ?? [];
   const postcode = form.watch('home_postcode');
