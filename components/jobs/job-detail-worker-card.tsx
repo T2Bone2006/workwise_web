@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { User, Phone, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -156,7 +157,12 @@ export function JobDetailWorkerCard({
               <>
                 <div className="flex items-center gap-2">
                   <User className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="font-medium text-foreground">{worker.full_name}</span>
+                  <Link
+                    href={`/workers/${worker.id}`}
+                    className="font-medium text-foreground hover:text-primary hover:underline"
+                  >
+                    {worker.full_name}
+                  </Link>
                 </div>
                 {worker.phone && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">

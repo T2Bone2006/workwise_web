@@ -100,16 +100,12 @@ export async function getCustomersWithPortalAccess(
         type,
         portal_last_accessed_at,
         customer_portal_users!inner (
-          user_id,
-          is_active
+          user_id
         )
       `
       )
       .eq('tenant_id', tenantId)
       .not('customer_portal_users.user_id', 'is', null)
-      .or('is_active.is.null,is_active.eq.true', {
-        referencedTable: 'customer_portal_users',
-      })
       .order('name');
 
     if (error) {

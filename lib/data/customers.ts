@@ -17,6 +17,16 @@ export interface CustomerListRow extends CustomerRow {
   created_at?: string;
   updated_at?: string | null;
   job_count: number;
+  has_portal_access: boolean;
+}
+
+export interface InactiveCustomerRow {
+  id: string;
+  name: string;
+  email: string | null;
+  type: CustomerType;
+  job_count: number;
+  updated_at: string | null;
 }
 
 export interface CustomerDetailRow extends CustomerListRow {
@@ -124,7 +134,8 @@ export interface CustomersListFilters {
 const PAGE_SIZE = 50;
 
 /**
- * Paginated customers list with job counts (via customers_with_job_counts view).
+ * Paginated active customers with job counts (via customers_with_job_counts view).
+ * Requires `is_active` on the view (see migration customers_with_job_counts_is_active).
  */
 export async function getCustomersForTenantList(
   tenantId: string,
@@ -141,7 +152,8 @@ export async function getCustomersForTenantList(
       .select('id, tenant_id, name, type, email, phone, notes, created_at, updated_at, job_count', {
         count: 'exact',
       })
-      .eq('tenant_id', tenantId);
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
 
     if (filters.type) {
       query = query.eq('type', filters.type);
@@ -177,10 +189,29 @@ export async function getCustomersForTenantList(
     }
 
     const rows = Array.isArray(data) ? data : [];
+    const customerIds = rows.map((row) => String((row as Record<string, unknown>).id));
+
+    const portalCustomerIds = new Set<string>();
+    if (customerIds.length > 0) {
+      const { data: portalRows, error: portalError } = await supabase
+        .from('customer_portal_users')
+        .select('customer_id')
+        .in('customer_id', customerIds);
+
+      if (portalError) {
+        console.error('[getCustomersForTenantList] portal access:', portalError);
+      } else {
+        for (const portalRow of Array.isArray(portalRows) ? portalRows : []) {
+          portalCustomerIds.add(String(portalRow.customer_id));
+        }
+      }
+    }
+
     const customers: CustomerListRow[] = rows.map((row: Record<string, unknown>) => {
       const jobCount = row.job_count;
+      const id = row.id as string;
       return {
-        id: row.id as string,
+        id,
         tenant_id: row.tenant_id as string,
         name: (row.name as string) ?? '',
         type: (row.type as CustomerType) ?? 'individual',
@@ -191,6 +222,7 @@ export async function getCustomersForTenantList(
         created_at: row.created_at as string | undefined,
         updated_at: row.updated_at as string | null | undefined,
         job_count: typeof jobCount === 'number' ? jobCount : 0,
+        has_portal_access: portalCustomerIds.has(id),
       };
     });
 
@@ -204,6 +236,58 @@ export async function getCustomersForTenantList(
     return {
       customers: [],
       totalCount: 0,
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+/**
+ * Inactive customers for the tenant (is_active = false), ordered by name.
+ */
+export async function getInactiveCustomersForTenant(
+  tenantId: string
+): Promise<{ customers: InactiveCustomerRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, email, type, updated_at, jobs(count)')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', false)
+      .order('name');
+
+    if (error) {
+      console.error('[getInactiveCustomersForTenant]', error);
+      return {
+        customers: [],
+        error: new Error(error.message ?? 'Failed to load inactive customers'),
+      };
+    }
+
+    const customers: InactiveCustomerRow[] = (Array.isArray(data) ? data : []).map((row) => {
+      const record = row as Record<string, unknown>;
+      const jobsRel = record.jobs as { count: number }[] | { count: number } | null;
+      const jobCount = Array.isArray(jobsRel)
+        ? jobsRel[0]?.count ?? 0
+        : jobsRel && typeof jobsRel === 'object' && 'count' in jobsRel
+          ? (jobsRel as { count: number }).count
+          : 0;
+
+      return {
+        id: String(record.id),
+        name: String(record.name ?? ''),
+        email: record.email != null ? String(record.email) : null,
+        type: (record.type as CustomerType) ?? 'individual',
+        job_count: typeof jobCount === 'number' ? jobCount : 0,
+        updated_at: record.updated_at != null ? String(record.updated_at) : null,
+      };
+    });
+
+    return { customers, error: null };
+  } catch (err) {
+    console.error('[getInactiveCustomersForTenant]', err);
+    return {
+      customers: [],
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }
@@ -242,6 +326,13 @@ export async function getCustomerById(
         ? (jobsRel as { count: number }).count
         : 0;
 
+    const { data: portalRow } = await supabase
+      .from('customer_portal_users')
+      .select('customer_id')
+      .eq('customer_id', customerId)
+      .limit(1)
+      .maybeSingle();
+
     const customer: CustomerDetailRow = {
       id: row.id as string,
       tenant_id: row.tenant_id as string,
@@ -254,6 +345,7 @@ export async function getCustomerById(
       created_at: row.created_at as string | undefined,
       updated_at: row.updated_at as string | null | undefined,
       job_count: typeof jobCount === 'number' ? jobCount : 0,
+      has_portal_access: !!portalRow,
     };
     return { customer, error: null };
   } catch (err) {

@@ -1,5 +1,9 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { getCustomersForTenantList, type CustomersListFilters } from '@/lib/data/customers';
+import {
+  getCustomersForTenantList,
+  getInactiveCustomersForTenant,
+  type CustomersListFilters,
+} from '@/lib/data/customers';
 import {
   getCustomerInvitesForTenant,
   getCustomersWithPortalAccess,
@@ -7,6 +11,7 @@ import {
 import { CustomersTable } from '@/components/customers/customers-table';
 import { CustomerInvitesTable } from '@/components/customers/customer-invites-table';
 import { CustomerPortalAccessTable } from '@/components/customers/customer-portal-access-table';
+import { InactiveCustomersTable } from '@/components/customers/inactive-customers-table';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -41,7 +46,9 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
 
   const raw = await searchParams;
   const defaultTab =
-    raw.tab === 'invites' || raw.tab === 'portal-access' ? raw.tab : 'customers';
+    raw.tab === 'invites' || raw.tab === 'portal-access' || raw.tab === 'inactive'
+      ? raw.tab
+      : 'customers';
 
   const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : undefined;
   const filters: CustomersListFilters & { page?: number } = {
@@ -59,10 +66,12 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
     { customers, totalCount, error },
     { invites },
     { customers: portalCustomers },
+    { customers: inactiveCustomers },
   ] = await Promise.all([
     getCustomersForTenantList(tenantId, filters),
     getCustomerInvitesForTenant(tenantId),
     getCustomersWithPortalAccess(tenantId),
+    getInactiveCustomersForTenant(tenantId),
   ]);
 
   return (
@@ -79,6 +88,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
           <TabsTrigger value="portal-access">
             Portal Access ({portalCustomers.length})
           </TabsTrigger>
+          <TabsTrigger value="inactive">Inactive ({inactiveCustomers.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="customers" className="mt-0">
@@ -96,6 +106,10 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
 
         <TabsContent value="portal-access" className="mt-0">
           <CustomerPortalAccessTable customers={portalCustomers} />
+        </TabsContent>
+
+        <TabsContent value="inactive" className="mt-0">
+          <InactiveCustomersTable customers={inactiveCustomers} />
         </TabsContent>
       </Tabs>
     </div>

@@ -2,7 +2,7 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { redirect } from 'next/navigation';
 import { WorkerForm } from '@/components/workers/worker-form';
-import { WorkerDeleteButton } from '@/components/workers/worker-delete-button';
+import { WorkerDeactivateButton } from '@/components/workers/worker-delete-button';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import type { WorkerInviteStatus, WorkerRow } from '@/lib/types/worker';
@@ -87,10 +87,9 @@ export default async function WorkerEditPage({ params }: WorkerEditPageProps) {
       <div className="max-w-xl space-y-6">
         <WorkerForm mode="edit" tenantId={tenantId} tenantSkills={tenantSkills} worker={worker} />
         <div className="pt-4 border-t border-border/80">
-          <WorkerDeleteButton
+          <WorkerDeactivateButton
             workerId={worker.id}
             workerName={worker.full_name}
-            user_id={worker.user_id}
           />
         </div>
       </div>

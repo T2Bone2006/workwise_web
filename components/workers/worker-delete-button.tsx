@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, UserMinus, Loader2 } from 'lucide-react';
+import { UserMinus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,30 +14,25 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  deleteWorker,
   deactivateWorker,
   getWorkerActiveJobCount,
 } from '@/lib/actions/workers';
 
-interface WorkerDeleteButtonProps {
+interface WorkerDeactivateButtonProps {
   workerId: string;
   workerName: string;
-  user_id: string | null;
   fullWidth?: boolean;
 }
 
-export function WorkerDeleteButton({
+export function WorkerDeactivateButton({
   workerId,
   workerName,
-  user_id,
   fullWidth = false,
-}: WorkerDeleteButtonProps) {
+}: WorkerDeactivateButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [activeJobCount, setActiveJobCount] = useState<number | null>(null);
   const [isPending, setIsPending] = useState(false);
-
-  const isDeactivate = user_id != null;
 
   useEffect(() => {
     if (open) {
@@ -47,31 +42,26 @@ export function WorkerDeleteButton({
 
   const handleConfirm = async () => {
     setIsPending(true);
-    const result = isDeactivate
-      ? await deactivateWorker(workerId)
-      : await deleteWorker(workerId);
+    const result = await deactivateWorker(workerId);
     setIsPending(false);
     setOpen(false);
     if (result.success) {
-      toast.success(isDeactivate ? 'Worker deactivated' : 'Worker deleted');
-      if (fullWidth && isDeactivate) {
+      toast.success('Worker deactivated');
+      if (fullWidth) {
         router.refresh();
       } else {
         router.push('/workers');
         router.refresh();
       }
     } else {
-      toast.error(
-        result.error ??
-          (isDeactivate ? 'Failed to deactivate worker' : 'Failed to delete worker')
-      );
+      toast.error(result.error ?? 'Failed to deactivate worker');
     }
   };
 
   const hasActiveJobs = (activeJobCount ?? 0) > 0;
-  const ActionIcon = isDeactivate ? UserMinus : Trash2;
-  const actionLabel = isDeactivate ? 'Deactivate worker' : 'Delete worker';
-  const confirmLabel = isDeactivate ? 'Deactivate' : 'Delete';
+  const ActionIcon = UserMinus;
+  const actionLabel = 'Deactivate worker';
+  const confirmLabel = 'Deactivate';
 
   const buttonClassName = fullWidth
     ? 'w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive'
@@ -91,23 +81,14 @@ export function WorkerDeleteButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {isDeactivate ? 'Deactivate worker' : 'Delete worker'}
-            </DialogTitle>
+            <DialogTitle>Deactivate worker</DialogTitle>
             <DialogDescription>
-              {isDeactivate ? (
-                <>
-                  This will disable {workerName}&apos;s access. Their job history
-                  will be preserved. You can reactivate them at any time.
-                </>
-              ) : (
-                <>Are you sure you want to delete {workerName}?</>
-              )}
+              This will disable {workerName}&apos;s access. Their job history
+              will be preserved. You can reactivate them at any time.
               {activeJobCount !== null && hasActiveJobs && (
                 <span className="mt-2 block font-medium text-destructive">
-                  {isDeactivate
-                    ? `This worker has ${activeJobCount} active job(s). Reassign or complete them first.`
-                    : `This worker has ${activeJobCount} active job(s). Reassign jobs first before deleting.`}
+                  This worker has {activeJobCount} active job(s). Reassign or
+                  complete them first.
                 </span>
               )}
             </DialogDescription>
@@ -130,3 +111,5 @@ export function WorkerDeleteButton({
     </>
   );
 }
+
+export const WorkerDeleteButton = WorkerDeactivateButton;

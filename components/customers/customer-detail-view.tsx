@@ -8,7 +8,6 @@ import {
   Building2,
   User,
   Pencil,
-  Trash2,
   Briefcase,
   Loader2,
 } from 'lucide-react';
@@ -23,18 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import type { CustomerDetailRow, CustomerJobStats } from '@/lib/data/customers';
 import type { RecentJobRow } from '@/lib/data/jobs';
 import {
-  deleteCustomer,
   getCustomerPortalInviteState,
   inviteCustomerToPortal,
 } from '@/lib/actions/customers';
@@ -75,8 +65,6 @@ export function CustomerDetailView({
   jobsError,
 }: CustomerDetailViewProps) {
   const router = useRouter();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
   const [canInviteToPortal, setCanInviteToPortal] = useState(false);
 
@@ -103,20 +91,6 @@ export function CustomerDetailView({
       mounted = false;
     };
   }, [customer.id]);
-
-  const handleDelete = async () => {
-    setIsDeleting(true);
-    const result = await deleteCustomer(customer.id);
-    setIsDeleting(false);
-    setDeleteOpen(false);
-    if (result.success) {
-      toast.success('Customer deleted');
-      router.push('/customers');
-      router.refresh();
-    } else {
-      toast.error(result.error ?? 'Failed to delete customer');
-    }
-  };
 
   const handleInviteToPortal = async () => {
     setIsInviting(true);
@@ -340,49 +314,9 @@ export function CustomerDetailView({
                 Invite to Portal
               </Button>
             )}
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="size-4" />
-              Delete customer
-            </Button>
           </CardContent>
         </Card>
       </div>
-
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete customer?</DialogTitle>
-            <DialogDescription>
-              {customer.job_count > 0
-                ? `This customer has ${customer.job_count} job(s). Customers with existing jobs cannot be deleted.`
-                : 'This action cannot be undone.'}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={isDeleting || customer.job_count > 0}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Deleting…
-                </>
-              ) : (
-                'Delete'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

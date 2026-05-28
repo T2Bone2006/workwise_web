@@ -677,6 +677,114 @@ export async function deactivateWorker(workerId: string) {
     };
   }
 
+  const { count: jobHistoryCount, error: jobHistoryError } = await supabase
+    .from('jobs')
+    .select('*', { count: 'exact', head: true })
+    .eq('assigned_worker_id', workerId);
+
+  if (jobHistoryError) {
+    console.error('[deactivateWorker] job history:', jobHistoryError);
+    return { success: false, error: jobHistoryError.message };
+  }
+
+  if ((jobHistoryCount ?? 0) === 0) {
+    let admin: ReturnType<typeof createAdminClient>;
+    try {
+      admin = createAdminClient();
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Server configuration error',
+      };
+    }
+
+    const { error: deleteInvitesError } = await admin
+      .from('worker_invites')
+      .delete()
+      .eq('worker_id', workerId);
+    if (deleteInvitesError) {
+      console.error('[deactivateWorker] delete worker_invites:', deleteInvitesError);
+      return { success: false, error: deleteInvitesError.message };
+    }
+
+    const { error: deleteWorkerTenantsError } = await admin
+      .from('worker_tenants')
+      .delete()
+      .eq('worker_id', workerId);
+    if (deleteWorkerTenantsError) {
+      console.error('[deactivateWorker] delete worker_tenants:', deleteWorkerTenantsError);
+      return { success: false, error: deleteWorkerTenantsError.message };
+    }
+
+    const { error: unassignJobsError } = await admin
+      .from('jobs')
+      .update({ assigned_worker_id: null })
+      .eq('assigned_worker_id', workerId);
+    if (unassignJobsError) {
+      console.error('[deactivateWorker] unassign jobs:', unassignJobsError);
+      return { success: false, error: unassignJobsError.message };
+    }
+
+    const { error: clearJobStatusHistoryError } = await admin
+      .from('job_status_history')
+      .update({ changed_by_worker_id: null })
+      .eq('changed_by_worker_id', workerId);
+    if (clearJobStatusHistoryError) {
+      console.error('[deactivateWorker] clear job_status_history worker ref:', clearJobStatusHistoryError);
+      return { success: false, error: clearJobStatusHistoryError.message };
+    }
+
+    if (worker.user_id) {
+      const { error: clearWorkerUserError } = await admin
+        .from('workers')
+        .update({ user_id: null })
+        .eq('id', workerId);
+      if (clearWorkerUserError) {
+        console.error('[deactivateWorker] clear workers.user_id:', clearWorkerUserError);
+        return { success: false, error: clearWorkerUserError.message };
+      }
+
+      const { error: deleteCustomerPortalUsersError } = await admin
+        .from('customer_portal_users')
+        .delete()
+        .eq('user_id', worker.user_id);
+      if (deleteCustomerPortalUsersError) {
+        console.error('[deactivateWorker] delete customer_portal_users:', deleteCustomerPortalUsersError);
+        return { success: false, error: deleteCustomerPortalUsersError.message };
+      }
+
+      const { error: deleteUsersRowError } = await admin
+        .from('users')
+        .delete()
+        .eq('id', worker.user_id);
+      if (deleteUsersRowError) {
+        console.error('[deactivateWorker] delete users row:', deleteUsersRowError);
+        return { success: false, error: deleteUsersRowError.message };
+      }
+
+      const { error: deleteAuthError } = await admin.auth.admin.deleteUser(worker.user_id);
+      if (deleteAuthError) {
+        console.error('[deactivateWorker] deleteUser:', deleteAuthError);
+        return { success: false, error: deleteAuthError.message };
+      }
+    }
+
+    const { error: deleteWorkerError } = await admin
+      .from('workers')
+      .delete()
+      .eq('id', workerId)
+      .eq('primary_tenant_id', tenantId);
+
+    if (deleteWorkerError) {
+      console.error('[deactivateWorker] hard delete worker:', deleteWorkerError);
+      return { success: false, error: deleteWorkerError.message };
+    }
+
+    revalidatePath('/workers');
+    revalidatePath(`/workers/${workerId}`);
+    return { success: true };
+  }
+
   if (worker.user_id) {
     let admin: ReturnType<typeof createAdminClient>;
     try {
@@ -699,7 +807,7 @@ export async function deactivateWorker(workerId: string) {
   const { error } = await supabase
     .from('workers')
     .update({
-      status: 'off_duty',
+      status: 'unavailable',
       invite_status: 'deactivated',
       updated_at: new Date().toISOString(),
     })

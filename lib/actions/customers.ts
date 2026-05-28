@@ -8,6 +8,8 @@ import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/da
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 
+const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'in_progress'] as const;
+
 function getRawFormData(formData: FormData) {
   return {
     name: formData.get('name'),
@@ -191,7 +193,8 @@ export async function deleteCustomer(customerId: string) {
   if (jobs && jobs.length > 0) {
     return {
       success: false,
-      error: 'Cannot delete customer with existing jobs',
+      error:
+        'This customer has job history. Use Deactivate instead of Delete to preserve records.',
     };
   }
 
@@ -208,6 +211,171 @@ export async function deleteCustomer(customerId: string) {
 
   revalidatePath('/customers');
   return { success: true };
+}
+
+export async function deactivateCustomer(customerId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+
+  const { data: customer, error: customerError } = await supabase
+    .from('customers')
+    .select('id, tenant_id')
+    .eq('id', customerId)
+    .single();
+
+  if (customerError || !customer || customer.tenant_id !== tenantId) {
+    return { success: false, error: 'Customer not found or access denied' };
+  }
+
+  const { data: portalUser, error: portalUserError } = await supabase
+    .from('customer_portal_users')
+    .select('user_id')
+    .eq('customer_id', customerId)
+    .maybeSingle<{ user_id: string | null }>();
+
+  if (portalUserError) {
+    console.error('[deactivateCustomer] portal user:', portalUserError);
+    return { success: false, error: portalUserError.message };
+  }
+
+  const hadPortalAccess = Boolean(portalUser);
+
+  if (portalUser) {
+    if (portalUser.user_id) {
+      let admin: ReturnType<typeof createAdminClient>;
+      try {
+        admin = createAdminClient();
+      } catch (e) {
+        return {
+          success: false,
+          error: e instanceof Error ? e.message : 'Server configuration error',
+        };
+      }
+
+      const { error: deleteUsersRowError } = await admin
+        .from('users')
+        .delete()
+        .eq('id', portalUser.user_id);
+      if (deleteUsersRowError) {
+        console.error('[deactivateCustomer] delete users row:', deleteUsersRowError);
+        return { success: false, error: deleteUsersRowError.message };
+      }
+
+      const { error: deleteAuthError } = await admin.auth.admin.deleteUser(portalUser.user_id);
+      if (deleteAuthError) {
+        console.error('[deactivateCustomer] deleteUser:', deleteAuthError);
+        return { success: false, error: deleteAuthError.message };
+      }
+    }
+
+    const { error: deletePortalUserError } = await supabase
+      .from('customer_portal_users')
+      .delete()
+      .eq('customer_id', customerId);
+    if (deletePortalUserError) {
+      console.error('[deactivateCustomer] delete portal user:', deletePortalUserError);
+      return { success: false, error: deletePortalUserError.message };
+    }
+  }
+
+  const { count: jobHistoryCount, error: jobHistoryError } = await supabase
+    .from('jobs')
+    .select('*', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .eq('tenant_id', tenantId);
+
+  if (jobHistoryError) {
+    console.error('[deactivateCustomer] job history:', jobHistoryError);
+    return { success: false, error: jobHistoryError.message };
+  }
+
+  if ((jobHistoryCount ?? 0) === 0 && !hadPortalAccess) {
+    const { error: deleteCustomerError } = await supabase
+      .from('customers')
+      .delete()
+      .eq('id', customerId)
+      .eq('tenant_id', tenantId);
+
+    if (deleteCustomerError) {
+      console.error('[deactivateCustomer] hard delete customer:', deleteCustomerError);
+      return { success: false, error: deleteCustomerError.message };
+    }
+  } else {
+    const { error } = await supabase
+      .from('customers')
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', customerId)
+      .eq('tenant_id', tenantId);
+
+    if (error) {
+      console.error('[deactivateCustomer]', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
+  return { success: true };
+}
+
+export async function reactivateCustomer(customerId: string) {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'No tenant found' };
+
+  const supabase = await createClient();
+
+  const { data: customer, error: customerError } = await supabase
+    .from('customers')
+    .select('id, tenant_id')
+    .eq('id', customerId)
+    .single();
+
+  if (customerError || !customer || customer.tenant_id !== tenantId) {
+    return { success: false, error: 'Customer not found or access denied' };
+  }
+
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', customerId)
+    .eq('tenant_id', tenantId);
+
+  if (error) {
+    console.error('[reactivateCustomer]', error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
+  return { success: true };
+}
+
+export async function getCustomerActiveJobCount(customerId: string): Promise<number> {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return 0;
+
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from('jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .eq('tenant_id', tenantId)
+    .in('status', [...ACTIVE_JOB_STATUSES]);
+
+  if (error) {
+    console.error('[getCustomerActiveJobCount]', error);
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 export async function getCustomerPortalInviteState(customerId: string) {
@@ -639,26 +807,6 @@ export async function deactivateCustomerPortalAccess(customerId: string) {
 
   const userId = portalUser?.user_id ?? null;
 
-  if (userId) {
-    let admin;
-    try {
-      admin = createAdminClient();
-    } catch (e) {
-      return {
-        success: false,
-        error: e instanceof Error ? e.message : 'Server configuration error',
-      };
-    }
-
-    const { error: banError } = await admin.auth.admin.updateUserById(userId, {
-      ban_duration: '876000h',
-    });
-    if (banError) {
-      console.error('[deactivateCustomerPortalAccess] ban:', banError);
-      return { success: false, error: banError.message };
-    }
-  }
-
   const { error: customerUpdateError } = await supabase
     .from('customers')
     .update({
@@ -673,13 +821,37 @@ export async function deactivateCustomerPortalAccess(customerId: string) {
     return { success: false, error: customerUpdateError.message };
   }
 
-  const { error: portalUpdateError } = await supabase
+  const { error: portalDeleteError } = await supabase
     .from('customer_portal_users')
-    .update({ is_active: false })
+    .delete()
     .eq('customer_id', customerId);
 
-  if (portalUpdateError) {
-    console.error('[deactivateCustomerPortalAccess] portal is_active:', portalUpdateError);
+  if (portalDeleteError) {
+    console.error('[deactivateCustomerPortalAccess] delete portal user:', portalDeleteError);
+    return { success: false, error: portalDeleteError.message };
+  }
+
+  if (userId) {
+    let admin;
+    try {
+      admin = createAdminClient();
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Server configuration error',
+      };
+    }
+
+    const { error: deleteUsersRowError } = await admin.from('users').delete().eq('id', userId);
+    if (deleteUsersRowError) {
+      console.error('[deactivateCustomerPortalAccess] delete users row:', deleteUsersRowError);
+    }
+
+    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(userId);
+    if (deleteAuthError) {
+      console.error('[deactivateCustomerPortalAccess] deleteUser:', deleteAuthError);
+      return { success: false, error: deleteAuthError.message };
+    }
   }
 
   revalidatePath('/customers');
@@ -728,15 +900,6 @@ export async function reactivateCustomerPortalAccess(customerId: string) {
     if (unbanError) {
       console.error('[reactivateCustomerPortalAccess] unban:', unbanError);
       return { success: false, error: unbanError.message };
-    }
-
-    const { error: portalUpdateError } = await supabase
-      .from('customer_portal_users')
-      .update({ is_active: true })
-      .eq('customer_id', customerId);
-
-    if (portalUpdateError) {
-      console.error('[reactivateCustomerPortalAccess] portal is_active:', portalUpdateError);
     }
   }
 

@@ -24,7 +24,7 @@ import {
 import Link from 'next/link';
 import { WorkerAutoAssignToggle } from '@/components/workers/worker-auto-assign-toggle';
 import { WorkerPasswordResetButton } from '@/components/workers/worker-password-reset-button';
-import { WorkerDeleteButton } from '@/components/workers/worker-delete-button';
+import { WorkerDeactivateButton } from '@/components/workers/worker-delete-button';
 
 interface WorkerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -490,10 +490,9 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
               {worker.user_id && worker.email ? (
                 <WorkerPasswordResetButton email={worker.email} />
               ) : null}
-              <WorkerDeleteButton
+              <WorkerDeactivateButton
                 workerId={worker.id}
                 workerName={worker.full_name}
-                user_id={worker.user_id}
                 fullWidth
               />
             </CardContent>

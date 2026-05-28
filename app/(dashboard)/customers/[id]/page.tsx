@@ -2,8 +2,11 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getCustomerById, getCustomerJobStats } from '@/lib/data/customers';
-import { getRecentJobsForCustomer, type RecentJobRow } from '@/lib/data/jobs';
+import { getRecentJobsForCustomer } from '@/lib/data/jobs';
+import { getCustomerPortalInviteState } from '@/lib/actions/customers';
 import { CustomerDetailView } from '@/components/customers/customer-detail-view';
+import { CustomerDeleteButton } from '@/components/customers/customer-delete-button';
+import { RevokeCustomerPortalAccessButton } from '@/components/customers/customers-table';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 
@@ -19,12 +22,19 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     redirect('/customers');
   }
 
-  const [{ customer, error: customerError }, { stats, error: statsError }, { jobs: recentJobs, error: jobsError }] =
-    await Promise.all([
-      getCustomerById(tenantId, customerId),
-      getCustomerJobStats(tenantId, customerId),
-      getRecentJobsForCustomer(tenantId, customerId, 10),
-    ]);
+  const [
+    { customer, error: customerError },
+    { stats, error: statsError },
+    { jobs: recentJobs, error: jobsError },
+    portalState,
+  ] = await Promise.all([
+    getCustomerById(tenantId, customerId),
+    getCustomerJobStats(tenantId, customerId),
+    getRecentJobsForCustomer(tenantId, customerId, 10),
+    getCustomerPortalInviteState(customerId),
+  ]);
+
+  const hasPortalUser = portalState.success && portalState.hasPortalUser;
 
   if (customerError || !customer) {
     redirect('/customers');
@@ -45,6 +55,16 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           <p className="mt-1 text-sm text-muted-foreground">
             Customer details and job history
           </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {hasPortalUser && (
+            <RevokeCustomerPortalAccessButton customerId={customerId} />
+          )}
+          <CustomerDeleteButton
+            customerId={customerId}
+            customerName={customer.name}
+            useDeactivate
+          />
         </div>
       </div>
 

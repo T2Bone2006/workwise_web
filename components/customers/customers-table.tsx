@@ -9,7 +9,7 @@ import {
   MoreHorizontal,
   Eye,
   Pencil,
-  Trash2,
+  UserMinus,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -19,6 +19,7 @@ import {
   X,
   Building2,
   User,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -60,7 +61,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { CustomerListRow, CustomersListFilters } from '@/lib/data/customers';
-import { deleteCustomer } from '@/lib/actions/customers';
+import {
+  deactivateCustomer,
+  deactivateCustomerPortalAccess,
+} from '@/lib/actions/customers';
 import { cn } from '@/lib/utils';
 import { FloatingAddButton } from '@/components/ui/floating-add-button';
 
@@ -102,6 +106,53 @@ function TypeBadge({ type }: { type: string }) {
   );
 }
 
+export function RevokeCustomerPortalAccessButton({ customerId }: { customerId: string }) {
+  const router = useRouter();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isRevoking, setIsRevoking] = useState(false);
+
+  const handleRevoke = async () => {
+    setIsRevoking(true);
+    const result = await deactivateCustomerPortalAccess(customerId);
+    setIsRevoking(false);
+    setConfirmOpen(false);
+    if (result.success) {
+      toast.success('Portal access revoked');
+      router.refresh();
+    } else {
+      toast.error(result.error ?? 'Failed to revoke portal access');
+    }
+  };
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)}>
+        Revoke Portal Access
+      </Button>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revoke portal access</DialogTitle>
+            <DialogDescription>
+              This will remove this customer&apos;s portal access. They will no longer be able to
+              log in. You can reinvite them at any time.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleRevoke} disabled={isRevoking}>
+              {isRevoking ? <Loader2 className="size-4 animate-spin" /> : null}
+              Revoke Portal Access
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export interface CustomersTableProps {
   customers: CustomerListRow[];
   totalCount: number;
@@ -119,9 +170,9 @@ export function CustomersTable({
   const searchParams = useSearchParams();
   const [searchInput, setSearchInput] = useState(initialFilters.search ?? '');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [deactivateConfirmCustomer, setDeactivateConfirmCustomer] =
+    useState<CustomerListRow | null>(null);
+  const [isDeactivating, setIsDeactivating] = useState(false);
 
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
@@ -191,38 +242,21 @@ export function CustomersTable({
     setSelectedIds(next);
   };
 
-  const handleDeleteOne = async () => {
-    if (!deleteConfirmId) return;
-    setIsDeleting(true);
-    const result = await deleteCustomer(deleteConfirmId);
-    setIsDeleting(false);
-    setDeleteConfirmId(null);
-    if (result.success) {
-      toast.success('Customer deleted');
-      router.refresh();
-    } else {
-      toast.error(result.error ?? 'Failed to delete customer');
-    }
+  const openDeactivateConfirm = (customer: CustomerListRow) => {
+    setDeactivateConfirmCustomer(customer);
   };
 
-  const handleBulkDelete = async () => {
-    if (!selectedIds.size) return;
-    setIsDeleting(true);
-    let ok = 0;
-    let withJobs = 0;
-    for (const id of selectedIds) {
-      const result = await deleteCustomer(id);
-      if (result.success) ok++;
-      else if (result.error?.includes('existing jobs')) withJobs++;
-    }
-    setIsDeleting(false);
-    setBulkDeleteOpen(false);
-    setSelectedIds(new Set());
-    router.refresh();
-    if (withJobs > 0) {
-      toast.warning(`Deleted ${ok} customer(s). ${withJobs} could not be deleted (have jobs).`);
+  const handleDeactivate = async () => {
+    if (!deactivateConfirmCustomer) return;
+    setIsDeactivating(true);
+    const result = await deactivateCustomer(deactivateConfirmCustomer.id);
+    setIsDeactivating(false);
+    setDeactivateConfirmCustomer(null);
+    if (result.success) {
+      toast.success('Customer deactivated');
+      router.refresh();
     } else {
-      toast.success(`Deleted ${ok} customer(s)`);
+      toast.error(result.error ?? 'Failed to deactivate customer');
     }
   };
 
@@ -318,15 +352,6 @@ export function CustomersTable({
                   <Button variant="outline" size="sm" onClick={handleExportSelected} className="gap-1">
                     <Download className="size-3.5" />
                     Export Selected
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    <Trash2 className="size-3.5" />
-                    Delete Selected
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
                     <X className="size-3.5" />
@@ -507,10 +532,10 @@ export function CustomersTable({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => setDeleteConfirmId(row.id)}
+                              onClick={() => openDeactivateConfirm(row)}
                             >
-                              <Trash2 className="size-3.5" />
-                              Delete
+                              <UserMinus className="size-3.5" />
+                              Deactivate
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -555,51 +580,33 @@ export function CustomersTable({
           </Card>
         )}
 
-        <Dialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
-          <DialogContent>
+        <Dialog
+          open={!!deactivateConfirmCustomer}
+          onOpenChange={(open) => !open && setDeactivateConfirmCustomer(null)}
+        >
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Delete customer?</DialogTitle>
+              <DialogTitle>Deactivate customer</DialogTitle>
               <DialogDescription>
-                This action cannot be undone. Customers with existing jobs cannot be deleted.
+                This will deactivate this customer. Their job history will be preserved. You can
+                reactivate them at any time.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setDeleteConfirmId(null)}>
+              <Button variant="ghost" onClick={() => setDeactivateConfirmCustomer(null)}>
                 Cancel
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleDeleteOne}
-                disabled={isDeleting}
+                onClick={handleDeactivate}
+                disabled={isDeactivating}
               >
-                {isDeleting ? 'Deleting…' : 'Delete'}
+                {isDeactivating ? 'Deactivating…' : 'Deactivate'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete selected customers?</DialogTitle>
-              <DialogDescription>
-                Customers with existing jobs will not be deleted. Others will be removed permanently.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setBulkDeleteOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleBulkDelete}
-                disabled={isDeleting}
-              >
-                {isDeleting ? 'Deleting…' : `Delete ${selectedIds.size} customer(s)`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
       <FloatingAddButton href="/customers/new" label="New Customer" desktopLabel={false} />
     </TooltipProvider>

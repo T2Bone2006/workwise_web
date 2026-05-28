@@ -11,7 +11,6 @@ import {
   Mail,
   Eye,
   Pencil,
-  Trash2,
   UserMinus,
   Loader2,
   ChevronDown,
@@ -68,10 +67,8 @@ import type {
   WorkerType,
 } from '@/lib/types/worker';
 import {
-  deleteWorker,
   deactivateWorker,
   bulkUpdateWorkerStatus,
-  bulkDeleteWorkers,
   getWorkerActiveJobCount,
 } from '@/lib/actions/workers';
 import type { TenantSkillRow } from '@/lib/actions/skills';
@@ -220,15 +217,10 @@ export function WorkersTable({
   const [statusPopoverOpen, setStatusPopoverOpen] = useState(false);
   const [skillsPopoverOpen, setSkillsPopoverOpen] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
-  const [deleteConfirmWorker, setDeleteConfirmWorker] = useState<WorkerRowType | null>(null);
   const [deactivateConfirmWorker, setDeactivateConfirmWorker] = useState<WorkerRowType | null>(null);
-  const [deleteActiveCount, setDeleteActiveCount] = useState<number>(0);
   const [deactivateActiveCount, setDeactivateActiveCount] = useState<number>(0);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [isDeactivating, setIsDeactivating] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const stripScrollRef = useRef<HTMLDivElement>(null);
   const [tableScrollWidth, setTableScrollWidth] = useState(0);
@@ -334,12 +326,6 @@ export function WorkersTable({
     hasSkillsArray.length
   );
 
-  const openDeleteConfirm = async (worker: WorkerRowType) => {
-    setDeleteConfirmWorker(worker);
-    const count = await getWorkerActiveJobCount(worker.id);
-    setDeleteActiveCount(count);
-  };
-
   const openDeactivateConfirm = async (worker: WorkerRowType) => {
     setDeactivateConfirmWorker(worker);
     const count = await getWorkerActiveJobCount(worker.id);
@@ -360,20 +346,6 @@ export function WorkersTable({
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteConfirmWorker) return;
-    setIsDeleting(true);
-    const result = await deleteWorker(deleteConfirmWorker.id);
-    setIsDeleting(false);
-    setDeleteConfirmWorker(null);
-    if (result.success) {
-      toast.success('Worker deleted');
-      router.refresh();
-    } else {
-      toast.error(result.error ?? 'Failed to delete worker');
-    }
-  };
-
   const handleBulkStatusUpdate = async (status: WorkerStatus) => {
     if (!selectedIds.size) return;
     setIsBulkUpdating(true);
@@ -386,21 +358,6 @@ export function WorkersTable({
       router.refresh();
     } else {
       toast.error(result.error ?? 'Failed to update status');
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (!selectedIds.size) return;
-    setIsBulkDeleting(true);
-    const result = await bulkDeleteWorkers(Array.from(selectedIds));
-    setIsBulkDeleting(false);
-    setBulkDeleteOpen(false);
-    if (result.success) {
-      setSelectedIds(new Set());
-      toast.success('Selected workers deleted');
-      router.refresh();
-    } else {
-      toast.error(result.error ?? 'Failed to delete workers');
     }
   };
 
@@ -607,31 +564,6 @@ export function WorkersTable({
         </CardContent>
       </Card>
 
-      {/* Bulk delete confirmation */}
-      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete {selectedIds.size} workers</DialogTitle>
-            <DialogDescription>
-              This cannot be undone. Workers with active jobs will not be deleted.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleBulkDelete}
-              disabled={isBulkDeleting}
-            >
-              {isBulkDeleting ? <Loader2 className="size-4 animate-spin" /> : null}
-              Delete Selected
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Table card */}
       <Card
         className={cn(
@@ -722,15 +654,6 @@ export function WorkersTable({
                   <Button variant="outline" size="sm" onClick={handleExportSelected}>
                     <Download className="size-4" />
                     Export Selected
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    <Trash2 className="size-4" />
-                    Delete Selected
                   </Button>
                   <Button
                     variant="ghost"
@@ -908,23 +831,13 @@ export function WorkersTable({
                                 Edit
                               </Link>
                             </DropdownMenuItem>
-                            {worker.user_id ? (
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => openDeactivateConfirm(worker)}
-                              >
-                                <UserMinus className="size-4" />
-                                Deactivate
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => openDeleteConfirm(worker)}
-                              >
-                                <Trash2 className="size-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            )}
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => openDeactivateConfirm(worker)}
+                            >
+                              <UserMinus className="size-4" />
+                              Deactivate
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -975,21 +888,12 @@ export function WorkersTable({
                         <DropdownMenuItem asChild>
                           <Link href={`/workers/${worker.id}/edit`}>Edit</Link>
                         </DropdownMenuItem>
-                        {worker.user_id ? (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => openDeactivateConfirm(worker)}
-                          >
-                            Deactivate
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => openDeleteConfirm(worker)}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        )}
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => openDeactivateConfirm(worker)}
+                        >
+                          Deactivate
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -1090,38 +994,6 @@ export function WorkersTable({
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation dialog */}
-      <Dialog open={!!deleteConfirmWorker} onOpenChange={(open) => !open && setDeleteConfirmWorker(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete worker</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {deleteConfirmWorker?.full_name}?
-              {deleteActiveCount > 0 && (
-                <span className="block mt-2 text-destructive font-medium">
-                  This worker has {deleteActiveCount} active job(s). Reassign jobs first or delete will be blocked.
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteConfirmWorker(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={isDeleting || deleteActiveCount > 0}
-            >
-              {isDeleting ? <Loader2 className="size-4 animate-spin" /> : null}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
