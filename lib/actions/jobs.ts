@@ -37,7 +37,7 @@ type CreateJobPayload = {
   address: string;
   postcode: string;
   description: string;
-  priority: 'low' | 'normal' | 'high' | 'urgent';
+  priority: 'low' | 'normal' | 'high' | 'emergency';
   scheduled_date?: string;
   assigned_worker_id?: string;
   /** If provided, use these skills and log user edits for AI training. */

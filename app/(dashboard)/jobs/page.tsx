@@ -43,7 +43,7 @@ const VALID_STATUS: JobStatus[] = [
   'completed',
   'cancelled',
 ];
-const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'urgent'];
+const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
 
 function parseSearchParams(
   raw: Awaited<JobsPageProps['searchParams']>

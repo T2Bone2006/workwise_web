@@ -42,14 +42,14 @@ const PRIORITY_LABELS: Record<JobPriority, string> = {
   low: 'Low',
   normal: 'Normal',
   high: 'High',
-  urgent: 'Urgent',
+  emergency: 'Urgent',
 };
 
 const PRIORITY_BADGE_CLASS: Record<JobPriority, string> = {
   low: 'border-slate-400/40 bg-slate-500/10 text-slate-600 dark:text-slate-400',
   normal: 'border-sky-400/40 bg-sky-500/10 text-sky-700 dark:text-sky-400',
   high: 'border-orange-400/50 bg-orange-500/10 text-orange-700 dark:text-orange-400',
-  urgent:
+  emergency:
     'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400 shadow-[0_0_10px_-2px_rgba(244,63,94,0.2)]',
 };
 

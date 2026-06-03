@@ -50,14 +50,14 @@ const PRIORITY_OPTIONS = [
   { value: 'low', label: 'Low' },
   { value: 'normal', label: 'Normal' },
   { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
+  { value: 'emergency', label: 'Urgent' },
 ] as const;
 
 const priorityBadgeClass: Record<string, string> = {
   low: 'border-slate-400/40 bg-slate-500/10 text-slate-600 dark:text-slate-400',
   normal: 'border-sky-400/40 bg-sky-500/10 text-sky-700 dark:text-sky-400',
   high: 'border-orange-400/50 bg-orange-500/10 text-orange-700 dark:text-orange-400',
-  urgent: 'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400',
+  emergency: 'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400',
 };
 
 interface JobFormProps {

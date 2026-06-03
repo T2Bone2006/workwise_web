@@ -58,7 +58,7 @@ const SCHEMA_FIELDS = [
   { key: 'worker_name', label: 'Worker name' },
 ] as const;
 
-const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'urgent'];
+const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'emergency'];
 
 function isSpreadsheetImportFile(fileName: string): boolean {
   const lower = fileName.toLowerCase();

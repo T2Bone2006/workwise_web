@@ -15,10 +15,7 @@ const SKILL_DETECT_BATCH_SIZE = 10;
 const SKILL_DETECT_DELAY_MS = 300;
 const GEOCODE_BATCH_SIZE = 5;
 const GEOCODE_DELAY_MS = 300;
-const VALID_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
-/** DB enum job_priority may only have low, normal, high - map urgent/emergency to high for insert */
-const DB_PRIORITIES = ['low', 'normal', 'high'] as const;
-type DbPriority = (typeof DB_PRIORITIES)[number];
+const VALID_PRIORITIES = ['low', 'normal', 'high', 'emergency'] as const;
 
 const AUTO_ASSIGN_CONCURRENCY = 5;
 
@@ -29,16 +26,10 @@ export type ImportJobsResult =
 function toPriority(val: unknown): (typeof VALID_PRIORITIES)[number] {
   if (typeof val !== 'string') return 'normal';
   const v = val.toLowerCase().trim();
-  if (v === 'emergency') return 'urgent';
+  if (v === 'urgent') return 'emergency';
   return VALID_PRIORITIES.includes(v as (typeof VALID_PRIORITIES)[number])
     ? (v as (typeof VALID_PRIORITIES)[number])
     : 'normal';
-}
-
-/** Map app priority to DB enum value (DB may not have 'urgent', so map to 'high'). */
-function toDbPriority(priority: (typeof VALID_PRIORITIES)[number]): DbPriority {
-  if (priority === 'urgent') return 'high';
-  return priority as DbPriority;
 }
 
 /** YYYY-MM-DD unchanged; DD/MM/YYYY or DD-MM-YYYY → ISO date; unparseable → null. */
@@ -250,7 +241,7 @@ export async function importJobs(params: {
         postcode,
         job_description: jobDescription,
         status: 'pending',
-        priority: toDbPriority(priority),
+        priority,
         scheduled_date: scheduledDate || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

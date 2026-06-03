@@ -9,7 +9,7 @@ export type JobStatus =
   | 'completed'
   | 'declined'
   | 'cancelled';
-export type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
+export type JobPriority = 'low' | 'normal' | 'high' | 'emergency';
 
 export interface JobsFilters {
   search?: string;
