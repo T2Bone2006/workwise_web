@@ -25,7 +25,12 @@ interface JobDetailWorkerCardProps {
   readOnly?: boolean;
 }
 
-const EDITABLE_STATUSES: readonly JobStatus[] = ['pending', 'pending_send', 'declined'];
+const EDITABLE_STATUSES: readonly JobStatus[] = [
+  'pending',
+  'pending_send',
+  'assigned',
+  'declined',
+];
 
 function canEditWorkerAssignment(status: JobStatus) {
   return EDITABLE_STATUSES.includes(status);

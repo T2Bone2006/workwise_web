@@ -24,14 +24,8 @@ import {
 } from '@/components/ui/dialog';
 import { revokeWorkerInvite, resendWorkerInvite } from '@/lib/actions/workers';
 import type { WorkerInviteRow } from '@/lib/data/worker-invites';
-import type { WorkerType } from '@/lib/types/worker';
+import { WORKER_TYPE_LABELS } from '@/lib/types/worker';
 import { cn } from '@/lib/utils';
-
-const WORKER_TYPE_LABELS: Record<WorkerType, string> = {
-  company_subcontractor: 'Company Subcontractor',
-  platform_solo: 'Platform Solo',
-  both: 'Both',
-};
 
 function formatDate(iso: string) {
   if (!iso) return '—';

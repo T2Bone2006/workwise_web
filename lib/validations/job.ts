@@ -14,10 +14,7 @@ export const createJobSchema = z.object({
       const match = val.match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)(\d[A-Z]{2})$/);
       return match ? `${match[1]} ${match[2]}` : val;
     }),
-  description: z
-    .string()
-    .min(10, 'Description must be at least 10 characters')
-    .max(1000),
+  description: z.string().min(1, 'Description is required').max(1000),
   priority: z.enum(['low', 'normal', 'high', 'emergency']),
   scheduled_date: z.string().optional(),
   assigned_worker_id: z

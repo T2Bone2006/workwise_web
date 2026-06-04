@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WORKER_TYPE_VALUES } from '@/lib/types/worker';
 
 export const workerSchema = z.object({
   full_name: z
@@ -24,11 +25,7 @@ export const workerSchema = z.object({
       const match = clean.match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)(\d[A-Z]{2})$/);
       return match ? `${match[1]} ${match[2]}` : val;
     }),
-  worker_type: z.enum([
-    'company_subcontractor',
-    'platform_solo',
-    'both',
-  ]),
+  worker_type: z.enum(WORKER_TYPE_VALUES),
   status: z.enum([
     'available',
     'busy',

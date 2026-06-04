@@ -24,13 +24,7 @@ import {
 } from '@/components/ui/dialog';
 import { reactivateWorker } from '@/lib/actions/workers';
 import type { DeactivatedWorkerRow } from '@/lib/data/worker-invites';
-import type { WorkerType } from '@/lib/types/worker';
-
-const WORKER_TYPE_LABELS: Record<WorkerType, string> = {
-  company_subcontractor: 'Company Subcontractor',
-  platform_solo: 'Platform Solo',
-  both: 'Both',
-};
+import { WORKER_TYPE_LABELS } from '@/lib/types/worker';
 
 export interface InactiveWorkersTableProps {
   workers: DeactivatedWorkerRow[];

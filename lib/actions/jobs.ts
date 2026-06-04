@@ -19,6 +19,7 @@ import {
   skillMatchLevelForJob,
   type RankedWorkerForJob,
 } from '@/lib/jobs/worker-skill-match';
+import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 
 export type CreateJobResult =
   | { success: true; jobId: string }
@@ -139,6 +140,9 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
 
     const fullAddress = buildFullAddressString([parsed.data.address, parsed.data.postcode]);
     const geocoded = await geocodeAddress(fullAddress);
+    const initialStatus = assignedWorkerId
+      ? statusAfterWorkerAssignment('pending')
+      : 'pending';
 
     const { data: job, error: insertError } = await supabase
       .from('jobs')
@@ -150,7 +154,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         address: parsed.data.address,
         postcode: parsed.data.postcode,
         job_description: parsed.data.description,
-        status: 'pending',
+        status: initialStatus,
         priority: parsed.data.priority,
         scheduled_date: parsed.data.scheduled_date || null,
         required_skills: requiredSkills,
@@ -188,10 +192,12 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       .insert({
         job_id: job.id,
         from_status: null,
-        to_status: 'pending',
+        to_status: initialStatus,
         created_at: new Date().toISOString(),
         changed_by_user_id: user?.id ?? null,
         changed_by_worker_id: null,
+        notes: assignedWorkerId ? 'Worker assigned' : null,
+        metadata: {},
       });
 
     if (historyError) {
@@ -396,7 +402,7 @@ export type AssignJobResult =
   | { success: false; error: string };
 
 export type AssignJobOptions = {
-  /** Auto-allocation: worker chosen but job not sent to mobile yet (no push until "Send out"). */
+  /** @deprecated Status transitions are enforced in assignJob; kept for callers. */
   pendingSend?: boolean;
 };
 
@@ -424,14 +430,7 @@ export async function assignJob(
     }
 
     const current = (job.status as string) ?? 'pending';
-    let newStatus: string;
-    if (current === 'pending') {
-      newStatus = options?.pendingSend ? 'pending_send' : 'assigned';
-    } else if (current === 'pending_send') {
-      newStatus = 'pending_send';
-    } else {
-      newStatus = current;
-    }
+    const newStatus = statusAfterWorkerAssignment(current);
     const { error: updateError } = await supabase
       .from('jobs')
       .update({

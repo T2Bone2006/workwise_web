@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { autoAllocateJob } from '@/lib/actions/jobs';
+import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
@@ -240,7 +241,7 @@ export async function importJobs(params: {
         address,
         postcode,
         job_description: jobDescription,
-        status: 'pending',
+        status: assignedWorkerId ? statusAfterWorkerAssignment('pending') : 'pending',
         priority,
         scheduled_date: scheduledDate || null,
         created_at: new Date().toISOString(),

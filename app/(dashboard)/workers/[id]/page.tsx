@@ -149,6 +149,11 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
       color:
         'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
     },
+    employee: {
+      label: 'Employee',
+      color:
+        'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300',
+    },
   };
 
   const jobStatusConfig: Record<string, { color: string; label: string }> = {

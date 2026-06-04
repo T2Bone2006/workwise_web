@@ -14,7 +14,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkerStatus, WorkerType, WorkersFilters } from '@/lib/types/worker';
 
 const VALID_STATUSES: WorkerStatus[] = ['available', 'busy', 'unavailable', 'off_duty'];
-const VALID_WORKER_TYPES: WorkerType[] = ['company_subcontractor', 'platform_solo', 'both'];
+const VALID_WORKER_TYPES: WorkerType[] = [
+  'company_subcontractor',
+  'platform_solo',
+  'both',
+  'employee',
+];
 
 interface WorkersPageProps {
   searchParams: Promise<{

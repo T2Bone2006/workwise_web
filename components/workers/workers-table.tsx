@@ -59,12 +59,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import type {
-  WorkerRow as WorkerRowType,
-  WorkerInviteStatus,
-  WorkersFilters,
-  WorkerStatus,
-  WorkerType,
+import {
+  WORKER_TYPE_OPTIONS,
+  workerTypeBadgeClass,
+  type WorkerRow as WorkerRowType,
+  type WorkerInviteStatus,
+  type WorkersFilters,
+  type WorkerStatus,
+  type WorkerType,
 } from '@/lib/types/worker';
 import {
   deactivateWorker,
@@ -89,12 +91,6 @@ const STATUS_OPTIONS: { value: WorkerStatus; label: string }[] = [
   { value: 'off_duty', label: 'Off Duty' },
 ];
 
-const WORKER_TYPE_OPTIONS: { value: WorkerType; label: string }[] = [
-  { value: 'company_subcontractor', label: 'Company Subcontractor' },
-  { value: 'platform_solo', label: 'Platform Solo' },
-  { value: 'both', label: 'Both' },
-];
-
 const statusBadgeClass: Record<WorkerStatus, string> = {
   available:
     'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
@@ -103,12 +99,6 @@ const statusBadgeClass: Record<WorkerStatus, string> = {
     'border-red-400/60 bg-red-500/10 text-red-700 dark:text-red-400 shadow-[0_0_12px_-2px_rgba(239,68,68,0.25)]',
   off_duty:
     'border-slate-400/50 bg-slate-500/10 text-slate-600 dark:text-slate-400 shadow-[0_0_8px_-2px_rgba(100,116,139,0.2)]',
-};
-
-const workerTypeBadgeClass: Record<WorkerType, string> = {
-  company_subcontractor: 'border-blue-400/50 bg-blue-500/10 text-blue-700 dark:text-blue-400',
-  platform_solo: 'border-violet-400/50 bg-violet-500/10 text-violet-700 dark:text-violet-400',
-  both: 'border-cyan-400/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400',
 };
 
 function StatusBadge({ status }: { status: WorkerStatus | null }) {

@@ -1,6 +1,56 @@
 export type WorkerStatus = 'available' | 'busy' | 'unavailable' | 'off_duty';
-export type WorkerType = 'company_subcontractor' | 'platform_solo' | 'both';
+
+export const WORKER_TYPE_VALUES = [
+  'company_subcontractor',
+  'platform_solo',
+  'both',
+  'employee',
+] as const;
+
+export type WorkerType = (typeof WORKER_TYPE_VALUES)[number];
+
 export type WorkerInviteStatus = 'pending' | 'active' | 'accepted' | 'deactivated';
+
+export const WORKER_TYPE_OPTIONS: { value: WorkerType; label: string }[] = [
+  { value: 'company_subcontractor', label: 'Company Subcontractor' },
+  { value: 'platform_solo', label: 'Platform Solo' },
+  { value: 'both', label: 'Both' },
+  { value: 'employee', label: 'Employee' },
+];
+
+export const WORKER_TYPE_LABELS = Object.fromEntries(
+  WORKER_TYPE_OPTIONS.map(({ value, label }) => [value, label])
+) as Record<WorkerType, string>;
+
+export const WORKER_TYPE_FORM_OPTIONS = [
+  {
+    value: 'company_subcontractor' as const,
+    label: 'Company Subcontractor',
+    description: 'Works only for this company',
+  },
+  {
+    value: 'platform_solo' as const,
+    label: 'Platform Solo',
+    description: 'Independent, takes B2C jobs',
+  },
+  {
+    value: 'both' as const,
+    label: 'Both',
+    description: 'Works for company + takes B2C jobs',
+  },
+  {
+    value: 'employee' as const,
+    label: 'Employee',
+    description: 'Employed directly by this company',
+  },
+];
+
+export const workerTypeBadgeClass: Record<WorkerType, string> = {
+  company_subcontractor: 'border-blue-400/50 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  platform_solo: 'border-violet-400/50 bg-violet-500/10 text-violet-700 dark:text-violet-400',
+  both: 'border-cyan-400/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400',
+  employee: 'border-emerald-400/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+};
 
 export interface WorkerRow {
   id: string;

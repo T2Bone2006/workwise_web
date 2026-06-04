@@ -35,25 +35,7 @@ import {
 } from '@/components/ui/popover';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import type { WorkerRow } from '@/lib/types/worker';
-
-const WORKER_TYPE_OPTIONS = [
-  {
-    value: 'company_subcontractor',
-    label: 'Company Subcontractor',
-    description: 'Works only for this company',
-  },
-  {
-    value: 'platform_solo',
-    label: 'Platform Solo',
-    description: 'Independent, takes B2C jobs',
-  },
-  {
-    value: 'both',
-    label: 'Both',
-    description: 'Works for company + takes B2C jobs',
-  },
-] as const;
+import { WORKER_TYPE_FORM_OPTIONS, type WorkerRow } from '@/lib/types/worker';
 
 const STATUS_OPTIONS = [
   { value: 'available', label: 'Available', color: 'bg-emerald-500' },
@@ -319,7 +301,7 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {WORKER_TYPE_OPTIONS.map((o) => (
+                      {WORKER_TYPE_FORM_OPTIONS.map((o) => (
                         <SelectItem key={o.value} value={o.value}>
                           <div>
                             <span className="font-medium">{o.label}</span>
