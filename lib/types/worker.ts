@@ -12,7 +12,7 @@ export type WorkerType = (typeof WORKER_TYPE_VALUES)[number];
 export type WorkerInviteStatus = 'pending' | 'active' | 'accepted' | 'deactivated';
 
 export const WORKER_TYPE_OPTIONS: { value: WorkerType; label: string }[] = [
-  { value: 'company_subcontractor', label: 'Company Subcontractor' },
+  { value: 'company_subcontractor', label: 'Subcontractor' },
   { value: 'platform_solo', label: 'Platform Solo' },
   { value: 'both', label: 'Both' },
   { value: 'employee', label: 'Employee' },
@@ -22,27 +22,9 @@ export const WORKER_TYPE_LABELS = Object.fromEntries(
   WORKER_TYPE_OPTIONS.map(({ value, label }) => [value, label])
 ) as Record<WorkerType, string>;
 
-export const WORKER_TYPE_FORM_OPTIONS = [
-  {
-    value: 'company_subcontractor' as const,
-    label: 'Company Subcontractor',
-    description: 'Works only for this company',
-  },
-  {
-    value: 'platform_solo' as const,
-    label: 'Platform Solo',
-    description: 'Independent, takes B2C jobs',
-  },
-  {
-    value: 'both' as const,
-    label: 'Both',
-    description: 'Works for company + takes B2C jobs',
-  },
-  {
-    value: 'employee' as const,
-    label: 'Employee',
-    description: 'Employed directly by this company',
-  },
+export const WORKER_TYPE_FORM_OPTIONS: { value: WorkerType; label: string }[] = [
+  { value: 'company_subcontractor' as const, label: 'Subcontractor' },
+  { value: 'employee' as const, label: 'Employee' },
 ];
 
 export const workerTypeBadgeClass: Record<WorkerType, string> = {

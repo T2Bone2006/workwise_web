@@ -8,7 +8,7 @@ import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
-import { getTenantSkills } from '@/lib/actions/skills';
+import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
 import { sendJobAssignedPushToWorker } from '@/lib/services/worker-push';
 import { getConnectionsForTenant } from '@/lib/data/network';
@@ -127,7 +127,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         );
       }
     } else {
-      const tenantSkillRows = await getTenantSkills(tenantId);
+      const tenantSkillRows = await getTenantSkillsById(tenantId);
       const tenantSkills = tenantSkillRows.map(({ key, label }) => ({ key, label }));
       const result = await detectSkills({
         description: parsed.data.description,

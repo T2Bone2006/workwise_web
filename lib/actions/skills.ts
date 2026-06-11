@@ -162,3 +162,17 @@ export async function deleteTenantSkill(id: string): Promise<MutateTenantSkillRe
 
   return { success: true };
 }
+
+export async function getTenantSkillsById(tenantId: string): Promise<TenantSkillRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('tenant_skills')
+    .select('id, key, label')
+    .eq('tenant_id', tenantId)
+    .order('key');
+  if (error) {
+    console.error('[getTenantSkillsById]', error);
+    return [];
+  }
+  return (data ?? []) as TenantSkillRow[];
+}

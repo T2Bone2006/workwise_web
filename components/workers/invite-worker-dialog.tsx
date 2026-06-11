@@ -319,12 +319,7 @@ export function InviteWorkerDialog({
                         <SelectContent>
                           {WORKER_TYPE_FORM_OPTIONS.map((o) => (
                             <SelectItem key={o.value} value={o.value}>
-                              <div>
-                                <span className="font-medium">{o.label}</span>
-                                <span className="block text-xs text-muted-foreground">
-                                  {o.description}
-                                </span>
-                              </div>
+                              {o.label}
                             </SelectItem>
                           ))}
                         </SelectContent>

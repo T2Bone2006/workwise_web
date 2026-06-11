@@ -136,7 +136,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
     { label: string; color: string }
   > = {
     company_subcontractor: {
-      label: 'Company Subcontractor',
+      label: 'Subcontractor',
       color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
     },
     platform_solo: {
