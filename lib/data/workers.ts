@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { getAssignableWorkers } from '@/lib/actions/workers';
 import type {
   WorkerInviteStatus,
   WorkerRow as AdminWorkerRow,
@@ -20,65 +21,25 @@ export interface WorkerRow {
 
 /**
  * Fetches workers available for the given tenant.
- * Uses workers.primary_tenant_id and workers.status = 'available'.
+ * Delegates to getAssignableWorkers (available + invite accepted).
  * Never throws - returns empty array on error.
  */
 export async function getWorkersForTenant(
   tenantId: string
 ): Promise<{ workers: WorkerRow[]; error: Error | null }> {
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from('workers')
-      .select(
-        `
-        id,
-        full_name,
-        phone,
-        email,
-        status,
-        worker_tenants!inner(exclude_from_auto_assign)
-      `
-      )
-      .eq('primary_tenant_id', tenantId)
-      .eq('worker_tenants.tenant_id', tenantId)
-      .eq('status', 'available')
-      .order('full_name');
-
-    if (error) {
-      console.error('[getWorkersForTenant] workers', error);
-      return { workers: [], error: new Error(error.message ?? 'Failed to load workers') };
-    }
-
-    const workers: WorkerRow[] = (Array.isArray(data) ? data : []).map(
-      (row: {
-        id: string;
-        full_name: string;
-        phone?: string | null;
-        email?: string | null;
-        status?: string | null;
-        worker_tenants?:
-          | { exclude_from_auto_assign?: boolean | null }
-          | Array<{ exclude_from_auto_assign?: boolean | null }>;
-      }) => ({
-        id: row.id,
-        full_name: row.full_name ?? '',
-        phone: row.phone ?? null,
-        email: row.email ?? null,
-        status: row.status ?? null,
-        exclude_from_auto_assign: Array.isArray(row.worker_tenants)
-          ? Boolean(row.worker_tenants[0]?.exclude_from_auto_assign)
-          : Boolean(row.worker_tenants?.exclude_from_auto_assign),
-      })
-    );
-    return { workers, error: null };
-  } catch (err) {
-    console.error('[getWorkersForTenant]', err);
-    return {
-      workers: [],
-      error: err instanceof Error ? err : new Error(String(err)),
-    };
+  const { workers: assignable, error } = await getAssignableWorkers(tenantId);
+  if (error) {
+    return { workers: [], error };
   }
+  const workers: WorkerRow[] = assignable.map((w) => ({
+    id: w.id,
+    full_name: w.full_name,
+    phone: w.phone,
+    email: w.email,
+    status: w.status,
+    exclude_from_auto_assign: w.exclude_from_auto_assign,
+  }));
+  return { workers, error: null };
 }
 
 function mapInviteStatus(raw: unknown): WorkerInviteStatus {

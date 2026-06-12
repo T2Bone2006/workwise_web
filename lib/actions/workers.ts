@@ -13,6 +13,93 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const ACTIVE_JOB_STATUSES = ['pending', 'pending_send', 'assigned', 'in_progress'] as const;
 
+export type AssignableWorkerRow = {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  status: string | null;
+  home_lat: number | null;
+  home_lng: number | null;
+  home_postcode: string | null;
+  skills: unknown;
+  exclude_from_auto_assign: boolean;
+};
+
+/**
+ * Workers eligible for job assignment: available, invitation accepted, linked to tenant.
+ */
+export async function getAssignableWorkers(
+  tenantId: string
+): Promise<{ workers: AssignableWorkerRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('workers')
+      .select(
+        `
+        id,
+        full_name,
+        phone,
+        email,
+        status,
+        home_lat,
+        home_lng,
+        home_postcode,
+        skills,
+        worker_tenants!inner(exclude_from_auto_assign)
+      `
+      )
+      .eq('primary_tenant_id', tenantId)
+      .eq('worker_tenants.tenant_id', tenantId)
+      .eq('status', 'available')
+      .eq('invite_status', 'accepted')
+      .order('full_name');
+
+    if (error) {
+      console.error('[getAssignableWorkers]', error);
+      return { workers: [], error: new Error(error.message ?? 'Failed to load workers') };
+    }
+
+    const workers: AssignableWorkerRow[] = (Array.isArray(data) ? data : []).map(
+      (row: {
+        id: string;
+        full_name: string;
+        phone?: string | null;
+        email?: string | null;
+        status?: string | null;
+        home_lat?: number | null;
+        home_lng?: number | null;
+        home_postcode?: string | null;
+        skills?: unknown;
+        worker_tenants?:
+          | { exclude_from_auto_assign?: boolean | null }
+          | Array<{ exclude_from_auto_assign?: boolean | null }>;
+      }) => ({
+        id: row.id,
+        full_name: row.full_name ?? '',
+        phone: row.phone ?? null,
+        email: row.email ?? null,
+        status: row.status ?? null,
+        home_lat: row.home_lat ?? null,
+        home_lng: row.home_lng ?? null,
+        home_postcode: row.home_postcode ?? null,
+        skills: row.skills ?? null,
+        exclude_from_auto_assign: Array.isArray(row.worker_tenants)
+          ? Boolean(row.worker_tenants[0]?.exclude_from_auto_assign)
+          : Boolean(row.worker_tenants?.exclude_from_auto_assign),
+      })
+    );
+    return { workers, error: null };
+  } catch (err) {
+    console.error('[getAssignableWorkers]', err);
+    return {
+      workers: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
 function getRawFormData(formData: FormData) {
   return {
     full_name: formData.get('full_name'),

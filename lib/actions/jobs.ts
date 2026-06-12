@@ -12,6 +12,7 @@ import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
 import { sendJobAssignedPushToWorker } from '@/lib/services/worker-push';
 import { getConnectionsForTenant } from '@/lib/data/network';
+import { getAssignableWorkers } from '@/lib/actions/workers';
 import { dispatchJobToNetwork, handleNetworkJobDeclined } from '@/lib/actions/network';
 import {
   parseWorkerSkillsArray,
@@ -429,6 +430,21 @@ export async function assignJob(
       return { success: false, error: 'Job not found or access denied.' };
     }
 
+    const { data: worker, error: workerFetchError } = await supabase
+      .from('workers')
+      .select('invite_status')
+      .eq('id', workerId)
+      .eq('primary_tenant_id', tenantId)
+      .maybeSingle();
+
+    if (workerFetchError || !worker) {
+      return { success: false, error: 'Worker not found.' };
+    }
+
+    if (worker.invite_status !== 'accepted') {
+      return { success: false, error: 'Worker has not accepted their invitation yet' };
+    }
+
     const current = (job.status as string) ?? 'pending';
     const newStatus = statusAfterWorkerAssignment(current);
     const { error: updateError } = await supabase
@@ -586,18 +602,14 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
     const jobCoords = await postcodeToLatLng(job.postcode);
     const requiredSkills = (job.required_skills as string[] | null) ?? [];
 
-    const { data: workersRaw, error: workersError } = await supabase
-      .from('workers')
-      .select('id, full_name, home_lat, home_lng, skills')
-      .eq('primary_tenant_id', userData.tenant_id)
-      .eq('status', 'available');
+    const { workers: workersList, error: workersError } = await getAssignableWorkers(
+      userData.tenant_id
+    );
 
     if (workersError) {
       console.error('[getRankedWorkersForJob] workers fetch error:', workersError);
       return { success: false, error: 'Failed to load workers' };
     }
-
-    const workersList = workersRaw ?? [];
     const workerIds = workersList.map((w) => w.id);
     let excludedWorkerIds = new Set<string>();
     if (workerIds.length > 0) {
@@ -835,23 +847,19 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
     const requiredSkills = (job.required_skills as string[] | null) ?? [];
     const requiredSet = new Set(requiredSkills);
 
-    const { data: workersRaw, error: workersError } = await supabase
-      .from('workers')
-      .select('id, full_name, home_lat, home_lng, home_postcode, skills')
-      .eq('primary_tenant_id', tenantId)
-      .eq('status', 'available')
-      .not('home_lat', 'is', null)
-      .not('home_lng', 'is', null);
+    const { workers: assignableWorkers, error: workersError } = await getAssignableWorkers(tenantId);
 
     if (workersError) {
       console.error('[autoAllocateJob] workers fetch error:', workersError);
       return await fail('Failed to load workers');
     }
 
-    const workersWithSkills = (workersRaw ?? []).map((worker) => ({
-      ...worker,
-      parsedSkills: parseWorkerSkillsArray(worker.skills),
-    }));
+    const workersWithSkills = assignableWorkers
+      .filter((w) => w.home_lat != null && w.home_lng != null)
+      .map((worker) => ({
+        ...worker,
+        parsedSkills: parseWorkerSkillsArray(worker.skills),
+      }));
     const workerIds = workersWithSkills.map((w) => w.id);
     let declinedWorkerIds = new Set<string>();
     if (workerIds.length > 0) {
