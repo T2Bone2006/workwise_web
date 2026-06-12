@@ -97,7 +97,8 @@ type MappedRowValidation =
 function validateMappedImportRow(row: Record<string, string>): MappedRowValidation {
   const reasons: string[] = [];
   if (!row.address?.trim()) reasons.push('Missing address');
-  if (!row.description?.trim()) reasons.push('Missing description');
+  const jobDescription = row.description?.trim() ?? '';
+  if (!jobDescription) reasons.push('Missing description');
   const postcode = row.postcode?.trim() ?? '';
   if (!postcode) reasons.push('Missing postcode');
   else if (!isBasicUkPostcode(postcode)) reasons.push('Invalid postcode');
@@ -105,8 +106,27 @@ function validateMappedImportRow(row: Record<string, string>): MappedRowValidati
   return { valid: true };
 }
 
-function mapCsvRowToSchema(
+/** Matches server formatUnmappedCsvColumns in lib/actions/import.ts */
+function formatUnmappedCsvColumns(
   row: Record<string, string>,
+  columnMapping: Record<string, string>
+): string {
+  const mappedCsvHeaders = new Set(
+    Object.values(columnMapping).filter((c) => typeof c === 'string' && c.trim() !== '')
+  );
+  const parts: string[] = [];
+  for (const col of Object.keys(row)) {
+    if (!col.trim()) continue;
+    if (mappedCsvHeaders.has(col)) continue;
+    const val = String(row[col] ?? '').trim();
+    if (val === '') continue;
+    parts.push(`${col}: ${val}`);
+  }
+  return parts.join(' | ');
+}
+
+function mapCsvRowToSchema(
+  rawRow: Record<string, string>,
   columnMapping: Record<string, string>,
   valueTransforms: Record<string, Record<string, string>>
 ): Record<string, string> {
@@ -119,11 +139,19 @@ function mapCsvRowToSchema(
   const out: Record<string, string> = {};
   SCHEMA_FIELDS.forEach(({ key }) => {
     const csvCol = columnMapping[key];
-    let val = csvCol && row[csvCol] != null ? String(row[csvCol]).trim() : '';
+    let val = csvCol && rawRow[csvCol] != null ? String(rawRow[csvCol]).trim() : '';
     if (val && valueTransforms[key]) val = applyFieldTransforms(key, val);
     out[key] = val;
   });
   if (!out.priority) out.priority = valueTransforms.priority?.default ?? 'normal';
+
+  const mappedDescription = out.description ?? '';
+  const unmappedAppendix = formatUnmappedCsvColumns(rawRow, columnMapping);
+  out.description =
+    mappedDescription && unmappedAppendix
+      ? `${mappedDescription} | ${unmappedAppendix}`
+      : mappedDescription || unmappedAppendix;
+
   return out;
 }
 
@@ -800,7 +828,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                       <TableHead>Postcode</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Priority</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Issues</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -822,9 +850,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                         <TableCell className="max-w-[200px] truncate">{mapped.description}</TableCell>
                         <TableCell>{mapped.priority}</TableCell>
                         <TableCell className="text-sm">
-                          {validation.valid ? (
-                            <span className="text-green-600 dark:text-green-400">Valid</span>
-                          ) : (
+                          {!validation.valid && (
                             <span className="text-destructive">{validation.reasons.join(', ')}</span>
                           )}
                         </TableCell>
