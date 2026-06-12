@@ -132,6 +132,7 @@ CREATE TABLE public.import_sources (
   source_name text NOT NULL,
   source_identifier text,
   column_mapping jsonb NOT NULL,
+  value_transforms jsonb NOT NULL DEFAULT '{}'::jsonb,
   mapped_by text DEFAULT 'manual'::text,
   ai_confidence numeric,
   last_used_at timestamp with time zone,

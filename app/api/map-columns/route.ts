@@ -6,13 +6,32 @@ type MapResult = {
   valueTransforms?: Record<string, Record<string, string>>;
 };
 
+function formatSampleRows(
+  columnNames: string[],
+  sampleRows: Record<string, string>[]
+): string {
+  const rows = sampleRows.slice(0, 5);
+  return columnNames
+    .map((col) => {
+      const values = rows
+        .map((row) => {
+          const v = String(row[col] ?? '').trim();
+          return v ? `"${v.replace(/"/g, '\\"')}"` : null;
+        })
+        .filter((v): v is string => v != null);
+      return values.length > 0 ? `- ${col}: ${values.join(', ')}` : `- ${col}: (empty)`;
+    })
+    .join('\n');
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
       columnNames?: string[];
+      sampleRows?: Record<string, string>[];
       importSourceId?: string;
     };
-    const { columnNames, importSourceId } = body;
+    const { columnNames, sampleRows = [], importSourceId } = body;
 
     if (!Array.isArray(columnNames) || columnNames.length === 0) {
       return NextResponse.json(
@@ -21,9 +40,12 @@ export async function POST(req: Request) {
       );
     }
 
+    const sampleSection = formatSampleRows(columnNames, sampleRows);
+
     const prompt = `You are mapping CSV columns to a job management schema AND normalizing values.
 
-CSV columns: ${columnNames.join(', ')}
+CSV columns and sample values:
+${sampleSection}
 
 Our schema:
 - customer_name (text - customer name)
@@ -75,10 +97,12 @@ Rules:
         prompt,
         inputData: {
           columnNames,
+          sampleRows: sampleRows.slice(0, 5),
           job_type: 'csv_column_mapping',
         },
         importSourceId,
-        max_tokens: 1500,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
       },
       (response) => {
         let raw = response.trim();

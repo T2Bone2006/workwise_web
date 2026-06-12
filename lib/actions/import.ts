@@ -124,6 +124,7 @@ export async function importJobs(params: {
         .from('import_sources')
         .update({
           column_mapping: params.columnMapping,
+          value_transforms: params.valueTransforms ?? {},
           customer_id: params.customerId ?? null,
           last_used_at: new Date().toISOString(),
           times_used: nextTimesUsed,
@@ -136,6 +137,7 @@ export async function importJobs(params: {
           tenant_id: tenantId,
           source_name: params.sourceName.trim() || 'Unnamed source',
           column_mapping: params.columnMapping,
+          value_transforms: params.valueTransforms ?? {},
           customer_id: params.customerId ?? null,
           mapped_by: 'manual',
           times_used: 1,

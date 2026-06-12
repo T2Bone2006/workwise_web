@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -11,9 +11,9 @@ import {
   ArrowRight,
   ArrowLeft,
   Sparkles,
-  Check,
   Loader2,
   MapPin,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,6 +60,73 @@ const SCHEMA_FIELDS = [
 
 const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'emergency'];
 
+function cleanSavedMapping(mapping: Record<string, string | null>): Record<string, string> {
+  const cleaned: Record<string, string> = {};
+  Object.entries(mapping).forEach(([k, v]) => {
+    if (v != null && v !== '') cleaned[k] = v;
+  });
+  return cleaned;
+}
+
+function getSavedCsvColumns(columnMapping: Record<string, string | null>): string[] {
+  return Object.values(columnMapping).filter(
+    (v): v is string => v != null && v !== ''
+  );
+}
+
+function savedMappingMissingColumns(
+  savedMapping: Record<string, string | null>,
+  headers: string[]
+): boolean {
+  const headerSet = new Set(headers);
+  return getSavedCsvColumns(savedMapping).some((col) => !headerSet.has(col));
+}
+
+function isBasicUkPostcode(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (!/^[A-Za-z0-9]+(\s[A-Za-z0-9]+)?$/.test(trimmed)) return false;
+  const compact = trimmed.replace(/\s/g, '');
+  return compact.length >= 5 && compact.length <= 8;
+}
+
+type MappedRowValidation =
+  | { valid: true }
+  | { valid: false; reasons: string[] };
+
+function validateMappedImportRow(row: Record<string, string>): MappedRowValidation {
+  const reasons: string[] = [];
+  if (!row.address?.trim()) reasons.push('Missing address');
+  if (!row.description?.trim()) reasons.push('Missing description');
+  const postcode = row.postcode?.trim() ?? '';
+  if (!postcode) reasons.push('Missing postcode');
+  else if (!isBasicUkPostcode(postcode)) reasons.push('Invalid postcode');
+  if (reasons.length > 0) return { valid: false, reasons };
+  return { valid: true };
+}
+
+function mapCsvRowToSchema(
+  row: Record<string, string>,
+  columnMapping: Record<string, string>,
+  valueTransforms: Record<string, Record<string, string>>
+): Record<string, string> {
+  const applyFieldTransforms = (field: string, raw: string): string => {
+    const t = valueTransforms[field];
+    if (!t) return raw;
+    const key = raw.trim();
+    return t[key] ?? t['default'] ?? raw;
+  };
+  const out: Record<string, string> = {};
+  SCHEMA_FIELDS.forEach(({ key }) => {
+    const csvCol = columnMapping[key];
+    let val = csvCol && row[csvCol] != null ? String(row[csvCol]).trim() : '';
+    if (val && valueTransforms[key]) val = applyFieldTransforms(key, val);
+    out[key] = val;
+  });
+  if (!out.priority) out.priority = valueTransforms.priority?.default ?? 'normal';
+  return out;
+}
+
 function isSpreadsheetImportFile(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return lower.endsWith('.csv') || lower.endsWith('.xlsx');
@@ -105,15 +172,72 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
   const [previewData, setPreviewData] = useState<Record<string, string>[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [useSavedMapping, setUseSavedMapping] = useState(false);
   const [showRemap, setShowRemap] = useState(false);
   const [isAiMapping, setIsAiMapping] = useState(false);
+  const [fileDiffersFromSaved, setFileDiffersFromSaved] = useState(false);
 
   const sources = initialSources;
 
   const canGoStep2 = sourceId !== null || sourceName.trim().length > 0;
   const canGoStep3 = csvFile && csvHeaders.length > 0 && csvData.length > 0;
   const priorityMapped = columnMapping.priority ?? 'normal';
+
+  const applySavedSourceMapping = useCallback((source: ImportSourceRow) => {
+    setColumnMapping(cleanSavedMapping(source.column_mapping));
+    setValueTransforms(source.value_transforms ?? {});
+  }, []);
+
+  const goToMappingOrPreview = useCallback(() => {
+    const source = sourceId ? sources.find((s) => s.id === sourceId) : null;
+    const saved = source?.column_mapping ?? {};
+    const hasSaved = source && Object.keys(saved).length > 0;
+    if (fileDiffersFromSaved) {
+      setStep(4);
+    } else if (hasSaved && !showRemap) {
+      applySavedSourceMapping(source);
+      setStep(4);
+    } else {
+      setStep(3);
+    }
+  }, [sourceId, sources, showRemap, applySavedSourceMapping, fileDiffersFromSaved]);
+
+  const runAiMapping = useCallback(
+    async (headers: string[], rows: Record<string, string>[]) => {
+      if (!headers.length) return;
+      setIsAiMapping(true);
+      try {
+        const res = await fetch('/api/map-columns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            columnNames: headers,
+            sampleRows: rows.slice(0, 5),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error ?? 'AI mapping failed');
+        }
+        const { mapping, transforms } = await res.json();
+        const cleaned: Record<string, string> = {};
+        Object.entries(mapping ?? {}).forEach(([k, v]) => {
+          if (v && typeof v === 'string') cleaned[k] = v;
+        });
+        setColumnMapping(cleaned);
+        setValueTransforms(transforms ?? {});
+        toast.success('AI mapped columns and value transforms');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'AI mapping failed. Use manual mapping.');
+      } finally {
+        setIsAiMapping(false);
+      }
+    },
+    []
+  );
+
+  const handleAiMapping = useCallback(() => {
+    void runAiMapping(csvHeaders, csvData);
+  }, [runAiMapping, csvHeaders, csvData]);
 
   const handleFile = useCallback((file: File) => {
     if (!isSpreadsheetImportFile(file.name)) {
@@ -128,12 +252,28 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
         setCsvHeaders([]);
         setCsvData([]);
         setPreviewData([]);
+        setFileDiffersFromSaved(false);
         return;
       }
       const headers = Object.keys(rows[0]!);
       setCsvHeaders(headers);
       setCsvData(rows);
       setPreviewData(rows.slice(0, 5));
+      setFileDiffersFromSaved(false);
+      setShowRemap(false);
+
+      if (sourceId === null) {
+        void runAiMapping(headers, rows);
+      } else {
+        const source = sources.find((s) => s.id === sourceId);
+        const saved = source?.column_mapping ?? {};
+        const hasSaved = source && Object.keys(saved).length > 0;
+        if (hasSaved && savedMappingMissingColumns(saved, headers)) {
+          setFileDiffersFromSaved(true);
+          setShowRemap(true);
+          void runAiMapping(headers, rows);
+        }
+      }
     };
 
     const lower = file.name.toLowerCase();
@@ -167,7 +307,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
         setPreviewData([]);
       },
     });
-  }, []);
+  }, [sourceId, sources, runAiMapping]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -189,52 +329,28 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
     setIsDragging(false);
   }, []);
 
-  const handleAiMapping = async () => {
-    if (!csvHeaders.length) return;
-    setIsAiMapping(true);
-    try {
-      const res = await fetch('/api/map-columns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ columnNames: csvHeaders }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? 'AI mapping failed');
-      }
-      const { mapping, transforms } = await res.json();
-      const cleaned: Record<string, string> = {};
-      Object.entries(mapping ?? {}).forEach(([k, v]) => {
-        if (v && typeof v === 'string') cleaned[k] = v;
-      });
-      setColumnMapping(cleaned);
-      setValueTransforms(transforms ?? {});
-      toast.success('AI mapped columns and value transforms');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'AI mapping failed. Use manual mapping.');
-    } finally {
-      setIsAiMapping(false);
-    }
-  };
+  const importRowStats = useMemo(() => {
+    const validations = csvData.map((row) =>
+      validateMappedImportRow(mapCsvRowToSchema(row, columnMapping, valueTransforms))
+    );
+    const readyCount = validations.filter((v) => v.valid).length;
+    const invalidCount = csvData.length - readyCount;
+    return {
+      validations,
+      readyCount,
+      invalidCount,
+      hasInvalidRows: invalidCount > 0,
+    };
+  }, [csvData, columnMapping, valueTransforms]);
 
-  const applyTransforms = (field: string, raw: string): string => {
-    const t = valueTransforms[field];
-    if (!t) return raw;
-    const key = raw.trim();
-    return t[key] ?? t['default'] ?? raw;
-  };
-
-  const mappedPreviewRows = previewData.slice(0, 10).map((row) => {
-    const out: Record<string, string> = {};
-    SCHEMA_FIELDS.forEach(({ key }) => {
-      const csvCol = columnMapping[key];
-      let val = csvCol && row[csvCol] != null ? String(row[csvCol]).trim() : '';
-      if (val && valueTransforms[key]) val = applyTransforms(key, val);
-      out[key] = val;
-    });
-    if (!out.priority) out.priority = valueTransforms.priority?.default ?? 'normal';
-    return out;
-  });
+  const mappedPreviewRows = useMemo(
+    () =>
+      previewData.slice(0, 10).map((row) => {
+        const mapped = mapCsvRowToSchema(row, columnMapping, valueTransforms);
+        return { mapped, validation: validateMappedImportRow(mapped) };
+      }),
+    [previewData, columnMapping, valueTransforms]
+  );
 
   const handleImport = async () => {
     if (!csvData.length) {
@@ -290,7 +406,13 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
   const selectedSource = sourceId ? sources.find((s) => s.id === sourceId) : null;
   const savedMapping = selectedSource?.column_mapping ?? {};
   const hasSavedMapping = selectedSource && Object.keys(savedMapping).length > 0;
-  const skipMappingStep = hasSavedMapping && (useSavedMapping || step < 3) && !showRemap;
+
+  const remappedWarningBanner = fileDiffersFromSaved ? (
+    <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-900 dark:text-yellow-100">
+      This file looks different from your last import. We&apos;ve automatically remapped it — please
+      review before importing.
+    </div>
+  ) : null;
 
   const stepProgress = (step / 4) * 100;
 
@@ -346,6 +468,10 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                 value={sourceId ?? 'new'}
                 onValueChange={(v) => {
                   setSourceId(v === 'new' ? null : v);
+                  setColumnMapping({});
+                  setValueTransforms({});
+                  setShowRemap(false);
+                  setFileDiffersFromSaved(false);
                   if (v !== 'new') {
                     const s = sources.find((x) => x.id === v);
                     if (s) {
@@ -422,6 +548,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {remappedWarningBanner}
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
@@ -484,7 +611,11 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
               <ArrowLeft className="size-4" /> Back
             </Button>
-            <Button onClick={() => setStep(3)} disabled={!canGoStep3} className="gap-2">
+            <Button
+              onClick={goToMappingOrPreview}
+              disabled={!canGoStep3 || isAiMapping}
+              className="gap-2"
+            >
               Next <ArrowRight className="size-4" />
             </Button>
           </CardFooter>
@@ -501,7 +632,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             </CardTitle>
             <CardDescription>
               {hasSavedMapping && !showRemap
-                ? 'Use your saved mapping or remap columns.'
+                ? 'Saved mapping is applied. Remap if this file has different columns.'
                 : 'Let AI suggest mappings or choose manually.'}
             </CardDescription>
           </CardHeader>
@@ -509,32 +640,13 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             {hasSavedMapping && !showRemap && (
               <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
                 <p className="text-sm text-muted-foreground">
-                  Saved mapping found for this source. You can use it as-is or remap.
+                  Saved mapping and value transforms are applied for this source.
                 </p>
                 <div className="flex gap-2">
                   <Button
-                    variant="gradient"
-                    className="gap-2"
-                    onClick={() => {
-                      const cleaned: Record<string, string> = {};
-                      Object.entries(savedMapping).forEach(([k, v]) => {
-                        if (v != null && v !== '') cleaned[k] = v;
-                      });
-                      setColumnMapping(cleaned);
-                      setUseSavedMapping(true);
-                      setStep(4);
-                    }}
-                  >
-                    <Check className="size-4" /> Use saved mapping
-                  </Button>
-                  <Button
                     variant="outline"
                     onClick={() => {
-                      const cleaned: Record<string, string> = {};
-                      Object.entries(savedMapping).forEach(([k, v]) => {
-                        if (v != null && v !== '') cleaned[k] = v;
-                      });
-                      setColumnMapping(cleaned);
+                      if (selectedSource) applySavedSourceMapping(selectedSource);
                       setShowRemap(true);
                     }}
                   >
@@ -672,43 +784,77 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
           <CardHeader>
             <CardTitle>Preview & import</CardTitle>
             <CardDescription>
-              First 10 rows mapped to our schema. Click Import to create {csvData.length} jobs.
+              First 10 rows mapped to our schema. All rows must pass validation before import.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="max-h-[400px] overflow-auto rounded-lg border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Address</TableHead>
-                    <TableHead>Postcode</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Priority</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mappedPreviewRows.map((row, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="max-w-[140px] truncate">{row.customer_name}</TableCell>
-                      <TableCell className="max-w-[180px] truncate">{row.address}</TableCell>
-                      <TableCell>{row.postcode}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{row.description}</TableCell>
-                      <TableCell>{row.priority}</TableCell>
+            <div className="space-y-4">
+              {remappedWarningBanner}
+              <div className="max-h-[400px] overflow-auto rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10" />
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Address</TableHead>
+                      <TableHead>Postcode</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {mappedPreviewRows.map(({ mapped, validation }, i) => (
+                      <TableRow
+                        key={i}
+                        className={cn(!validation.valid && 'bg-destructive/10')}
+                      >
+                        <TableCell>
+                          {validation.valid ? (
+                            <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+                          ) : (
+                            <span className="inline-block size-2 rounded-full bg-destructive" />
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate">{mapped.customer_name}</TableCell>
+                        <TableCell className="max-w-[180px] truncate">{mapped.address}</TableCell>
+                        <TableCell>{mapped.postcode}</TableCell>
+                        <TableCell className="max-w-[200px] truncate">{mapped.description}</TableCell>
+                        <TableCell>{mapped.priority}</TableCell>
+                        <TableCell className="text-sm">
+                          {validation.valid ? (
+                            <span className="text-green-600 dark:text-green-400">Valid</span>
+                          ) : (
+                            <span className="text-destructive">{validation.reasons.join(', ')}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </CardContent>
-          <CardFooter className="flex items-center gap-4">
+          <CardFooter className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1 text-sm">
+              <p className="text-muted-foreground">
+                {importRowStats.readyCount} of {csvData.length} rows ready to import
+              </p>
+              {importRowStats.hasInvalidRows && (
+                <p className="text-amber-600 dark:text-amber-400">
+                  {importRowStats.invalidCount} row{importRowStats.invalidCount === 1 ? '' : 's'}{' '}
+                  have missing required fields and will be skipped
+                </p>
+              )}
+            </div>
+            <div className="flex gap-4">
             <Button variant="outline" onClick={() => setStep(3)} className="gap-2">
               <ArrowLeft className="size-4" /> Back
             </Button>
             <Button
               variant="gradient"
               onClick={handleImport}
-              disabled={isImporting}
+              disabled={isImporting || importRowStats.hasInvalidRows}
               className="gap-2"
             >
               {isImporting ? (
@@ -718,6 +864,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
               )}
               Import {csvData.length} jobs
             </Button>
+            </div>
           </CardFooter>
         </Card>
       )}
