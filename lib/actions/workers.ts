@@ -288,15 +288,15 @@ export async function inviteWorker(formData: FormData) {
     tenantName: tenantData?.name ?? 'WorkWise',
   });
 
-  try {
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to: emailNorm,
-      subject,
-      html,
-    });
-  } catch (e) {
-    console.error('[inviteWorker] resend:', e);
+  const { error: resendError } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: emailNorm,
+    subject,
+    html,
+  });
+  if (resendError) {
+    console.error('[inviteWorker] resend error:', resendError);
+    return { success: false, error: 'Failed to send invitation email. Please try again.' };
   }
 
   revalidatePath('/workers');
@@ -597,6 +597,7 @@ export async function resendWorkerInvite(inviteId: string) {
 
   if (generateError) {
     console.error('[resendWorkerInvite] generateLink:', generateError);
+    return { success: false, error: generateError.message };
   }
 
   const { error: deleteInviteError } = await admin
@@ -632,15 +633,15 @@ export async function resendWorkerInvite(inviteId: string) {
     tenantName: tenantData?.name ?? 'WorkWise',
   });
 
-  try {
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to: emailNorm,
-      subject,
-      html,
-    });
-  } catch (e) {
-    console.error('[resendWorkerInvite] resend:', e);
+  const { error: resendError } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: emailNorm,
+    subject,
+    html,
+  });
+  if (resendError) {
+    console.error('[resendWorkerInvite] resend error:', resendError);
+    return { success: false, error: 'Failed to send invitation email. Please try again.' };
   }
 
   revalidatePath('/workers');
