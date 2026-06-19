@@ -79,13 +79,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
   }
 
-  const { error: workerStatusError } = await adminClient
+  const { data: updatedRows, error: workerStatusError } = await adminClient
     .from('workers')
     .update({ invite_status: 'accepted', updated_at: now })
-    .eq('user_id', userId);
+    .eq('id', record.worker_id)
+    .select('id');
 
-  if (workerStatusError) {
-    console.error('[invite/confirm] workers invite_status update:', workerStatusError);
+  if (workerStatusError || !updatedRows || updatedRows.length === 0) {
+    console.error(
+      '[invite/confirm] workers invite_status update failed or matched 0 rows:',
+      workerStatusError,
+      'worker_id:',
+      record.worker_id
+    );
     return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
   }
 
