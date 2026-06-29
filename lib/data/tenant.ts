@@ -51,14 +51,11 @@ export async function getTenantIdForCurrentUser(): Promise<string | null> {
       error: authError,
     } = await supabase.auth.getUser();
 
-    console.log('[getTenantIdForCurrentUser] Auth user:', user?.id ?? null, authError?.message ?? 'ok');
-
     if (authError) {
       console.error('[getTenantIdForCurrentUser] Auth error:', authError);
       return null;
     }
     if (!user?.id) {
-      console.log('[getTenantIdForCurrentUser] No user id');
       return null;
     }
 
@@ -73,9 +70,7 @@ export async function getTenantIdForCurrentUser(): Promise<string | null> {
       return null;
     }
 
-    const tenantId = userRow?.tenant_id ?? null;
-    console.log('[getTenantIdForCurrentUser] Tenant ID:', tenantId);
-    return tenantId;
+    return userRow?.tenant_id ?? null;
   } catch (err) {
     console.error('[getTenantIdForCurrentUser] Unexpected error:', err);
     return null;

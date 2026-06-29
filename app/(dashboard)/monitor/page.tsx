@@ -37,11 +37,13 @@ function NoTenantMessage() {
   );
 }
 
-function MonitorErrorFallback({ message }: { message: string }) {
+function MonitorErrorFallback() {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
       <h2 className="text-lg font-semibold text-foreground">Unable to load monitor</h2>
-      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Something went wrong. Please try again or contact support.
+      </p>
     </div>
   );
 }
@@ -71,10 +73,10 @@ export default async function MonitorPage({ searchParams }: MonitorPageProps) {
     ]);
 
     if (dispatchesResult.error) {
-      return <MonitorErrorFallback message={dispatchesResult.error.message} />;
+      return <MonitorErrorFallback />;
     }
     if (connectionsResult.error) {
-      return <MonitorErrorFallback message={connectionsResult.error.message} />;
+      return <MonitorErrorFallback />;
     }
 
     const activeConnections = connectionsResult.connections.filter(
@@ -97,10 +99,7 @@ export default async function MonitorPage({ searchParams }: MonitorPageProps) {
       />
     );
   } catch (err) {
-    return (
-      <MonitorErrorFallback
-        message={err instanceof Error ? err.message : 'An unexpected error occurred.'}
-      />
-    );
+    console.error('[MonitorPage] Unexpected error:', err);
+    return <MonitorErrorFallback />;
   }
 }

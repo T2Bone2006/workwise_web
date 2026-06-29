@@ -258,8 +258,6 @@ export async function importJobs(params: {
       });
     }
 
-    console.log('[importJobs] valid jobs ready to insert:', jobs.length);
-
     try {
       for (let i = 0; i < jobs.length; i += GEOCODE_BATCH_SIZE) {
         const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);

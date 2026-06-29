@@ -39,11 +39,6 @@ export function LoginForm() {
   // Always show when we have an error so both wrong-email and wrong-password show the toast.
   useEffect(() => {
     if (!state.success && state.error) {
-      // Debug: log the full error response from the Server Action
-      console.log('[LoginForm] Error response from login action:', {
-        success: state.success,
-        error: state.error,
-      });
       toast.error(state.error);
     }
   }, [state.success, state.error]);

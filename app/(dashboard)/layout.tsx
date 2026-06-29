@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { DashboardShell } from '@/components/layout/dashboard-shell';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getTenantFeatures } from '@/lib/data/tenant-features';
 import { getNetworkNotificationCounts } from '@/lib/data/network';
 import { isAdmin } from '@/lib/utils/admin';
 
@@ -19,11 +20,14 @@ export default async function DashboardLayout({
     redirect('/login');
   }
 
-  const [tenantName, admin, tenantId] = await Promise.all([
+  const [tenantName, admin, tenantId, features] = await Promise.all([
     getTenantNameForCurrentUser(),
     isAdmin(),
     getTenantIdForCurrentUser(),
+    getTenantFeatures(),
   ]);
+
+  // TODO: route protection — add per-page checks instead (layout has no pathname access in this codebase)
 
   const networkCounts = tenantId ? await getNetworkNotificationCounts(tenantId) : null;
   const networkBadge = networkCounts
@@ -36,6 +40,7 @@ export default async function DashboardLayout({
       userEmail={user.email ?? undefined}
       isAdmin={admin}
       networkBadge={networkBadge}
+      features={features}
     >
       {children}
     </DashboardShell>

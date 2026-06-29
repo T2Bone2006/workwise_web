@@ -43,12 +43,7 @@ export default function PortalLoginPage() {
     setIsSubmitting(false);
 
     if (error) {
-      const message =
-        error.message?.toLowerCase().includes('invalid') ||
-        error.message?.toLowerCase().includes('credentials')
-          ? 'Invalid email or password'
-          : error.message;
-      toast.error(message);
+      toast.error('Invalid email or password');
       return;
     }
 

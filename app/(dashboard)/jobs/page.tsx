@@ -100,13 +100,15 @@ function NoTenantMessage() {
   );
 }
 
-function JobsErrorFallback({ message }: { message: string }) {
+function JobsErrorFallback() {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
       <h2 className="text-lg font-semibold text-foreground">
         Unable to load jobs
       </h2>
-      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Something went wrong. Please try again or contact support.
+      </p>
       <p className="mt-4 text-xs text-muted-foreground">
         Please contact support if this continues.
       </p>
@@ -117,7 +119,6 @@ function JobsErrorFallback({ message }: { message: string }) {
 export default async function JobsPage({ searchParams }: JobsPageProps) {
   try {
     const tenantId = await getTenantIdForCurrentUser();
-    console.log('[JobsPage] Tenant ID:', tenantId ?? 'null/undefined');
 
     if (!tenantId) {
       return <NoTenantMessage />;
@@ -160,11 +161,6 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           : undefined,
     };
     const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
-    console.log('[JobsPage] Jobs query result:', {
-      jobsCount: jobs?.length ?? 0,
-      totalCount: totalCount ?? 0,
-      hasError: !!error,
-    });
 
     const redirectError = rawParams.error ?? null;
     const unassignedCount = unassignedJobs?.length ?? 0;
@@ -196,7 +192,6 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     );
   } catch (err) {
     console.error('[JobsPage] Unexpected error:', err);
-    const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
-    return <JobsErrorFallback message={message} />;
+    return <JobsErrorFallback />;
   }
 }

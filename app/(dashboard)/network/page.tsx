@@ -17,11 +17,13 @@ function NoTenantMessage() {
   );
 }
 
-function NetworkErrorFallback({ message }: { message: string }) {
+function NetworkErrorFallback() {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
       <h2 className="text-lg font-semibold text-foreground">Unable to load network</h2>
-      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Something went wrong. Please try again or contact support.
+      </p>
     </div>
   );
 }
@@ -42,10 +44,10 @@ export default async function NetworkPage() {
     ]);
 
     if (connectionsError) {
-      return <NetworkErrorFallback message={connectionsError.message} />;
+      return <NetworkErrorFallback />;
     }
     if (inboxError) {
-      return <NetworkErrorFallback message={inboxError.message} />;
+      return <NetworkErrorFallback />;
     }
 
     return (
@@ -58,10 +60,7 @@ export default async function NetworkPage() {
       />
     );
   } catch (err) {
-    return (
-      <NetworkErrorFallback
-        message={err instanceof Error ? err.message : 'An unexpected error occurred.'}
-      />
-    );
+    console.error('[NetworkPage] Unexpected error:', err);
+    return <NetworkErrorFallback />;
   }
 }

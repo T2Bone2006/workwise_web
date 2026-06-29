@@ -259,7 +259,6 @@ export async function getJobsForTenant(
       };
     });
 
-    console.log('[getJobsForTenant] Jobs query result:', { count: jobs.length, totalCount: typeof count === 'number' ? count : 0 });
     return {
       jobs,
       totalCount: typeof count === 'number' ? count : 0,

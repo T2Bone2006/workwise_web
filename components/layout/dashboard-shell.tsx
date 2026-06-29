@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
+import type { TenantFeatures } from '@/lib/data/tenant-features';
 
 interface DashboardShellProps {
   children: React.ReactNode;
@@ -13,6 +14,7 @@ interface DashboardShellProps {
   isAdmin?: boolean;
   /** Sum of pending network notifications; sidebar shows a dot when > 0. */
   networkBadge?: number;
+  features: TenantFeatures;
 }
 
 /**
@@ -24,6 +26,7 @@ export function DashboardShell({
   userEmail,
   isAdmin = false,
   networkBadge,
+  features,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -36,6 +39,7 @@ export function DashboardShell({
         onMobileClose={() => setMobileOpen(false)}
         isAdmin={isAdmin}
         networkBadge={networkBadge}
+        features={features}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Topbar

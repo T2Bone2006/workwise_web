@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   Brain,
 } from 'lucide-react';
+import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,16 +31,11 @@ import { Separator } from '@/components/ui/separator';
 
 const SIDEBAR_STORAGE_KEY = 'workwise-sidebar-collapsed';
 
-const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/jobs', label: 'Jobs', icon: Briefcase },
-  { href: '/workers', label: 'Workers', icon: Users },
-  { href: '/network', label: 'Network', icon: Share2 },
-  { href: '/monitor', label: 'Monitor', icon: Activity },
-  { href: '/customers', label: 'Customers', icon: Building2 },
-  { href: '/import', label: 'Import', icon: Upload },
-  { href: '/settings', label: 'Settings', icon: Settings },
-] as const;
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+};
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -47,12 +43,24 @@ interface SidebarProps {
   isAdmin?: boolean;
   /** When > 0, shows a dot next to Network (or on the icon when sidebar is collapsed). */
   networkBadge?: number;
+  features: TenantFeatures;
 }
 
-export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBadge }: SidebarProps) {
+export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBadge, features }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  const navItems: NavItem[] = [
+    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { href: '/jobs', label: 'Jobs', icon: Briefcase, show: features.pro },
+    { href: '/workers', label: 'Workers', icon: Users, show: features.pro },
+    { href: '/network', label: 'Network', icon: Share2, show: features.pro },
+    { href: '/monitor', label: 'Monitor', icon: Activity, show: features.pro },
+    { href: '/customers', label: 'Customers', icon: Building2, show: features.pro },
+    { href: '/import', label: 'Import', icon: Upload, show: features.pro },
+    { href: '/settings', label: 'Settings', icon: Settings, show: true },
+  ].filter((item) => item.show);
 
   useEffect(() => {
     setMounted(true);
@@ -70,7 +78,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
     if (mounted) localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
   };
 
-  const linkContent = (item: (typeof navItems)[number], isMobile = false) => {
+  const linkContent = (item: NavItem, isMobile = false) => {
     const showNetworkDot =
       item.href === '/network' && networkBadge != null && networkBadge > 0;
     const labelVisible = !collapsed || isMobile;

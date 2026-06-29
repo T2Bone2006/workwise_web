@@ -1,21 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function JobsError({
-  error,
+  error: _error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error('[JobsError] Boundary caught:', error?.message ?? error);
-  }, [error]);
-
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
       <div className="rounded-full border border-destructive/30 bg-destructive/10 p-4">

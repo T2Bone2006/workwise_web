@@ -32,15 +32,7 @@ export async function login(
     });
 
     if (error) {
-      // Use a single message for invalid email or password so we don't leak which was wrong
-      const message =
-        error.message?.toLowerCase().includes('invalid') ||
-        error.message?.toLowerCase().includes('credentials')
-          ? 'Invalid email or password'
-          : error.message;
-      const result: AuthResult = { success: false, error: message };
-      console.log('[login Server Action] Auth failed, returning:', result);
-      return result;
+      return { success: false, error: 'Invalid email or password' };
     }
 
     const {

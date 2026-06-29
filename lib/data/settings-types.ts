@@ -76,6 +76,13 @@ export interface TenantSettings {
   integrations?: IntegrationsSettings;
   notifications?: NotificationsSettings;
   user_phone?: Record<string, string>;
+  features?: {
+    pro?: boolean;
+    widget?: boolean;
+    autopilot?: boolean;
+    voice?: boolean;
+    payments?: boolean;
+  };
 }
 
 export interface TenantForSettings {

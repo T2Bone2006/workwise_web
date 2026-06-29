@@ -107,9 +107,6 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
 
   if (statusHistoryError) {
     console.error('[JobDetailPage] job_status_history query error:', statusHistoryError);
-    console.error('[JobDetailPage] code:', statusHistoryError.code, 'details:', statusHistoryError.details);
-  } else {
-    console.log('[JobDetailPage] job_status_history rows:', statusHistoryRows?.length ?? 0);
   }
 
   type CustomerRow = {
@@ -236,11 +233,6 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     .select('*')
     .eq('job_id', jobId)
     .order('created_at', { ascending: true });
-
-  console.log('[JobDetailPage] job_attachments raw result:', {
-    error: attachmentsError,
-    data: attachmentRows,
-  });
 
   if (attachmentsError) {
     console.error('[JobDetailPage] job_attachments query error:', attachmentsError);

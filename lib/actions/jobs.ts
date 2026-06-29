@@ -204,8 +204,6 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
     if (historyError) {
       console.error('[createJob] job_status_history insert error:', historyError);
       // Job was created; don't fail the request
-    } else {
-      console.log('[createJob] job_status_history insert ok for job', job.id);
     }
 
     revalidatePath('/jobs');
@@ -322,10 +320,7 @@ export async function updateJobStatus(
 
     if (historyError) {
       console.error('[updateJobStatus] job_status_history insert error:', historyError);
-      console.error('[updateJobStatus] code:', historyError.code, 'details:', historyError.details);
       // Still return success - job status was updated
-    } else {
-      console.log('[updateJobStatus] job_status_history insert ok');
     }
 
     revalidatePath('/jobs');
@@ -482,9 +477,6 @@ export async function assignJob(
 
     if (historyError) {
       console.error('[assignJob] job_status_history insert error:', historyError);
-      console.error('[assignJob] code:', historyError.code, 'details:', historyError.details);
-    } else {
-      console.log('[assignJob] job_status_history insert ok');
     }
 
     revalidatePath('/jobs');
@@ -842,7 +834,6 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
     if (!jobCoords) {
       return await fail('Invalid job postcode');
     }
-    console.log('[autoAllocateJob] job coordinates', { jobId, postcode: job.postcode, ...jobCoords });
 
     const requiredSkills = (job.required_skills as string[] | null) ?? [];
     const requiredSet = new Set(requiredSkills);
@@ -943,9 +934,6 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
       return await fail(message);
     }
 
-    console.log('[autoAllocateJob] worker count found:', workers.length);
-    console.log('[autoAllocateJob] business count found:', businesses.length);
-
     const { data: jobCounts } = await supabase
       .from('jobs')
       .select('assigned_worker_id')
@@ -1023,13 +1011,6 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
       });
 
     const bestCandidate = rankedCandidates[0];
-    console.log('[autoAllocateJob] selected candidate', {
-      id: bestCandidate.id,
-      name: bestCandidate.name,
-      type: bestCandidate.type,
-      distance: Math.round(bestCandidate.distance * 10) / 10,
-      currentLoad: bestCandidate.currentLoad,
-    });
 
     if (bestCandidate.type === 'business') {
       const dispatchResult = await dispatchJobToNetwork(jobId, bestCandidate.id);
