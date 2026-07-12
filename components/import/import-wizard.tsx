@@ -44,6 +44,7 @@ import {
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { importJobs } from '@/lib/actions/import';
+import { normalizeUkPostcode } from '@/lib/utils/postcode';
 import type { ImportSourceRow } from '@/lib/data/import-sources';
 import type { CustomerImportOption } from '@/lib/data/customers';
 
@@ -82,14 +83,6 @@ function savedMappingMissingColumns(
   return getSavedCsvColumns(savedMapping).some((col) => !headerSet.has(col));
 }
 
-function isBasicUkPostcode(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  if (!/^[A-Za-z0-9]+(\s[A-Za-z0-9]+)?$/.test(trimmed)) return false;
-  const compact = trimmed.replace(/\s/g, '');
-  return compact.length >= 5 && compact.length <= 8;
-}
-
 type MappedRowValidation =
   | { valid: true }
   | { valid: false; reasons: string[] };
@@ -101,7 +94,7 @@ function validateMappedImportRow(row: Record<string, string>): MappedRowValidati
   if (!jobDescription) reasons.push('Missing description');
   const postcode = row.postcode?.trim() ?? '';
   if (!postcode) reasons.push('Missing postcode');
-  else if (!isBasicUkPostcode(postcode)) reasons.push('Invalid postcode');
+  else if (!normalizeUkPostcode(postcode)) reasons.push('Invalid postcode');
   if (reasons.length > 0) return { valid: false, reasons };
   return { valid: true };
 }
@@ -404,12 +397,11 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
         fileName: csvFile?.name ?? 'import.csv',
       });
       const duration = Math.round((Date.now() - started) / 1000);
-      if (result.success && result.count != null) {
+      if (result.success && typeof result.count === 'number' && result.count > 0) {
         const assigned = 'assignedCount' in result ? result.assignedCount : 0;
         const unassigned = 'unassignedCount' in result ? result.unassignedCount : 0;
-        let msg = `Imported ${result.count} jobs.`;
+        let msg = `Imported ${result.count} job${result.count === 1 ? '' : 's'}.`;
         if (assigned > 0) msg += ` ${assigned} assigned to workers by location and availability.`;
-        if (assigned === 0 && unassigned === 0) msg = `Imported ${result.count} jobs successfully.`;
         toast.success(msg);
         if (unassigned > 0) {
           toast.warning(
@@ -420,9 +412,21 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
             }
           );
         }
+        if (result.errors?.length) {
+          toast.warning(`${result.errors.length} row warning${result.errors.length === 1 ? '' : 's'}`, {
+            description: result.errors.slice(0, 3).join(' · '),
+            duration: 10000,
+          });
+        }
         router.push('/jobs');
+      } else if (result.success && result.count === 0) {
+        toast.error('Imported 0 jobs. No rows were saved — check mapping and try again.', {
+          duration: 12000,
+        });
       } else if (!result.success) {
-        toast.error('error' in result ? result.error : 'Import failed');
+        toast.error('error' in result ? result.error : 'Import failed', {
+          duration: 12000,
+        });
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Import failed');

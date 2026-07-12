@@ -2,9 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { autoAllocateJob } from '@/lib/actions/jobs';
 import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
-import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
+import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
 import { normalizeUkPostcode } from '@/lib/utils/postcode';
@@ -21,8 +22,48 @@ const VALID_PRIORITIES = ['low', 'normal', 'high', 'emergency'] as const;
 const AUTO_ASSIGN_CONCURRENCY = 5;
 
 export type ImportJobsResult =
-  | { success: true; count: number; assignedCount: number; unassignedCount: number }
+  | {
+      success: true;
+      count: number;
+      assignedCount: number;
+      unassignedCount: number;
+      errors?: string[];
+    }
   | { success: false; error: string };
+
+/** Strip ephemeral keys (e.g. _fullAddress) that must never be sent to PostgREST. */
+function toJobInsertRow(job: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(job)) {
+    if (key.startsWith('_')) continue;
+    row[key] = value;
+  }
+  return row;
+}
+
+function uniquifyReferenceNumber(
+  preferred: string,
+  used: Set<string>,
+  counter: number
+): string {
+  let candidate = preferred.trim();
+  if (!candidate) {
+    candidate = `IMP-${Date.now()}-${counter}`;
+  }
+  if (!used.has(candidate.toLowerCase())) {
+    used.add(candidate.toLowerCase());
+    return candidate;
+  }
+  // Keep colliding until unique (handles same CSV re-import + in-file dupes).
+  let n = 0;
+  let unique = '';
+  do {
+    n += 1;
+    unique = `${candidate}-IMP-${Date.now()}-${counter}-${n}`;
+  } while (used.has(unique.toLowerCase()));
+  used.add(unique.toLowerCase());
+  return unique;
+}
 
 function toPriority(val: unknown): (typeof VALID_PRIORITIES)[number] {
   if (typeof val !== 'string') return 'normal';
@@ -163,7 +204,11 @@ export async function importJobs(params: {
       if (transforms[ourField]) {
         const t = transforms[ourField];
         const key = value === '' ? 'default' : value;
-        value = t[key] ?? t['default'] ?? value;
+        const mapped = t[key] ?? t['default'];
+        // "keep" means retain the CSV value (AI mapping sentinel), not replace with the word keep.
+        if (mapped != null && mapped !== 'keep') {
+          value = mapped;
+        }
       }
       return value;
     };
@@ -187,6 +232,16 @@ export async function importJobs(params: {
       if (w.full_name) workerByName.set(w.full_name.trim().toLowerCase(), w.id);
     });
 
+    const { data: existingRefRows } = await supabase
+      .from('jobs')
+      .select('reference_number')
+      .eq('tenant_id', tenantId);
+    const usedReferenceNumbers = new Set(
+      (existingRefRows ?? [])
+        .map((r: { reference_number: string | null }) => r.reference_number?.trim().toLowerCase())
+        .filter((r): r is string => !!r)
+    );
+
     const jobs: Record<string, unknown>[] = [];
     const errors: string[] = [];
     let refCounter = 0;
@@ -194,7 +249,8 @@ export async function importJobs(params: {
     for (let i = 0; i < params.csvData.length; i++) {
       const row = params.csvData[i]!;
       const address = get(row, 'address');
-      const postcode = normalizeUkPostcode(get(row, 'postcode')) ?? '';
+      const rawPostcode = get(row, 'postcode');
+      const postcode = normalizeUkPostcode(rawPostcode) ?? '';
       const description = get(row, 'description');
       const customerName = get(row, 'customer_name');
       const workerName = get(row, 'worker_name');
@@ -205,9 +261,15 @@ export async function importJobs(params: {
           ? `${description} | ${unmappedAppendix}`
           : description || unmappedAppendix;
 
-      if (!address || !postcode || !jobDescription) {
+      if (!address || !jobDescription) {
         errors.push(
-          `Row ${i + 1}: missing address, postcode, or job description (map Description and/or rely on unmapped columns)`
+          `Row ${i + 1}: missing address or job description (map Description and/or rely on unmapped columns)`
+        );
+        continue;
+      }
+      if (!postcode) {
+        errors.push(
+          `Row ${i + 1}: invalid UK postcode "${rawPostcode}" (expected e.g. M1 1AE)`
         );
         continue;
       }
@@ -221,13 +283,15 @@ export async function importJobs(params: {
         ? workerByName.get(workerName.toLowerCase()) ?? null
         : null;
 
-      // Use CSV value if mapped; otherwise generate unique ref per import run (IMP-<timestamp>-<n>).
-      // Same CSV uploaded twice gets a new timestamp each run, so no duplicate reference numbers.
-      let referenceNumber = get(row, 'reference_number');
-      if (!referenceNumber) {
-        refCounter += 1;
-        referenceNumber = `IMP-${Date.now()}-${refCounter}`;
-      }
+      // Prefer CSV ref when mapped; uniquify against tenant + in-file duplicates
+      // (unique index idx_jobs_tenant_reference rejects the whole batch otherwise).
+      refCounter += 1;
+      const preferredRef = get(row, 'reference_number') || `IMP-${Date.now()}-${refCounter}`;
+      const referenceNumber = uniquifyReferenceNumber(
+        preferredRef,
+        usedReferenceNumbers,
+        refCounter
+      );
 
       const priority = toPriority(get(row, 'priority') || 'normal');
       let scheduledDate = get(row, 'scheduled_date') || null;
@@ -307,11 +371,9 @@ export async function importJobs(params: {
     const jobIds: string[] = [];
     const startedAt = new Date().toISOString();
 
-    const jobsToInsert = jobs.map((j) => {
-      const o = j as Record<string, unknown>;
-      const { _description, _address, _priority, ...rest } = o;
-      return rest;
-    });
+    // Always strip ephemeral `_` keys — skill-detect cleanup can be skipped on errors,
+    // and leftover `_fullAddress` makes PostgREST reject the entire batch.
+    const jobsToInsert = jobs.map((j) => toJobInsertRow(j as Record<string, unknown>));
 
     for (let i = 0; i < jobsToInsert.length; i += BATCH_SIZE) {
       const batch = jobsToInsert.slice(i, i + BATCH_SIZE);
@@ -351,7 +413,7 @@ export async function importJobs(params: {
       (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000
     );
 
-    await supabase.from('import_history').insert({
+    const historyPayload = {
       tenant_id: tenantId,
       import_source_id: resolvedSourceId,
       file_name: params.fileName ?? 'import.csv',
@@ -365,11 +427,37 @@ export async function importJobs(params: {
       started_at: startedAt,
       completed_at: completedAt,
       duration_seconds: durationSeconds,
-    });
+    };
+
+    // Authenticated INSERT on import_history is blocked by RLS (no INSERT policy).
+    // Write via service role after tenant checks; migration adds a proper policy too.
+    const { error: historyError } = await createAdminClient()
+      .from('import_history')
+      .insert(historyPayload);
+    if (historyError) {
+      console.error('[importJobs] import_history insert', historyError);
+      errors.push(`Import history could not be saved: ${historyError.message}`);
+    }
 
     revalidatePath('/jobs');
+    revalidatePath('/monitor');
     const unassignedCount = imported - assignedCount;
-    return { success: true, count: imported, assignedCount, unassignedCount };
+
+    if (imported === 0 && params.csvData.length > 0) {
+      const detail = errors[0] ?? 'No rows could be imported.';
+      return {
+        success: false,
+        error: `Imported 0 jobs. ${detail}`,
+      };
+    }
+
+    return {
+      success: true,
+      count: imported,
+      assignedCount,
+      unassignedCount,
+      errors: errors.length ? errors : undefined,
+    };
   } catch (e) {
     console.error('[importJobs]', e);
     return {
