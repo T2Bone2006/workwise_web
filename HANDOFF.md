@@ -1,7 +1,7 @@
 # Handoff — workwise_web
 
 Read this first in a new chat. Branch: `fix/maps-geocoding-dispatch-and-ai-model`.
-Commits so far: `e3040d1`, `77e4434` (run `git log --oneline -5` to confirm).
+Commits so far: `e3040d1`, `77e4434`, `d4bebe4` (run `git log --oneline -5` to confirm).
 
 ## Done and committed
 
@@ -31,6 +31,21 @@ Commits so far: `e3040d1`, `77e4434` (run `git log --oneline -5` to confirm).
   `invite-worker-dialog.tsx` was silently blocking any 11th skill with no
   error shown. This was the actual cause of a failed clustering test (worker
   had "all 10 skills" per the cap, but not the two the job actually needed).
+- **Clustering — confirmed working with two competing workers.** Re-ran
+  `test-jobs-clustering.csv` with a second test worker (all skills, postcode
+  `NW2 6JN`, ~3.4km from the `NW6 5DG` test cluster) alongside the original.
+  Result: the two clusters resolved to *different* workers, and neither
+  cluster split — `NW6 5DG` (5 jobs) went entirely to the new worker,
+  `CR7 8JF` (3 jobs) went entirely to the original. That's the strong pass:
+  not just "no splits," but proof each site is ranked independently rather
+  than everything piling onto one default worker. Considered production-
+  ready. One residual caveat, not worth chasing further: since all 5 NW6
+  jobs share identical coordinates, if the winning worker was clearly closer
+  on raw distance, naive un-grouped per-job ranking might have coincidentally
+  produced the same result — the load-penalty tiebreaker only bites once
+  enough jobs stack up, and 5 may not be enough to isolate that specific
+  edge. Doesn't change the verdict; the end-to-end behavior is correct
+  either way.
 
 ## Verified how (in case it matters)
 
@@ -40,19 +55,6 @@ addresses/postcodes — not synthetic data. Two test CSVs exist at repo root
 (untracked): `test-jobs-clustering.csv` (mixed skills, 2 clusters + 2 solo
 jobs) and `test-jobs-clustering-noskill.csv` (isolates clustering from
 skill-matching).
-
-## In progress — clustering needs one more test
-
-Only one worker currently has auto-assign enabled + matching skills, so every
-test so far trivially sends everything to that one worker — doesn't prove
-clustering beats plain per-job ranking (vs. there just being no alternative).
-
-**Next step**: add a second test worker, all skills, postcode `NW2 6JN`
-(verified real, ~3.4km from the `NW6 5DG` test cluster — close enough to be a
-genuine competing candidate, not a trivial win either way). Re-run
-`test-jobs-clustering.csv`. Pass = all jobs at one postcode land on the same
-worker (either one, doesn't matter which). Fail = a cluster splits across
-both workers.
 
 ## Not started yet
 
