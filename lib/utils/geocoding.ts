@@ -1,3 +1,5 @@
+import { postcodeToLatLng } from './postcode';
+
 type LatLng = { lat: number; lng: number };
 
 function buildGoogleGeocodingUrl(address: string, apiKey: string): string {
@@ -12,6 +14,34 @@ export function buildFullAddressString(parts: Array<string | null | undefined>):
     .map((part) => part?.trim() ?? '')
     .filter((part) => part.length > 0)
     .join(', ');
+}
+
+/**
+ * Resolves coordinates for a job, preferring the free postcodes.io lookup and
+ * falling back to Google only when it can't answer.
+ *
+ * postcodes.io is free, unlimited, needs no API key and uses ONS data, so it
+ * can't break from an expired key or lapsed billing — which is exactly how
+ * every job ended up with null coordinates previously. Google is kept as a
+ * fallback because postcodes.io returns nothing for a missing or malformed
+ * postcode, and it resolves to a building rather than a postcode centroid.
+ */
+export async function resolveJobCoordinates(params: {
+  postcode?: string | null;
+  fullAddress?: string | null;
+}): Promise<LatLng | null> {
+  const postcode = params.postcode?.trim();
+  if (postcode) {
+    const fromPostcode = await postcodeToLatLng(postcode);
+    if (fromPostcode) return fromPostcode;
+  }
+
+  const fullAddress = params.fullAddress?.trim();
+  if (fullAddress) {
+    return geocodeAddress(fullAddress);
+  }
+
+  return null;
 }
 
 export async function geocodeAddress(address: string): Promise<LatLng | null> {

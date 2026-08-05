@@ -49,6 +49,8 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       completed_at,
       customer_id,
       assigned_worker_id,
+      lat,
+      lng,
       required_skills,
       industry_data,
       completion_notes,
@@ -130,11 +132,12 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
   const customer = Array.isArray(rawCustomer) ? rawCustomer[0] ?? null : rawCustomer;
   const worker = Array.isArray(rawWorker) ? rawWorker[0] ?? null : rawWorker;
 
-  // Job coordinates from postcode (jobs table has no lat/lng columns)
-  let jobLat: number | null = null;
-  let jobLng: number | null = null;
+  // Prefer the stored coordinates; only fall back to a lookup for older rows
+  // imported before geocoding worked, so a page view costs no network call.
   const jobPostcode = jobRow.postcode ?? '';
-  if (jobPostcode) {
+  let jobLat = (jobRow.lat as number | null) ?? null;
+  let jobLng = (jobRow.lng as number | null) ?? null;
+  if ((jobLat == null || jobLng == null) && jobPostcode) {
     const coords = await postcodeToLatLng(jobPostcode);
     if (coords) {
       jobLat = coords.lat;

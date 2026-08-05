@@ -25,7 +25,11 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-const initialState = { success: true as boolean, error: undefined as string | undefined };
+const initialState = {
+  success: true as boolean,
+  error: undefined as string | undefined,
+  attemptedAt: undefined as number | undefined,
+};
 
 export function LoginForm() {
   const [state, formAction, isPending] = useActionState(login, initialState);
@@ -36,12 +40,14 @@ export function LoginForm() {
   });
 
   // Show error toast on every login failure (wrong email or wrong password).
-  // Always show when we have an error so both wrong-email and wrong-password show the toast.
+  // `attemptedAt` must be in the dep array: repeated failures return an
+  // identical success/error pair, so without a changing value React skips the
+  // effect and only the first wrong password ever shows a toast.
   useEffect(() => {
     if (!state.success && state.error) {
       toast.error(state.error);
     }
-  }, [state.success, state.error]);
+  }, [state.success, state.error, state.attemptedAt]);
 
   return (
     <Form {...form}>

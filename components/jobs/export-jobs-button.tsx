@@ -1,7 +1,6 @@
 'use client';
 
 import { Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -60,8 +59,13 @@ function formatTodayForFilename(): string {
 export function ExportJobsButton({ jobs }: ExportJobsButtonProps) {
   const isDisabled = jobs.length === 0;
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (isDisabled) return;
+
+    // xlsx is a large library (500KB+) — importing it here instead of at the
+    // top of the file means it's only downloaded when Export is actually
+    // clicked, not on every jobs page load.
+    const XLSX = await import('xlsx');
 
     const rows = jobs.map((job) => {
       const enrichedJob = job as ExportableJob;

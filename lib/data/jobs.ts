@@ -99,6 +99,10 @@ export interface PendingSendJobRow {
   id: string;
   reference_number: string | null;
   worker_name: string | null;
+  job_description: string | null;
+  address: string | null;
+  postcode: string | null;
+  required_skills: string[];
 }
 
 export async function getPendingSendJobsForTenant(
@@ -112,6 +116,10 @@ export async function getPendingSendJobsForTenant(
         `
         id,
         reference_number,
+        job_description,
+        address,
+        postcode,
+        required_skills,
         worker:workers!assigned_worker_id(full_name)
       `
       )
@@ -130,6 +138,12 @@ export async function getPendingSendJobsForTenant(
         id: row.id as string,
         reference_number: (row.reference_number as string | null) ?? null,
         worker_name: worker?.full_name ?? null,
+        job_description: (row.job_description as string | null) ?? null,
+        address: (row.address as string | null) ?? null,
+        postcode: (row.postcode as string | null) ?? null,
+        required_skills: Array.isArray(row.required_skills)
+          ? (row.required_skills as string[])
+          : [],
       };
     });
 
@@ -279,6 +293,37 @@ export async function getJobsForTenant(
  * Excludes jobs dispatched to a network partner (`network_dispatch_id` set).
  * Ordered by created_at ascending (oldest first) for review flow.
  */
+/**
+ * Count of jobs awaiting review, without transferring any rows.
+ * Use this instead of `getUnassignedJobsForTenant(...).jobs.length` — the
+ * banner only needs the number, and fetching the rows to count them pulls
+ * hundreds of joined records per page load.
+ */
+export async function getUnassignedJobsCountForTenant(
+  tenantId: string
+): Promise<{ count: number; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { count, error } = await supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .is('assigned_worker_id', null)
+      .is('network_dispatch_id', null);
+
+    if (error) {
+      console.error('[getUnassignedJobsCountForTenant]', error);
+      return { count: 0, error: new Error(error.message ?? 'Failed to count jobs') };
+    }
+
+    return { count: count ?? 0, error: null };
+  } catch (err) {
+    console.error('[getUnassignedJobsCountForTenant]', err);
+    return { count: 0, error: err instanceof Error ? err : new Error('Failed to count jobs') };
+  }
+}
+
 export async function getUnassignedJobsForTenant(
   tenantId: string,
   limit = 100

@@ -6,7 +6,7 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { createJobSchema } from '@/lib/validations/job';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
-import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
+import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
 import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
@@ -41,6 +41,7 @@ type CreateJobPayload = {
   description: string;
   priority: 'low' | 'normal' | 'high' | 'emergency';
   scheduled_date?: string;
+  scheduled_time?: string;
   assigned_worker_id?: string;
   /** If provided, use these skills and log user edits for AI training. */
   overrideSkills?: OverrideSkillsPayload;
@@ -56,6 +57,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       description: payload.description?.trim(),
       priority: payload.priority,
       scheduled_date: payload.scheduled_date?.trim() || undefined,
+      scheduled_time: payload.scheduled_time?.trim() || undefined,
       assigned_worker_id: payload.assigned_worker_id?.trim() || undefined,
     };
 
@@ -140,7 +142,10 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
     }
 
     const fullAddress = buildFullAddressString([parsed.data.address, parsed.data.postcode]);
-    const geocoded = await geocodeAddress(fullAddress);
+    const geocoded = await resolveJobCoordinates({
+      postcode: parsed.data.postcode,
+      fullAddress,
+    });
     const initialStatus = assignedWorkerId
       ? statusAfterWorkerAssignment('pending')
       : 'pending';
@@ -158,6 +163,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         status: initialStatus,
         priority: parsed.data.priority,
         scheduled_date: parsed.data.scheduled_date || null,
+        scheduled_time: parsed.data.scheduled_time || null,
         required_skills: requiredSkills,
         lat: geocoded?.lat ?? null,
         lng: geocoded?.lng ?? null,

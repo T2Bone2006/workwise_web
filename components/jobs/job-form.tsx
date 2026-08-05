@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -92,6 +93,7 @@ export function JobForm({
       description: '',
       priority: 'normal',
       scheduled_date: '',
+      scheduled_time: '',
       assigned_worker_id: '',
     },
   });
@@ -151,6 +153,7 @@ export function JobForm({
         description: values.description,
         priority: values.priority,
         scheduled_date: values.scheduled_date || undefined,
+        scheduled_time: values.scheduled_time || undefined,
         assigned_worker_id: useAutoAssign
           ? undefined
           : values.assigned_worker_id,
@@ -259,6 +262,34 @@ export function JobForm({
 
             <FormField
               control={form.control}
+              name="postcode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
+                    Postcode
+                  </FormLabel>
+                  <FormControl>
+                    <AddressAutocompleteInput
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      onAddressSelect={({ address, postcode }) => {
+                        if (postcode) field.onChange(postcode);
+                        form.setValue('address', address, { shouldValidate: true });
+                      }}
+                      placeholder="Start typing a postcode or address…"
+                      className={cn(
+                        'bg-white/80 dark:bg-white/5 dark:border-white/10 uppercase',
+                        'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
+                      )}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-destructive text-xs" />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="address"
               render={({ field }) => (
                 <FormItem>
@@ -267,7 +298,7 @@ export function JobForm({
                   </FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Full address"
+                      placeholder="Filled in automatically, or type manually"
                       className={cn(
                         'bg-white/80 dark:bg-white/5 dark:border-white/10',
                         'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
@@ -280,72 +311,47 @@ export function JobForm({
               )}
             />
 
-            <div className="grid gap-6 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="postcode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                      Postcode
-                    </FormLabel>
+            <FormField
+              control={form.control}
+              name="priority"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
+                    Priority
+                  </FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                  >
                     <FormControl>
-                      <Input
-                        placeholder="UK postcode (e.g. SW1A 1AA)"
+                      <SelectTrigger
                         className={cn(
-                          'bg-white/80 dark:bg-white/5 dark:border-white/10 uppercase',
-                          'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
+                          'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                          'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
                         )}
-                        {...field}
-                      />
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
                     </FormControl>
-                    <FormMessage className="text-destructive text-xs" />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="priority"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                      Priority
-                    </FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger
-                          className={cn(
-                            'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
-                            'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
-                          )}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {PRIORITY_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            <span
-                              className={cn(
-                                'inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                                priorityBadgeClass[o.value]
-                              )}
-                            >
-                              {o.label}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage className="text-destructive text-xs" />
-                  </FormItem>
-                )}
-              />
-            </div>
+                    <SelectContent>
+                      {PRIORITY_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          <span
+                            className={cn(
+                              'inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                              priorityBadgeClass[o.value]
+                            )}
+                          >
+                            {o.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className="text-destructive text-xs" />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}
@@ -512,33 +518,19 @@ export function JobForm({
 
               <FormField
                 control={form.control}
-                name="assigned_worker_id"
+                name="scheduled_time"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Assignment (optional)</FormLabel>
+                    <FormLabel>Scheduled Time (optional)</FormLabel>
                     <FormControl>
-                      <SearchableSelect
-                        value={field.value && field.value.length > 0 ? field.value : 'auto'}
-                        onValueChange={(v) => field.onChange(v === 'auto' ? '' : v)}
-                        placeholder="Auto-assign"
-                        searchPlaceholder="Search assignee..."
+                      <Input
+                        type="time"
                         className={cn(
-                          'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
-                          'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
+                          'h-10 bg-white/80 dark:bg-white/5 dark:border-white/10',
+                          'border-input focus-visible:border-brand-primary focus-visible:ring-brand-primary/20',
+                          'focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
                         )}
-                        options={[
-                          { value: 'auto', label: 'Auto-assign' },
-                          ...workers.map((w) => ({
-                            value: w.id,
-                            label: w.full_name,
-                            group: 'Workers',
-                          })),
-                          ...activeConnections.map((connection) => ({
-                            value: `business:${connection.id}`,
-                            label: connection.other_tenant_name ?? 'Connected business',
-                            group: 'Connected businesses',
-                          })),
-                        ]}
+                        {...field}
                       />
                     </FormControl>
                     <FormMessage className="text-destructive text-xs" />
@@ -546,6 +538,42 @@ export function JobForm({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="assigned_worker_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Assignment (optional)</FormLabel>
+                  <FormControl>
+                    <SearchableSelect
+                      value={field.value && field.value.length > 0 ? field.value : 'auto'}
+                      onValueChange={(v) => field.onChange(v === 'auto' ? '' : v)}
+                      placeholder="Auto-assign"
+                      searchPlaceholder="Search assignee..."
+                      className={cn(
+                        'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                        'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
+                      )}
+                      options={[
+                        { value: 'auto', label: 'Auto-assign' },
+                        ...workers.map((w) => ({
+                          value: w.id,
+                          label: w.full_name,
+                          group: 'Workers',
+                        })),
+                        ...activeConnections.map((connection) => ({
+                          value: `business:${connection.id}`,
+                          label: connection.other_tenant_name ?? 'Connected business',
+                          group: 'Connected businesses',
+                        })),
+                      ]}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-destructive text-xs" />
+                </FormItem>
+              )}
+            />
 
             <div className="flex flex-col gap-3 border-t border-border/60 pt-6 sm:flex-row sm:justify-end">
               <Button

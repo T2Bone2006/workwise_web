@@ -3,7 +3,6 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
   Briefcase,
@@ -140,19 +139,15 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
             className="object-contain"
           />
         </div>
-        <AnimatePresence initial={false}>
-          {(!collapsed || isMobile) && (
-            <motion.span
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: 'auto' }}
-              exit={{ opacity: 0, width: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden whitespace-nowrap text-base font-semibold text-sidebar-foreground"
-            >
-              WorkWise
-            </motion.span>
+        <span
+          className={cn(
+            'overflow-hidden whitespace-nowrap text-base font-semibold text-sidebar-foreground',
+            'transition-[max-width,opacity] duration-200 ease-out',
+            !collapsed || isMobile ? 'max-w-[140px] opacity-100' : 'max-w-0 opacity-0'
           )}
-        </AnimatePresence>
+        >
+          WorkWise
+        </span>
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main navigation">
         {navItems.map((item) => (
@@ -214,12 +209,13 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
   return (
     <>
       {/* Desktop: fixed sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{ width: collapsed ? 72 : 192 }}
-        transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-        className="hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl"
+      <aside
+        className={cn(
+          'hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl',
+          'transition-[width] duration-[250ms] ease-[cubic-bezier(0.32,0.72,0,1)]'
+        )}
         style={{
+          width: collapsed ? 72 : 192,
           background: 'var(--glass-bg)',
           backdropFilter: 'blur(var(--blur-glass))',
           WebkitBackdropFilter: 'blur(var(--blur-glass))',
@@ -233,7 +229,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
         <div className="relative z-10 flex flex-1 flex-col min-h-0">
           {sidebarContent(false)}
         </div>
-      </motion.aside>
+      </aside>
 
       {/* Mobile: Sheet overlay */}
       <Sheet open={mobileOpen} onOpenChange={(open) => !open && onMobileClose()}>

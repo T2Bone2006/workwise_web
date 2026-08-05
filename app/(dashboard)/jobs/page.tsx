@@ -1,7 +1,8 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
 import {
   getJobsForTenant,
-  getUnassignedJobsForTenant,
+  getUnassignedJobsCountForTenant,
   getJobsStatusSummary,
   getPendingSendJobsForTenant,
   getCustomerJobCounts,
@@ -135,35 +136,38 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     }
 
     const [
-      { jobs: unassignedJobs },
+      { count: unassignedCount },
       statusSummary,
       { jobs: pendingSendJobs },
       customerJobCountsResult,
       batchesResult,
+      tenantSkills,
     ] = await Promise.all([
-      getUnassignedJobsForTenant(tenantId, 500),
+      getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
       getPendingSendJobsForTenant(tenantId),
       getCustomerJobCounts(tenantId),
       getImportBatchesForTenant(tenantId),
+      getTenantSkills(tenantId),
     ]);
 
     const activeBatch = activeBatchId
       ? batchesResult.batches.find((batch) => batch.id === activeBatchId) ?? null
       : null;
+    // Batch is a combinable filter, not a separate mode — it must apply
+    // whichever view (list or batches) the URL currently has, so the batch
+    // and customer dropdowns can be used together.
     const jobsFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' } = {
       ...filters,
-      import_source_id:
-        filters.view === 'batches'
-          ? activeBatchId === 'ungrouped'
-            ? 'ungrouped'
-            : activeBatch?.import_source_id ?? undefined
-          : undefined,
+      import_source_id: activeBatchId
+        ? activeBatchId === 'ungrouped'
+          ? 'ungrouped'
+          : (activeBatch?.import_source_id ?? undefined)
+        : undefined,
     };
     const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
 
     const redirectError = rawParams.error ?? null;
-    const unassignedCount = unassignedJobs?.length ?? 0;
     const customerFilterOptions: CustomerJobCount[] = customerJobCountsResult.error
       ? []
       : customerJobCountsResult.customers;
@@ -171,7 +175,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     return (
       <div className="space-y-6">
         <JobsPageErrorToast error={redirectError} />
-        <PendingSendJobsBanner jobs={pendingSendJobs} />
+        <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
         <JobsForReviewBanner count={unassignedCount} />
         <PageGradientHeader
           title="Jobs"

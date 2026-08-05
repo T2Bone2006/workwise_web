@@ -7,7 +7,7 @@ import { autoAllocateJob } from '@/lib/actions/jobs';
 import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
-import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
+import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { normalizeUkPostcode } from '@/lib/utils/postcode';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
@@ -327,10 +327,13 @@ export async function importJobs(params: {
         const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);
         await Promise.all(
           batch.map(async (job) => {
-            const fullAddress = (job as Record<string, unknown>)._fullAddress as string;
-            const geocoded = await geocodeAddress(fullAddress);
-            (job as Record<string, unknown>).lat = geocoded?.lat ?? null;
-            (job as Record<string, unknown>).lng = geocoded?.lng ?? null;
+            const record = job as Record<string, unknown>;
+            const geocoded = await resolveJobCoordinates({
+              postcode: record.postcode as string | null,
+              fullAddress: record._fullAddress as string,
+            });
+            record.lat = geocoded?.lat ?? null;
+            record.lng = geocoded?.lng ?? null;
           })
         );
         if (i + GEOCODE_BATCH_SIZE < jobs.length) {

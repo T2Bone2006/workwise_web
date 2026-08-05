@@ -17,6 +17,11 @@ export const createJobSchema = z.object({
   description: z.string().min(1, 'Description is required').max(1000),
   priority: z.enum(['low', 'normal', 'high', 'emergency']),
   scheduled_date: z.string().optional(),
+  scheduled_time: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid time')
+    .optional()
+    .or(z.literal('')),
   assigned_worker_id: z
     .union([
       z.string().uuid(),
