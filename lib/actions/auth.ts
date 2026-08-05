@@ -7,7 +7,17 @@ import { resend, FROM_EMAIL } from '@/lib/resend';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 
-export type AuthResult = { success: boolean; error?: string };
+/**
+ * `attemptedAt` makes each failure distinguishable to `useActionState`
+ * consumers. Without it, two identical failures produce equal state values and
+ * a `useEffect` watching them won't re-run, so the second wrong password shows
+ * no error at all.
+ */
+export type AuthResult = {
+  success: boolean;
+  error?: string;
+  attemptedAt?: number;
+};
 
 /**
  * Server Action: sign in with email and password.
@@ -21,7 +31,11 @@ export async function login(
   const password = formData.get('password') as string | null;
 
   if (!email?.trim() || !password) {
-    return { success: false, error: 'Email and password are required.' };
+    return {
+      success: false,
+      error: 'Email and password are required.',
+      attemptedAt: Date.now(),
+    };
   }
 
   try {
@@ -32,7 +46,11 @@ export async function login(
     });
 
     if (error) {
-      return { success: false, error: 'Invalid email or password' };
+      return {
+        success: false,
+        error: 'Invalid email or password',
+        attemptedAt: Date.now(),
+      };
     }
 
     const {
@@ -62,7 +80,7 @@ export async function login(
     }
     const message =
       err instanceof Error ? err.message : 'Something went wrong. Please try again.';
-    return { success: false, error: message };
+    return { success: false, error: message, attemptedAt: Date.now() };
   }
 }
 

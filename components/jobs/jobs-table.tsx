@@ -282,6 +282,14 @@ export function JobsTable({
     [customerFilterOptions]
   );
 
+  const sortedBatchFilterOptions = useMemo(
+    () =>
+      [...batches]
+        .filter((b) => b.id !== 'ungrouped')
+        .sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? '')),
+    [batches]
+  );
+
   const customerSelectValue = initialFilters.customer_id ?? '__all__';
   const activeBatch = activeBatchId
     ? batches.find((batch) => batch.id === activeBatchId) ?? null
@@ -323,7 +331,8 @@ export function JobsTable({
     initialFilters.date_from ||
     initialFilters.date_to ||
     initialFilters.customer_id ||
-    initialFilters.priority
+    initialFilters.priority ||
+    activeBatchId
   );
   const hasNonCustomerFilters = !!(
     initialFilters.search ||
@@ -470,6 +479,28 @@ export function JobsTable({
                     ]}
                   />
                 </div>
+                <div className="flex min-w-[200px] max-w-[min(100%,320px)] flex-col gap-1.5">
+                  <label htmlFor="jobs-batch-filter" className="sr-only">
+                    Filter by import batch
+                  </label>
+                  <SearchableSelect
+                    value={activeBatchId ?? '__all__'}
+                    onValueChange={(v) => {
+                      if (v === '__all__') updateParams({ batchId: undefined });
+                      else updateParams({ batchId: v });
+                    }}
+                    placeholder="All batches"
+                    searchPlaceholder="Search batch..."
+                    className="h-10 w-full"
+                    options={[
+                      { value: '__all__', label: 'All batches' },
+                      ...sortedBatchFilterOptions.map((b) => ({
+                        value: b.id,
+                        label: `${b.file_name ?? 'Unnamed import'} (${b.rows_imported})`,
+                      })),
+                    ]}
+                  />
+                </div>
                 <div className="flex items-center gap-1 rounded-md border border-border/80 p-0.5">
                   <Button
                     variant={
@@ -513,7 +544,7 @@ export function JobsTable({
                       Clear filters
                     </Button>
                   )}
-                  <ExportJobsButton jobs={initialJobs} />
+                  <ExportJobsButton jobs={initialJobs} totalCount={totalCount} filters={initialFilters} />
                 </div>
               </div>
 

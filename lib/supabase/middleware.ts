@@ -1,10 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import type { User } from '@supabase/supabase-js';
 
 export type UpdateSessionResult = {
   response: NextResponse;
-  user: User | null;
+  user: { id: string } | null;
 };
 
 /**
@@ -60,10 +59,16 @@ export async function updateSession(request: NextRequest): Promise<UpdateSession
     },
   });
 
-  let user: User | null = null;
+  let user: { id: string } | null = null;
   try {
-    const { data: { user: u } } = await supabase.auth.getUser();
-    user = u ?? null;
+    // getClaims() verifies the JWT locally against a cached JWKS (this project
+    // uses asymmetric signing keys) instead of getUser()'s per-request round
+    // trip to the Auth server, while still refreshing an expiring session via
+    // the same cookie adapter.
+    const { data } = await supabase.auth.getClaims();
+    if (data?.claims.sub) {
+      user = { id: data.claims.sub };
+    }
   } catch {
     // Session refresh can fail (e.g. invalid token). Continue with the response
     // so the app can handle unauthenticated state.

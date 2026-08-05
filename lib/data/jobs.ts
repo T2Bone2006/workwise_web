@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 
 export type JobStatus =
   | 'pending'
@@ -44,6 +45,14 @@ export interface JobRow {
   required_skills?: string[];
   /** Last auto-assign failure message; cleared on successful assignment. */
   auto_assign_failure_reason?: string | null;
+}
+
+/** JobRow plus lifecycle timestamps/notes needed for export — not fetched by the paginated list query. */
+export interface ExportJobRow extends JobRow {
+  started_at: string | null;
+  arrived_at: string | null;
+  completed_at: string | null;
+  completion_notes: string | null;
 }
 
 /** Dashboard-style counts for the jobs list summary bar (excludes cancelled). */
@@ -99,6 +108,10 @@ export interface PendingSendJobRow {
   id: string;
   reference_number: string | null;
   worker_name: string | null;
+  job_description: string | null;
+  address: string | null;
+  postcode: string | null;
+  required_skills: string[];
 }
 
 export async function getPendingSendJobsForTenant(
@@ -112,6 +125,10 @@ export async function getPendingSendJobsForTenant(
         `
         id,
         reference_number,
+        job_description,
+        address,
+        postcode,
+        required_skills,
         worker:workers!assigned_worker_id(full_name)
       `
       )
@@ -130,6 +147,12 @@ export async function getPendingSendJobsForTenant(
         id: row.id as string,
         reference_number: (row.reference_number as string | null) ?? null,
         worker_name: worker?.full_name ?? null,
+        job_description: (row.job_description as string | null) ?? null,
+        address: (row.address as string | null) ?? null,
+        postcode: (row.postcode as string | null) ?? null,
+        required_skills: Array.isArray(row.required_skills)
+          ? (row.required_skills as string[])
+          : [],
       };
     });
 
@@ -147,6 +170,76 @@ function toError(err: unknown): Error {
     return new Error((err as { message: string }).message);
   }
   return new Error(String(err));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JobsQuery = any;
+
+/** Applies the shared status/priority/customer/date/search filters used by both the paginated list and export. */
+function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
+  let q = query;
+  if (filters.status) {
+    if (Array.isArray(filters.status) && filters.status.length > 0) {
+      q = q.in('status', filters.status);
+    } else if (!Array.isArray(filters.status)) {
+      q = q.eq('status', filters.status);
+    }
+  }
+  if (filters.priority) {
+    q = q.eq('priority', filters.priority);
+  }
+  if (filters.customer_id) {
+    if (filters.customer_id === 'none') {
+      q = q.is('customer_id', null);
+    } else {
+      q = q.eq('customer_id', filters.customer_id);
+    }
+  }
+  if (filters.import_source_id) {
+    if (filters.import_source_id === 'ungrouped') {
+      q = q.is('import_source_id', null);
+    } else {
+      q = q.eq('import_source_id', filters.import_source_id);
+    }
+  }
+  if (filters.date_from) {
+    q = q.gte('scheduled_date', filters.date_from);
+  }
+  if (filters.date_to) {
+    q = q.lte('scheduled_date', filters.date_to);
+  }
+  if (filters.search?.trim()) {
+    const term = filters.search.trim();
+    q = q.or(
+      `address.ilike.%${term}%,reference_number.ilike.%${term}%,job_description.ilike.%${term}%`
+    );
+  }
+  return q;
+}
+
+function mapJobRow(row: Record<string, unknown>): JobRow {
+  const customer = row.customer as { id?: string; name?: string } | null;
+  const worker = row.worker as { id?: string; full_name?: string } | null;
+  const requiredSkills = row.required_skills;
+  return {
+    id: row.id as string,
+    tenant_id: row.tenant_id as string,
+    customer_id: row.customer_id as string | null,
+    assigned_worker_id: row.assigned_worker_id as string | null,
+    reference_number: row.reference_number as string | null,
+    address: row.address as string | null,
+    postcode: (row.postcode as string | null) ?? null,
+    job_description: (row.job_description as string | null) ?? null,
+    status: row.status as JobRow['status'],
+    priority: row.priority as JobRow['priority'],
+    scheduled_date: row.scheduled_date as string | null,
+    scheduled_time: (row.scheduled_time as string | null) ?? null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string | null,
+    customer_name: customer?.name ?? null,
+    worker_name: worker?.full_name ?? null,
+    required_skills: Array.isArray(requiredSkills) ? (requiredSkills as string[]) : [],
+  };
 }
 
 /**
@@ -176,45 +269,10 @@ export async function getJobsForTenant(
         { count: 'exact' }
       )
       .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (filters.status) {
-      if (Array.isArray(filters.status) && filters.status.length > 0) {
-        query = query.in('status', filters.status);
-      } else if (!Array.isArray(filters.status)) {
-        query = query.eq('status', filters.status);
-      }
-    }
-    if (filters.priority) {
-      query = query.eq('priority', filters.priority);
-    }
-    if (filters.customer_id) {
-      if (filters.customer_id === 'none') {
-        query = query.is('customer_id', null);
-      } else {
-        query = query.eq('customer_id', filters.customer_id);
-      }
-    }
-    if (filters.import_source_id) {
-      if (filters.import_source_id === 'ungrouped') {
-        query = query.is('import_source_id', null);
-      } else {
-        query = query.eq('import_source_id', filters.import_source_id);
-      }
-    }
-    if (filters.date_from) {
-      query = query.gte('scheduled_date', filters.date_from);
-    }
-    if (filters.date_to) {
-      query = query.lte('scheduled_date', filters.date_to);
-    }
-    if (filters.search?.trim()) {
-      const term = filters.search.trim();
-      query = query.or(
-        `address.ilike.%${term}%,reference_number.ilike.%${term}%,job_description.ilike.%${term}%`
-      );
-    }
+    query = applyJobsFilters(query, filters);
+
     const sortCol = filters.sort ?? 'created_at';
     const sortDir = filters.sort_dir === 'asc';
     if (sortCol === 'customer_name') {
@@ -234,30 +292,7 @@ export async function getJobsForTenant(
       };
     }
 
-    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) => {
-      const customer = row.customer as { id?: string; name?: string } | null;
-      const worker = row.worker as { id?: string; full_name?: string } | null;
-      const requiredSkills = row.required_skills;
-      return {
-        id: row.id as string,
-        tenant_id: row.tenant_id as string,
-        customer_id: row.customer_id as string | null,
-        assigned_worker_id: row.assigned_worker_id as string | null,
-        reference_number: row.reference_number as string | null,
-        address: row.address as string | null,
-        postcode: (row.postcode as string | null) ?? null,
-        job_description: (row.job_description as string | null) ?? null,
-        status: row.status as JobRow['status'],
-        priority: row.priority as JobRow['priority'],
-        scheduled_date: row.scheduled_date as string | null,
-        scheduled_time: (row.scheduled_time as string | null) ?? null,
-        created_at: row.created_at as string,
-        updated_at: row.updated_at as string | null,
-        customer_name: customer?.name ?? null,
-        worker_name: worker?.full_name ?? null,
-        required_skills: Array.isArray(requiredSkills) ? (requiredSkills as string[]) : [],
-      };
-    });
+    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map(mapJobRow);
 
     return {
       jobs,
@@ -275,10 +310,102 @@ export async function getJobsForTenant(
 }
 
 /**
+ * Fetches jobs for export — same filters/sort as the jobs list, but uncapped by the
+ * page-size pagination and including lifecycle fields the list view doesn't need.
+ * `limit` is clamped to `EXPORT_MAX_ROWS`; pass `undefined` to export all matching rows
+ * (still capped).
+ */
+export async function getJobsForExport(
+  tenantId: string,
+  filters: JobsFilters,
+  limit?: number
+): Promise<{ jobs: ExportJobRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const cappedLimit = Math.min(limit && limit > 0 ? limit : EXPORT_MAX_ROWS, EXPORT_MAX_ROWS);
+
+    let query = supabase
+      .from('jobs')
+      .select(
+        `
+      *,
+      customer:customers!customer_id(id, name),
+      worker:workers!assigned_worker_id(id, full_name)
+    `
+      )
+      .eq('tenant_id', tenantId)
+      .range(0, cappedLimit - 1);
+
+    query = applyJobsFilters(query, filters);
+
+    const sortCol = filters.sort ?? 'created_at';
+    const sortDir = filters.sort_dir === 'asc';
+    if (sortCol === 'customer_name') {
+      query = query.order('created_at', { ascending: sortDir });
+    } else {
+      query = query.order(sortCol, { ascending: sortDir });
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('[getJobsForExport] Supabase query error:', error);
+      return { jobs: [], error: new Error(error.message ?? 'Failed to load jobs for export') };
+    }
+
+    const jobs: ExportJobRow[] = (Array.isArray(data) ? data : []).map(
+      (row: Record<string, unknown>) => ({
+        ...mapJobRow(row),
+        started_at: (row.started_at as string | null) ?? null,
+        arrived_at: (row.arrived_at as string | null) ?? null,
+        completed_at: (row.completed_at as string | null) ?? null,
+        completion_notes: (row.completion_notes as string | null) ?? null,
+      })
+    );
+
+    return { jobs, error: null };
+  } catch (err) {
+    console.error('[getJobsForExport] Unexpected error:', err);
+    return { jobs: [], error: toError(err) };
+  }
+}
+
+/**
  * Fetches jobs that need manual assignment (pending, no worker assigned).
  * Excludes jobs dispatched to a network partner (`network_dispatch_id` set).
  * Ordered by created_at ascending (oldest first) for review flow.
  */
+/**
+ * Count of jobs awaiting review, without transferring any rows.
+ * Use this instead of `getUnassignedJobsForTenant(...).jobs.length` — the
+ * banner only needs the number, and fetching the rows to count them pulls
+ * hundreds of joined records per page load.
+ */
+export async function getUnassignedJobsCountForTenant(
+  tenantId: string
+): Promise<{ count: number; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { count, error } = await supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .is('assigned_worker_id', null)
+      .is('network_dispatch_id', null);
+
+    if (error) {
+      console.error('[getUnassignedJobsCountForTenant]', error);
+      return { count: 0, error: new Error(error.message ?? 'Failed to count jobs') };
+    }
+
+    return { count: count ?? 0, error: null };
+  } catch (err) {
+    console.error('[getUnassignedJobsCountForTenant]', err);
+    return { count: 0, error: err instanceof Error ? err : new Error('Failed to count jobs') };
+  }
+}
+
 export async function getUnassignedJobsForTenant(
   tenantId: string,
   limit = 100

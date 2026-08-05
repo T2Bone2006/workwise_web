@@ -56,7 +56,6 @@ const SCHEMA_FIELDS = [
   { key: 'priority', label: 'Priority' },
   { key: 'reference_number', label: 'Reference number' },
   { key: 'scheduled_date', label: 'Scheduled date' },
-  { key: 'worker_name', label: 'Worker name' },
 ] as const;
 
 const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'emergency'];

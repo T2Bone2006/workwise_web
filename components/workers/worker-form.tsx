@@ -44,7 +44,6 @@ const STATUS_OPTIONS = [
   { value: 'off_duty', label: 'Off Duty', color: 'bg-slate-500' },
 ] as const;
 
-const MAX_SKILLS = 10;
 
 interface WorkerFormProps {
   mode: 'create' | 'edit';
@@ -123,7 +122,7 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
 
   const addSkill = (key: string) => {
     const current = form.getValues('skills') ?? [];
-    if (current.length >= MAX_SKILLS || current.includes(key)) return;
+    if (current.includes(key)) return;
     form.setValue('skills', [...current, key]);
     setSkillSearch('');
   };
@@ -355,7 +354,7 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
               name="skills"
               render={() => (
                 <FormItem>
-                  <FormLabel>Skills (optional, max {MAX_SKILLS})</FormLabel>
+                  <FormLabel>Skills (optional)</FormLabel>
                   <Popover open={skillsOpen} onOpenChange={setSkillsOpen}>
                     <PopoverTrigger asChild>
                       <FormControl>
@@ -363,13 +362,9 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
                           type="button"
                           variant="outline"
                           className="w-full justify-between font-normal"
-                          disabled={isSubmitting || skills.length >= MAX_SKILLS}
+                          disabled={isSubmitting}
                         >
-                          <span className="text-muted-foreground">
-                            {skills.length >= MAX_SKILLS
-                              ? 'Maximum skills selected'
-                              : 'Add skills…'}
-                          </span>
+                          <span className="text-muted-foreground">Add skills…</span>
                           <ChevronDown className="size-4 opacity-50" />
                         </Button>
                       </FormControl>

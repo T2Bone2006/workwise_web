@@ -3,11 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { autoAllocateJob } from '@/lib/actions/jobs';
-import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
+import { autoAllocateJobGroup } from '@/lib/actions/jobs';
+import { clusterKeyForPostcode } from '@/lib/jobs/assignment-ranking';
 import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
-import { buildFullAddressString, geocodeAddress } from '@/lib/utils/geocoding';
+import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { normalizeUkPostcode } from '@/lib/utils/postcode';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
@@ -223,15 +223,6 @@ export async function importJobs(params: {
       if (c.name) customerByName.set(c.name.trim().toLowerCase(), c.id);
     });
 
-    const workersResult = await supabase
-      .from('workers')
-      .select('id, full_name')
-      .eq('primary_tenant_id', tenantId);
-    const workerByName = new Map<string, string>();
-    (workersResult.data ?? []).forEach((w: { id: string; full_name: string | null }) => {
-      if (w.full_name) workerByName.set(w.full_name.trim().toLowerCase(), w.id);
-    });
-
     const { data: existingRefRows } = await supabase
       .from('jobs')
       .select('reference_number')
@@ -253,7 +244,6 @@ export async function importJobs(params: {
       const postcode = normalizeUkPostcode(rawPostcode) ?? '';
       const description = get(row, 'description');
       const customerName = get(row, 'customer_name');
-      const workerName = get(row, 'worker_name');
 
       const unmappedAppendix = formatUnmappedCsvColumns(row, map);
       const jobDescription =
@@ -279,10 +269,6 @@ export async function importJobs(params: {
         : customerName
           ? customerByName.get(customerName.toLowerCase()) ?? null
           : null;
-      const assignedWorkerId = workerName
-        ? workerByName.get(workerName.toLowerCase()) ?? null
-        : null;
-
       // Prefer CSV ref when mapped; uniquify against tenant + in-file duplicates
       // (unique index idx_jobs_tenant_reference rejects the whole batch otherwise).
       refCounter += 1;
@@ -303,11 +289,10 @@ export async function importJobs(params: {
         import_source_id: resolvedSourceId,
         reference_number: referenceNumber,
         customer_id: customerId,
-        assigned_worker_id: assignedWorkerId,
         address,
         postcode,
         job_description: jobDescription,
-        status: assignedWorkerId ? statusAfterWorkerAssignment('pending') : 'pending',
+        status: 'pending',
         priority,
         scheduled_date: scheduledDate || null,
         created_at: new Date().toISOString(),
@@ -327,10 +312,13 @@ export async function importJobs(params: {
         const batch = jobs.slice(i, i + GEOCODE_BATCH_SIZE);
         await Promise.all(
           batch.map(async (job) => {
-            const fullAddress = (job as Record<string, unknown>)._fullAddress as string;
-            const geocoded = await geocodeAddress(fullAddress);
-            (job as Record<string, unknown>).lat = geocoded?.lat ?? null;
-            (job as Record<string, unknown>).lng = geocoded?.lng ?? null;
+            const record = job as Record<string, unknown>;
+            const geocoded = await resolveJobCoordinates({
+              postcode: record.postcode as string | null,
+              fullAddress: record._fullAddress as string,
+            });
+            record.lat = geocoded?.lat ?? null;
+            record.lng = geocoded?.lng ?? null;
           })
         );
         if (i + GEOCODE_BATCH_SIZE < jobs.length) {
@@ -369,6 +357,7 @@ export async function importJobs(params: {
 
     let imported = 0;
     const jobIds: string[] = [];
+    const insertedPostcodes = new Map<string, string | null>();
     const startedAt = new Date().toISOString();
 
     // Always strip ephemeral `_` keys — skill-detect cleanup can be skipped on errors,
@@ -380,7 +369,7 @@ export async function importJobs(params: {
       const { data: inserted, error } = await supabase
         .from('jobs')
         .insert(batch)
-        .select('id');
+        .select('id, postcode');
       if (error) {
         console.error('[importJobs] batch insert', error);
         errors.push(`Batch at row ${i + 1}: ${error.message}`);
@@ -388,23 +377,35 @@ export async function importJobs(params: {
       }
       if (inserted) {
         imported += inserted.length;
-        inserted.forEach((r: { id: string }) => jobIds.push(r.id));
+        inserted.forEach((r: { id: string; postcode: string | null }) => {
+          jobIds.push(r.id);
+          insertedPostcodes.set(r.id, r.postcode);
+        });
       }
     }
 
+    // Group jobs by site before allocating so several jobs in one building go
+    // to the same worker as a single visit. Jobs within a group are allocated
+    // sequentially (autoAllocateJobGroup); only separate sites run in parallel,
+    // which avoids two concurrent allocations racing for the same building.
+    const groups = new Map<string, string[]>();
+    for (const id of jobIds) {
+      const key = clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`;
+      const existing = groups.get(key);
+      if (existing) existing.push(id);
+      else groups.set(key, [id]);
+    }
+
     let assignedCount = 0;
-    for (let i = 0; i < jobIds.length; i += AUTO_ASSIGN_CONCURRENCY) {
-      const chunk = jobIds.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
-      const results = await Promise.all(chunk.map((id) => autoAllocateJob(id)));
-      results.forEach((r, idx) => {
-        if (r.success) assignedCount += 1;
-        else
-          console.warn(
-            '[importJobs] auto-assign failed for job',
-            chunk[idx],
-            ':',
-            r.error ?? 'unknown'
-          );
+    const groupList = [...groups.values()];
+    for (let i = 0; i < groupList.length; i += AUTO_ASSIGN_CONCURRENCY) {
+      const chunk = groupList.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
+      const results = await Promise.all(chunk.map((ids) => autoAllocateJobGroup(ids)));
+      results.forEach((r) => {
+        assignedCount += r.assignedCount;
+        if (r.failedJobIds.length > 0) {
+          console.warn('[importJobs] auto-assign failed for jobs', r.failedJobIds.join(', '));
+        }
       });
     }
 

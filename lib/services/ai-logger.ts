@@ -31,12 +31,25 @@ export interface AICallResult<T> {
   latency: number;
 }
 
+/**
+ * Default model for AI calls. Overridable via env so a retired model is a
+ * config change, not a code change — the previous hardcoded
+ * `claude-sonnet-4-20250514` was retired and returned 404, which silently
+ * disabled every AI feature (skill detection returned [] for every job).
+ *
+ * Haiku is the default because these calls are constrained classification
+ * (pick matching keys from a supplied list), which it handles as accurately
+ * as larger models at roughly a fifth of the cost — and this runs once per
+ * imported job, so volume is high.
+ */
+const DEFAULT_AI_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-haiku-4-5';
+
 export async function callAIWithLogging<T>(
   params: AICallParams,
   parser: (response: string) => T
 ): Promise<AICallResult<T>> {
   const startTime = Date.now();
-  const model = params.model || 'claude-sonnet-4-20250514';
+  const model = params.model || DEFAULT_AI_MODEL;
 
   const supabase = await createClient();
   const {
