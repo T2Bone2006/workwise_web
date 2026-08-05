@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { autoAllocateJob } from '@/lib/actions/jobs';
+import { autoAllocateJobGroup } from '@/lib/actions/jobs';
+import { clusterKeyForPostcode } from '@/lib/jobs/assignment-ranking';
 import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
@@ -372,6 +373,7 @@ export async function importJobs(params: {
 
     let imported = 0;
     const jobIds: string[] = [];
+    const insertedPostcodes = new Map<string, string | null>();
     const startedAt = new Date().toISOString();
 
     // Always strip ephemeral `_` keys — skill-detect cleanup can be skipped on errors,
@@ -383,7 +385,7 @@ export async function importJobs(params: {
       const { data: inserted, error } = await supabase
         .from('jobs')
         .insert(batch)
-        .select('id');
+        .select('id, postcode');
       if (error) {
         console.error('[importJobs] batch insert', error);
         errors.push(`Batch at row ${i + 1}: ${error.message}`);
@@ -391,23 +393,35 @@ export async function importJobs(params: {
       }
       if (inserted) {
         imported += inserted.length;
-        inserted.forEach((r: { id: string }) => jobIds.push(r.id));
+        inserted.forEach((r: { id: string; postcode: string | null }) => {
+          jobIds.push(r.id);
+          insertedPostcodes.set(r.id, r.postcode);
+        });
       }
     }
 
+    // Group jobs by site before allocating so several jobs in one building go
+    // to the same worker as a single visit. Jobs within a group are allocated
+    // sequentially (autoAllocateJobGroup); only separate sites run in parallel,
+    // which avoids two concurrent allocations racing for the same building.
+    const groups = new Map<string, string[]>();
+    for (const id of jobIds) {
+      const key = clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`;
+      const existing = groups.get(key);
+      if (existing) existing.push(id);
+      else groups.set(key, [id]);
+    }
+
     let assignedCount = 0;
-    for (let i = 0; i < jobIds.length; i += AUTO_ASSIGN_CONCURRENCY) {
-      const chunk = jobIds.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
-      const results = await Promise.all(chunk.map((id) => autoAllocateJob(id)));
-      results.forEach((r, idx) => {
-        if (r.success) assignedCount += 1;
-        else
-          console.warn(
-            '[importJobs] auto-assign failed for job',
-            chunk[idx],
-            ':',
-            r.error ?? 'unknown'
-          );
+    const groupList = [...groups.values()];
+    for (let i = 0; i < groupList.length; i += AUTO_ASSIGN_CONCURRENCY) {
+      const chunk = groupList.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
+      const results = await Promise.all(chunk.map((ids) => autoAllocateJobGroup(ids)));
+      results.forEach((r) => {
+        assignedCount += r.assignedCount;
+        if (r.failedJobIds.length > 0) {
+          console.warn('[importJobs] auto-assign failed for jobs', r.failedJobIds.join(', '));
+        }
       });
     }
 

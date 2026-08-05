@@ -21,6 +21,12 @@ import {
   type RankedWorkerForJob,
 } from '@/lib/jobs/worker-skill-match';
 import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
+import {
+  clusterKeyForPostcode,
+  compareByDistanceThenLoad,
+  skillSignature,
+  unionRequiredSkills,
+} from '@/lib/jobs/assignment-ranking';
 
 export type CreateJobResult =
   | { success: true; jobId: string }
@@ -689,12 +695,11 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
       }
     }
 
-    const sortByDistanceThenLoad = (a: RankedWorkerForJob, b: RankedWorkerForJob) => {
-      const da = a.distanceKm ?? Infinity;
-      const db = b.distanceKm ?? Infinity;
-      if (da !== db) return da - db;
-      return a.currentJobs - b.currentJobs;
-    };
+    const sortByDistanceThenLoad = (a: RankedWorkerForJob, b: RankedWorkerForJob) =>
+      compareByDistanceThenLoad(
+        { distanceKm: a.distanceKm, load: a.currentJobs },
+        { distanceKm: b.distanceKm, load: b.currentJobs }
+      );
 
     const rankedWorkers: RankedWorkerForJob[] = eligibleWorkers.map((w) => {
       const ws = parseWorkerSkillsArray(w.skills);
@@ -799,7 +804,21 @@ async function persistAutoAssignFailureReason(
   }
 }
 
-export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobResult> {
+export interface AutoAllocateOptions {
+  /**
+   * Skills the assignee must cover, overriding the job's own `required_skills`.
+   * Used when allocating a group of same-site jobs as one unit, so the chosen
+   * worker can handle every job at that site.
+   */
+  requiredSkillsOverride?: string[];
+  /** Worker to prefer if they rank as eligible — used for same-site stickiness. */
+  preferWorkerId?: string;
+}
+
+export async function autoAllocateJob(
+  jobId: string,
+  options?: AutoAllocateOptions
+): Promise<AutoAllocateJobResult> {
   const supabase = await createClient();
   let tenantId: string | null = null;
 
@@ -841,8 +860,35 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
       return await fail('Invalid job postcode');
     }
 
-    const requiredSkills = (job.required_skills as string[] | null) ?? [];
+    const requiredSkills =
+      options?.requiredSkillsOverride ?? (job.required_skills as string[] | null) ?? [];
     const requiredSet = new Set(requiredSkills);
+
+    // Same-site stickiness: if a worker already has in-flight work at this
+    // postcode, prefer them so the site stays one visit. Only in-flight work
+    // counts — once jobs there are completed/declined/cancelled the pin
+    // releases and the site is ranked fresh.
+    let preferWorkerId = options?.preferWorkerId;
+    if (!preferWorkerId && job.postcode) {
+      const { data: siblingRows } = await supabase
+        .from('jobs')
+        .select('assigned_worker_id')
+        .eq('tenant_id', tenantId)
+        .eq('postcode', job.postcode)
+        .neq('id', jobId)
+        .not('assigned_worker_id', 'is', null)
+        .in('status', [
+          'pending_send',
+          'assigned',
+          'accepted',
+          'en_route',
+          'arrived',
+          'in_progress',
+          'paused',
+        ])
+        .limit(1);
+      preferWorkerId = (siblingRows?.[0]?.assigned_worker_id as string | undefined) ?? undefined;
+    }
 
     const { workers: assignableWorkers, error: workersError } = await getAssignableWorkers(tenantId);
 
@@ -1011,12 +1057,21 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
         ...candidate,
         distance: haversineDistance(jobCoords.lat, jobCoords.lng, candidate.lat, candidate.lng),
       }))
-      .sort((a, b) => {
-        if (a.distance !== b.distance) return a.distance - b.distance;
-        return a.currentLoad - b.currentLoad;
-      });
+      .sort((a, b) =>
+        compareByDistanceThenLoad(
+          { distanceKm: a.distance, load: a.currentLoad },
+          { distanceKm: b.distance, load: b.currentLoad }
+        )
+      );
 
-    const bestCandidate = rankedCandidates[0];
+    // Keep jobs at the same site with one worker: if a candidate is already
+    // handling in-flight work at this postcode and is still eligible here,
+    // prefer them over the top-ranked candidate so one visit covers the site.
+    const stickyCandidate = preferWorkerId
+      ? rankedCandidates.find((c) => c.type === 'worker' && c.id === preferWorkerId)
+      : undefined;
+
+    const bestCandidate = stickyCandidate ?? rankedCandidates[0];
 
     if (bestCandidate.type === 'business') {
       const dispatchResult = await dispatchJobToNetwork(jobId, bestCandidate.id);
@@ -1045,6 +1100,106 @@ export async function autoAllocateJob(jobId: string): Promise<AutoAllocateJobRes
     }
     return { success: false, error: message };
   }
+}
+
+export type AutoAllocateGroupResult = {
+  /** Job IDs successfully assigned, keyed by the assignee that took them. */
+  assignedCount: number;
+  failedJobIds: string[];
+};
+
+/**
+ * Allocates a set of jobs at the same site as one unit, so five jobs in one
+ * building become one visit rather than five separate dispatches.
+ *
+ * The assignee must cover the *union* of the group's skills. Where no single
+ * candidate can, the group is split by skill signature and each subset is
+ * retried — otherwise one unusual job would block every other job at the site
+ * from being assigned at all.
+ */
+export async function autoAllocateJobGroup(
+  jobIds: string[]
+): Promise<AutoAllocateGroupResult> {
+  if (jobIds.length === 0) return { assignedCount: 0, failedJobIds: [] };
+  if (jobIds.length === 1) {
+    const single = await autoAllocateJob(jobIds[0]);
+    return single.success
+      ? { assignedCount: 1, failedJobIds: [] }
+      : { assignedCount: 0, failedJobIds: [jobIds[0]] };
+  }
+
+  const supabase = await createClient();
+  const tenantId = await getTenantIdForCurrentUser();
+  const { data: rows, error } = await supabase
+    .from('jobs')
+    .select('id, required_skills')
+    .in('id', jobIds)
+    .eq('tenant_id', tenantId ?? '');
+
+  if (error || !rows?.length) {
+    console.error('[autoAllocateJobGroup] fetch error:', error);
+    return { assignedCount: 0, failedJobIds: jobIds };
+  }
+
+  const union = unionRequiredSkills(rows);
+
+  // Allocate the first job while requiring the whole group's skills, then put
+  // the rest of the group with whoever won it.
+  const [leadJobId, ...restJobIds] = jobIds;
+  const lead = await autoAllocateJob(leadJobId, { requiredSkillsOverride: union });
+
+  if (!lead.success) {
+    // Nobody covers the union. Split by skill signature so jobs that *can* be
+    // placed still get placed, instead of failing the whole site.
+    const bySignature = new Map<string, string[]>();
+    for (const row of rows) {
+      const key = skillSignature(row.required_skills);
+      const list = bySignature.get(key);
+      if (list) list.push(row.id as string);
+      else bySignature.set(key, [row.id as string]);
+    }
+
+    // A single signature means splitting cannot help — the union already
+    // equals it, so every job in the group needs exactly what the lead
+    // needed. Persist that same reason to the rest of the group; only the
+    // lead's own autoAllocateJob call wrote one, and the others would
+    // otherwise sit with a stale/null reason that looks unattempted.
+    if (bySignature.size <= 1) {
+      const reason = lead.error ?? 'No worker or connected business with required skills.';
+      const others = jobIds.filter((id) => id !== leadJobId);
+      if (others.length > 0 && tenantId) {
+        await Promise.all(
+          others.map((id) => persistAutoAssignFailureReason(supabase, id, tenantId, reason))
+        );
+      }
+      return { assignedCount: 0, failedJobIds: jobIds };
+    }
+
+    let assignedCount = 0;
+    const failedJobIds: string[] = [];
+    for (const subset of bySignature.values()) {
+      const result = await autoAllocateJobGroup(subset);
+      assignedCount += result.assignedCount;
+      failedJobIds.push(...result.failedJobIds);
+    }
+    return { assignedCount, failedJobIds };
+  }
+
+  let assignedCount = 1;
+  const failedJobIds: string[] = [];
+  for (const jobId of restJobIds) {
+    const assigned = await assignJob(jobId, lead.workerId, { pendingSend: true });
+    if (assigned.success) {
+      assignedCount += 1;
+    } else {
+      // Fall back to ranking this one on its own rather than losing it.
+      const solo = await autoAllocateJob(jobId);
+      if (solo.success) assignedCount += 1;
+      else failedJobIds.push(jobId);
+    }
+  }
+
+  return { assignedCount, failedJobIds };
 }
 
 export async function autoAssignJob(jobId: string): Promise<AssignJobResult> {
