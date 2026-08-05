@@ -544,7 +544,7 @@ export function JobsTable({
                       Clear filters
                     </Button>
                   )}
-                  <ExportJobsButton jobs={initialJobs} />
+                  <ExportJobsButton jobs={initialJobs} totalCount={totalCount} filters={initialFilters} />
                 </div>
               </div>
 

@@ -54,7 +54,7 @@ Our schema:
 - description (text - job details)
 - priority (ENUM: must be exactly one of: "low", "normal", "high", "emergency")
 
-Optional: reference_number, scheduled_date, worker_name (assigned worker)
+Optional: reference_number, scheduled_date
 
 Return JSON with TWO sections:
 
@@ -70,8 +70,7 @@ Example response:
     "description": "Notes",
     "priority": "Priority Level",
     "reference_number": null,
-    "scheduled_date": null,
-    "worker_name": null
+    "scheduled_date": null
   },
   "valueTransforms": {
     "priority": {

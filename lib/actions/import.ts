@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { autoAllocateJobGroup } from '@/lib/actions/jobs';
 import { clusterKeyForPostcode } from '@/lib/jobs/assignment-ranking';
-import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
@@ -224,15 +223,6 @@ export async function importJobs(params: {
       if (c.name) customerByName.set(c.name.trim().toLowerCase(), c.id);
     });
 
-    const workersResult = await supabase
-      .from('workers')
-      .select('id, full_name')
-      .eq('primary_tenant_id', tenantId);
-    const workerByName = new Map<string, string>();
-    (workersResult.data ?? []).forEach((w: { id: string; full_name: string | null }) => {
-      if (w.full_name) workerByName.set(w.full_name.trim().toLowerCase(), w.id);
-    });
-
     const { data: existingRefRows } = await supabase
       .from('jobs')
       .select('reference_number')
@@ -254,7 +244,6 @@ export async function importJobs(params: {
       const postcode = normalizeUkPostcode(rawPostcode) ?? '';
       const description = get(row, 'description');
       const customerName = get(row, 'customer_name');
-      const workerName = get(row, 'worker_name');
 
       const unmappedAppendix = formatUnmappedCsvColumns(row, map);
       const jobDescription =
@@ -280,10 +269,6 @@ export async function importJobs(params: {
         : customerName
           ? customerByName.get(customerName.toLowerCase()) ?? null
           : null;
-      const assignedWorkerId = workerName
-        ? workerByName.get(workerName.toLowerCase()) ?? null
-        : null;
-
       // Prefer CSV ref when mapped; uniquify against tenant + in-file duplicates
       // (unique index idx_jobs_tenant_reference rejects the whole batch otherwise).
       refCounter += 1;
@@ -304,11 +289,10 @@ export async function importJobs(params: {
         import_source_id: resolvedSourceId,
         reference_number: referenceNumber,
         customer_id: customerId,
-        assigned_worker_id: assignedWorkerId,
         address,
         postcode,
         job_description: jobDescription,
-        status: assignedWorkerId ? statusAfterWorkerAssignment('pending') : 'pending',
+        status: 'pending',
         priority,
         scheduled_date: scheduledDate || null,
         created_at: new Date().toISOString(),

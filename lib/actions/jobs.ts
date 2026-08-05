@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getJobsForExport, type ExportJobRow, type JobsFilters } from '@/lib/data/jobs';
+import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 import { createJobSchema } from '@/lib/validations/job';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
@@ -1522,6 +1524,42 @@ export async function bulkDeleteJobs(jobIds: string[]): Promise<DeleteJobResult>
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to delete jobs.',
+    };
+  }
+}
+
+export type ExportJobsResult =
+  | { success: true; jobs: ExportJobRow[]; capped: boolean }
+  | { success: false; error: string };
+
+/**
+ * Fetches jobs for export, applying the same filters as the current jobs list view.
+ * `scope` mirrors the export dialog: 'all' fetches every matching row (capped at
+ * EXPORT_MAX_ROWS), 'count' fetches up to the given number.
+ */
+export async function getJobsForExportAction(
+  filters: JobsFilters,
+  scope: { type: 'all' } | { type: 'count'; count: number }
+): Promise<ExportJobsResult> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const limit = scope.type === 'count' ? scope.count : undefined;
+    const { jobs, error } = await getJobsForExport(tenantId, filters, limit);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, jobs, capped: jobs.length >= EXPORT_MAX_ROWS };
+  } catch (err) {
+    console.error('[getJobsForExportAction]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to export jobs.',
     };
   }
 }
