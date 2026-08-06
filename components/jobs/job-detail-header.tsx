@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { JobStatus, JobPriority } from '@/lib/data/jobs';
+import type { JobLength } from '@/lib/jobs/normalize-job-length';
 import { JobDetailDeleteButton } from '@/components/jobs/job-detail-delete-button';
 
 const STATUS_LABELS: Record<JobStatus, string> = {
@@ -53,11 +54,22 @@ const PRIORITY_BADGE_CLASS: Record<JobPriority, string> = {
     'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400 shadow-[0_0_10px_-2px_rgba(244,63,94,0.2)]',
 };
 
+const JOB_LENGTH_LABELS: Record<JobLength, string> = {
+  half_day: 'Half day',
+  full_day: 'Full day',
+};
+
+const JOB_LENGTH_BADGE_CLASS: Record<JobLength, string> = {
+  half_day: 'border-teal-400/40 bg-teal-500/10 text-teal-700 dark:text-teal-400',
+  full_day: 'border-indigo-400/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+};
+
 interface JobDetailHeaderProps {
   jobId: string;
   referenceNumber: string;
   status: JobStatus;
   priority: JobPriority;
+  jobLength?: JobLength | null;
   createdAt: string;
   hideDeleteAction?: boolean;
 }
@@ -67,6 +79,7 @@ export function JobDetailHeader({
   referenceNumber,
   status,
   priority,
+  jobLength,
   createdAt,
   hideDeleteAction = false,
 }: JobDetailHeaderProps) {
@@ -112,6 +125,16 @@ export function JobDetailHeader({
           >
             {PRIORITY_LABELS[priority]}
           </span>
+          {jobLength && (
+            <span
+              className={cn(
+                'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm',
+                JOB_LENGTH_BADGE_CLASS[jobLength]
+              )}
+            >
+              {JOB_LENGTH_LABELS[jobLength]}
+            </span>
+          )}
           {createdRelative && (
             <span className="text-sm text-muted-foreground">
               Created {createdRelative}

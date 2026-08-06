@@ -53,13 +53,19 @@ Our schema:
 - postcode (text - UK postcode)
 - description (text - job details)
 - priority (ENUM: must be exactly one of: "low", "normal", "high", "emergency")
+- job_length (ENUM: must be exactly one of: "half_day", "full_day" - how LONG the job takes, not what time it starts)
 
 Optional: reference_number, scheduled_date
+
+For job_length, look for columns describing duration/shift, e.g. "Time Required",
+"Duration", "Job Length", "Shift", "Appointment Length", "Hours". Do not map a
+column that only gives a single start time (e.g. "Start Time") to job_length —
+that's a time, not a duration.
 
 Return JSON with TWO sections:
 
 1. "columnMapping" - which CSV column maps to which schema field (use exact CSV header names; null if no match)
-2. "valueTransforms" - how to transform VALUES in those columns (only for fields that need normalization, e.g. priority)
+2. "valueTransforms" - how to transform VALUES in those columns (only for fields that need normalization, e.g. priority, job_length)
 
 Example response:
 {
@@ -69,6 +75,7 @@ Example response:
     "postcode": "Post Code",
     "description": "Notes",
     "priority": "Priority Level",
+    "job_length": "Shift",
     "reference_number": null,
     "scheduled_date": null
   },
@@ -79,6 +86,12 @@ Example response:
       "Medium": "normal",
       "Low": "low",
       "default": "normal"
+    },
+    "job_length": {
+      "Full Day": "full_day",
+      "HALF DAY": "half_day",
+      "FD": "full_day",
+      "AM": "half_day"
     }
   }
 }
@@ -86,7 +99,11 @@ Example response:
 Rules:
 - If no priority column exists, use null in columnMapping and set "default": "normal" in valueTransforms.priority
 - Map common variations (Urgent/URGENT/urgent → emergency, Medium/Med → normal)
-- Always include "default" fallback for enums in valueTransforms
+- Always include "default" fallback for enums in valueTransforms — EXCEPT job_length
+- job_length must NEVER get a "default" fallback. If a sample value isn't a clear
+  half/full day indicator, leave it out of valueTransforms.job_length entirely
+  rather than guessing — an unrecognized value should stay unmapped, not be
+  forced into half_day or full_day.
 - If column not found or low confidence, use null in columnMapping
 - Return ONLY valid JSON, no markdown or explanation.`;
 

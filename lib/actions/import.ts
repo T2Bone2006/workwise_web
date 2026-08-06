@@ -9,6 +9,7 @@ import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { normalizeUkPostcode } from '@/lib/utils/postcode';
+import { normalizeJobLength, normalizeJobLengthFromText } from '@/lib/jobs/normalize-job-length';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
@@ -59,7 +60,7 @@ function uniquifyReferenceNumber(
   let unique = '';
   do {
     n += 1;
-    unique = `${candidate}-IMP-${Date.now()}-${counter}-${n}`;
+    unique = `${candidate}-${n}`;
   } while (used.has(unique.toLowerCase()));
   used.add(unique.toLowerCase());
   return unique;
@@ -284,6 +285,12 @@ export async function importJobs(params: {
       scheduledDate = parseImportScheduledDate(scheduledDate);
       const fullAddress = buildFullAddressString([address, postcode]);
 
+      // Try the mapped column first; if it's empty/unrecognized, fall back to
+      // scanning the assembled description (which includes unmapped columns
+      // dumped by formatUnmappedCsvColumns) as a last resort.
+      const jobLength =
+        normalizeJobLength(get(row, 'job_length')) ?? normalizeJobLengthFromText(jobDescription);
+
       jobs.push({
         tenant_id: tenantId,
         import_source_id: resolvedSourceId,
@@ -294,6 +301,7 @@ export async function importJobs(params: {
         job_description: jobDescription,
         status: 'pending',
         priority,
+        job_length: jobLength,
         scheduled_date: scheduledDate || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

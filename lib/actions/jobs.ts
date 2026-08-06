@@ -48,6 +48,7 @@ type CreateJobPayload = {
   postcode: string;
   description: string;
   priority: 'low' | 'normal' | 'high' | 'emergency';
+  job_length?: 'half_day' | 'full_day';
   scheduled_date?: string;
   scheduled_time?: string;
   assigned_worker_id?: string;
@@ -64,6 +65,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       postcode: payload.postcode?.trim(),
       description: payload.description?.trim(),
       priority: payload.priority,
+      job_length: payload.job_length,
       scheduled_date: payload.scheduled_date?.trim() || undefined,
       scheduled_time: payload.scheduled_time?.trim() || undefined,
       assigned_worker_id: payload.assigned_worker_id?.trim() || undefined,
@@ -78,6 +80,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         (first.postcode?.[0]) ||
         (first.description?.[0]) ||
         (first.priority?.[0]) ||
+        (first.job_length?.[0]) ||
         (first.assigned_worker_id?.[0]) ||
         parsed.error.message;
       return { success: false, error: message ?? 'Validation failed' };
@@ -170,6 +173,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         job_description: parsed.data.description,
         status: initialStatus,
         priority: parsed.data.priority,
+        job_length: parsed.data.job_length ?? null,
         scheduled_date: parsed.data.scheduled_date || null,
         scheduled_time: parsed.data.scheduled_time || null,
         required_skills: requiredSkills,

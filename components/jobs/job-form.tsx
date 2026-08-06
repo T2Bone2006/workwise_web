@@ -61,6 +61,11 @@ const priorityBadgeClass: Record<string, string> = {
   emergency: 'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400',
 };
 
+const JOB_LENGTH_OPTIONS = [
+  { value: 'half_day', label: 'Half day' },
+  { value: 'full_day', label: 'Full day' },
+] as const;
+
 interface JobFormProps {
   customers: CustomerRow[];
   workers: WorkerRow[];
@@ -92,6 +97,7 @@ export function JobForm({
       postcode: '',
       description: '',
       priority: 'normal',
+      job_length: undefined,
       scheduled_date: '',
       scheduled_time: '',
       assigned_worker_id: '',
@@ -152,6 +158,7 @@ export function JobForm({
         postcode: values.postcode,
         description: values.description,
         priority: values.priority,
+        job_length: values.job_length,
         scheduled_date: values.scheduled_date || undefined,
         scheduled_time: values.scheduled_time || undefined,
         assigned_worker_id: useAutoAssign
@@ -311,47 +318,83 @@ export function JobForm({
               )}
             />
 
-            <FormField
-              control={form.control}
-              name="priority"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                    Priority
-                  </FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger
-                        className={cn(
-                          'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
-                          'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
-                        )}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {PRIORITY_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          <span
-                            className={cn(
-                              'inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                              priorityBadgeClass[o.value]
-                            )}
-                          >
+            <div className="grid gap-6 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="priority"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
+                      Priority
+                    </FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger
+                          className={cn(
+                            'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                            'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
+                          )}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {PRIORITY_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            <span
+                              className={cn(
+                                'inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                                priorityBadgeClass[o.value]
+                              )}
+                            >
+                              {o.label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage className="text-destructive text-xs" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="job_length"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Job length</FormLabel>
+                    <Select
+                      onValueChange={(v) => field.onChange(v === '__unset__' ? undefined : v)}
+                      value={field.value ?? '__unset__'}
+                    >
+                      <FormControl>
+                        <SelectTrigger
+                          className={cn(
+                            'w-full bg-white/80 dark:bg-white/5 dark:border-white/10',
+                            'focus-visible:border-brand-primary focus-visible:ring-brand-primary/20 transition-all duration-300'
+                          )}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__unset__">Not specified</SelectItem>
+                        {JOB_LENGTH_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
                             {o.label}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage className="text-destructive text-xs" />
-                </FormItem>
-              )}
-            />
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage className="text-destructive text-xs" />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <FormField
               control={form.control}

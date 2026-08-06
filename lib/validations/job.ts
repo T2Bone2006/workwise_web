@@ -16,6 +16,7 @@ export const createJobSchema = z.object({
     }),
   description: z.string().min(1, 'Description is required').max(1000),
   priority: z.enum(['low', 'normal', 'high', 'emergency']),
+  job_length: z.enum(['half_day', 'full_day']).optional(),
   scheduled_date: z.string().optional(),
   scheduled_time: z
     .string()
