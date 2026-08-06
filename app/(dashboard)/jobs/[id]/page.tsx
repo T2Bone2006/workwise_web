@@ -42,6 +42,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       job_description,
       status,
       priority,
+      job_length,
       scheduled_date,
       created_at,
       updated_at,
@@ -191,6 +192,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     job_description: jobRow.job_description ?? '',
     status: (jobRow.status as JobDetailJob['status']) ?? 'pending',
     priority: (jobRow.priority as JobDetailJob['priority']) ?? 'normal',
+    job_length: (jobRow.job_length as JobDetailJob['job_length']) ?? null,
     scheduled_date: jobRow.scheduled_date ?? null,
     created_at: jobRow.created_at,
     updated_at: jobRow.updated_at ?? null,
@@ -303,6 +305,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         referenceNumber={job.reference_number}
         status={job.status}
         priority={job.priority}
+        jobLength={job.job_length}
         createdAt={job.created_at}
         hideDeleteAction={isNetworkDispatched}
       />

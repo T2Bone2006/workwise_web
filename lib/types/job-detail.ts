@@ -24,6 +24,7 @@ export interface JobDetailJob {
   job_description: string;
   status: JobStatus;
   priority: JobPriority;
+  job_length: 'half_day' | 'full_day' | null;
   scheduled_date: string | null;
   created_at: string;
   updated_at: string | null;

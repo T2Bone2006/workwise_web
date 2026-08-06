@@ -45,6 +45,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { importJobs } from '@/lib/actions/import';
 import { normalizeUkPostcode } from '@/lib/utils/postcode';
+import { normalizeJobLength } from '@/lib/jobs/normalize-job-length';
 import type { ImportSourceRow } from '@/lib/data/import-sources';
 import type { CustomerImportOption } from '@/lib/data/customers';
 
@@ -54,6 +55,7 @@ const SCHEMA_FIELDS = [
   { key: 'postcode', label: 'Postcode' },
   { key: 'description', label: 'Description' },
   { key: 'priority', label: 'Priority' },
+  { key: 'job_length', label: 'Job length' },
   { key: 'reference_number', label: 'Reference number' },
   { key: 'scheduled_date', label: 'Scheduled date' },
 ] as const;
@@ -136,6 +138,9 @@ function mapCsvRowToSchema(
     out[key] = val;
   });
   if (!out.priority) out.priority = valueTransforms.priority?.default ?? 'normal';
+  // Preview-only approximation: resolves the mapped column same as the server,
+  // but doesn't replicate the server's job_description-scanning fallback.
+  out.job_length = normalizeJobLength(out.job_length || null) ?? '';
 
   const mappedDescription = out.description ?? '';
   const unmappedAppendix = formatUnmappedCsvColumns(rawRow, columnMapping);
@@ -831,6 +836,7 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                       <TableHead>Postcode</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Priority</TableHead>
+                      <TableHead>Job length</TableHead>
                       <TableHead>Issues</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -852,6 +858,13 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                         <TableCell>{mapped.postcode}</TableCell>
                         <TableCell className="max-w-[200px] truncate">{mapped.description}</TableCell>
                         <TableCell>{mapped.priority}</TableCell>
+                        <TableCell>
+                          {mapped.job_length === 'half_day'
+                            ? 'Half day'
+                            : mapped.job_length === 'full_day'
+                              ? 'Full day'
+                              : '—'}
+                        </TableCell>
                         <TableCell className="text-sm">
                           {!validation.valid && (
                             <span className="text-destructive">{validation.reasons.join(', ')}</span>
