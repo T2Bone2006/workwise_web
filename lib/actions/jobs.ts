@@ -235,18 +235,48 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
   }
 }
 
+export type UpdateJobCustomerRecord = {
+  id: string;
+  name: string;
+  type: string;
+  email: string | null;
+  phone: string | null;
+};
+
 export type UpdateJobCustomerResult =
-  | { success: true }
+  | { success: true; customer: UpdateJobCustomerRecord | null }
   | { success: false; error: string };
 
-export async function updateJobCustomer(
-  jobId: string,
+async function loadJobCustomerRecord(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tenantId: string,
   customerId: string | null
-): Promise<UpdateJobCustomerResult> {
+): Promise<UpdateJobCustomerRecord | null> {
+  if (!customerId) return null;
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id, name, type, email, phone')
+    .eq('id', customerId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    id: data.id as string,
+    name: (data.name as string) ?? '',
+    type: (data.type as string) ?? 'individual',
+    email: (data.email as string | null) ?? null,
+    phone: (data.phone as string | null) ?? null,
+  };
+}
+
+export async function updateJobCustomer(payload: {
+  jobId: string;
+  customerId: string;
+}): Promise<UpdateJobCustomerResult> {
   try {
     const parsed = updateJobCustomerSchema.safeParse({
-      jobId,
-      customer_id: customerId,
+      jobId: payload.jobId,
+      customer_id: payload.customerId,
     });
     if (!parsed.success) {
       const first = parsed.error.flatten().fieldErrors;
@@ -275,9 +305,6 @@ export async function updateJobCustomer(
 
     const nextCustomerId = parsed.data.customer_id;
     const currentCustomerId = (job.customer_id as string | null) ?? null;
-    if (nextCustomerId === currentCustomerId) {
-      return { success: true };
-    }
 
     if (nextCustomerId) {
       const { data: customer, error: customerError } = await supabase
@@ -293,25 +320,39 @@ export async function updateJobCustomer(
       }
     }
 
-    const { error: updateError } = await supabase
-      .from('jobs')
-      .update({
-        customer_id: nextCustomerId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', parsed.data.jobId)
-      .eq('tenant_id', tenantId);
+    if (nextCustomerId !== currentCustomerId) {
+      const { data: updated, error: updateError } = await supabase
+        .from('jobs')
+        .update({
+          customer_id: nextCustomerId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', parsed.data.jobId)
+        .eq('tenant_id', tenantId)
+        .select('id, customer_id')
+        .maybeSingle();
 
-    if (updateError) {
-      console.error('[updateJobCustomer] update error:', updateError);
-      if (updateError.code === '23503') {
-        return { success: false, error: 'Customer not found.' };
+      if (updateError) {
+        console.error('[updateJobCustomer] update error:', updateError);
+        if (updateError.code === '23503') {
+          return { success: false, error: 'Customer not found.' };
+        }
+        return { success: false, error: updateError.message ?? 'Failed to update customer.' };
       }
-      return { success: false, error: updateError.message ?? 'Failed to update customer.' };
+
+      if (!updated) {
+        return {
+          success: false,
+          error: 'Could not update this job. Please try again.',
+        };
+      }
     }
+
+    const customer = await loadJobCustomerRecord(supabase, tenantId, nextCustomerId);
 
     revalidatePath('/jobs');
     revalidatePath(`/jobs/${parsed.data.jobId}`);
+    revalidatePath('/jobs/[id]', 'page');
     revalidatePath('/customers');
     if (currentCustomerId) {
       revalidatePath(`/customers/${currentCustomerId}`);
@@ -319,7 +360,7 @@ export async function updateJobCustomer(
     if (nextCustomerId) {
       revalidatePath(`/customers/${nextCustomerId}`);
     }
-    return { success: true };
+    return { success: true, customer };
   } catch (err) {
     console.error('[updateJobCustomer]', err);
     return {

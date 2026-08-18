@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Mail, Phone, User } from 'lucide-react';
 import { toast } from 'sonner';
@@ -27,15 +27,18 @@ const TYPE_LABELS: Record<string, string> = {
   bulk_client: 'Bulk client',
 };
 
+type DisplayCustomer = {
+  id: string;
+  name: string;
+  type: string;
+  email: string | null;
+  phone: string | null;
+};
+
 interface JobDetailCustomerCardProps {
   jobId: string;
-  customer: {
-    id: string;
-    name: string;
-    type: string;
-    email: string | null;
-    phone: string | null;
-  } | null;
+  customerId: string | null;
+  customer: DisplayCustomer | null;
   customers: CustomerRow[];
   readOnly?: boolean;
 }
@@ -44,8 +47,27 @@ function customerLabel(name: string, type: string) {
   return type === 'bulk_client' ? `${name} (Bulk)` : name;
 }
 
+function resolveCustomer(
+  customer: DisplayCustomer | null,
+  customerId: string | null,
+  customers: CustomerRow[]
+): DisplayCustomer | null {
+  if (customer) return customer;
+  if (!customerId) return null;
+  const match = customers.find((c) => c.id === customerId);
+  if (!match) return null;
+  return {
+    id: match.id,
+    name: match.name,
+    type: match.type,
+    email: null,
+    phone: null,
+  };
+}
+
 export function JobDetailCustomerCard({
   jobId,
+  customerId,
   customer,
   customers,
   readOnly = false,
@@ -54,9 +76,23 @@ export function JobDetailCustomerCard({
   const [isChanging, setIsChanging] = useState(false);
   const [pendingValue, setPendingValue] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [displayed, setDisplayed] = useState<DisplayCustomer | null>(() =>
+    resolveCustomer(customer, customerId, customers)
+  );
 
-  const canChange = !readOnly && (customers.length > 0 || customer != null);
-  const typeLabel = customer ? TYPE_LABELS[customer.type] ?? customer.type : null;
+  useEffect(() => {
+    setDisplayed(resolveCustomer(customer, customerId, customers));
+  }, [jobId]);
+
+  useEffect(() => {
+    const resolved = resolveCustomer(customer, customerId, customers);
+    if (resolved) {
+      setDisplayed(resolved);
+    }
+  }, [customer, customerId, customers]);
+
+  const canChange = !readOnly && (customers.length > 0 || displayed != null);
+  const typeLabel = displayed ? TYPE_LABELS[displayed.type] ?? displayed.type : null;
 
   const options = useMemo(() => {
     const next = [
@@ -66,16 +102,16 @@ export function JobDetailCustomerCard({
         label: customerLabel(c.name, c.type),
       })),
     ];
-    if (customer && !customers.some((c) => c.id === customer.id)) {
+    if (displayed && !customers.some((c) => c.id === displayed.id)) {
       next.splice(1, 0, {
-        value: customer.id,
-        label: customerLabel(customer.name, customer.type),
+        value: displayed.id,
+        label: customerLabel(displayed.name, displayed.type),
       });
     }
     return next;
-  }, [customers, customer]);
+  }, [customers, displayed]);
 
-  const selectValue = customer?.id ?? NONE_VALUE;
+  const selectValue = displayed?.id ?? NONE_VALUE;
 
   function stopChanging() {
     setIsChanging(false);
@@ -84,7 +120,7 @@ export function JobDetailCustomerCard({
 
   function handleSelect(value: string) {
     const nextId = value === NONE_VALUE ? null : value;
-    const currentId = customer?.id ?? null;
+    const currentId = displayed?.id ?? null;
     if (nextId === currentId) {
       stopChanging();
       return;
@@ -95,16 +131,16 @@ export function JobDetailCustomerCard({
   function confirmDescription() {
     if (!pendingValue) return '';
     if (pendingValue === NONE_VALUE) {
-      return customer
-        ? `This job will no longer show under ${customer.name}. It will have no customer.`
+      return displayed
+        ? `This job will no longer show under ${displayed.name}. It will have no customer.`
         : 'This job will have no customer.';
     }
     const next =
       customers.find((c) => c.id === pendingValue) ??
-      (customer?.id === pendingValue ? customer : null);
+      (displayed?.id === pendingValue ? displayed : null);
     const nextName = next?.name ?? 'the selected customer';
-    if (customer) {
-      return `This job will no longer show under ${customer.name}. It will show under ${nextName}.`;
+    if (displayed) {
+      return `This job will no longer show under ${displayed.name}. It will show under ${nextName}.`;
     }
     return `This job will show under ${nextName}.`;
   }
@@ -113,10 +149,11 @@ export function JobDetailCustomerCard({
     if (!pendingValue) return;
     setIsSaving(true);
     try {
-      const nextId = pendingValue === NONE_VALUE ? null : pendingValue;
-      const result = await updateJobCustomer(jobId, nextId);
+      const nextId = pendingValue === NONE_VALUE ? '' : pendingValue;
+      const result = await updateJobCustomer({ jobId, customerId: nextId });
       if (result.success) {
-        toast.success(nextId ? 'Customer updated' : 'Customer removed');
+        toast.success(result.customer ? 'Customer updated' : 'Customer removed');
+        setDisplayed(result.customer);
         stopChanging();
         router.refresh();
       } else {
@@ -179,11 +216,11 @@ export function JobDetailCustomerCard({
             options={options}
           />
         )}
-        {customer ? (
+        {displayed ? (
           <>
             <div className="flex items-center gap-2">
               <User className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium text-foreground">{customer.name || '—'}</span>
+              <span className="font-medium text-foreground">{displayed.name || '—'}</span>
             </div>
             {typeLabel && (
               <span
@@ -194,31 +231,31 @@ export function JobDetailCustomerCard({
                 {typeLabel}
               </span>
             )}
-            {customer.email && (
+            {displayed.email && (
               <div className="flex items-center gap-1">
                 <Mail className="size-4 shrink-0 text-muted-foreground" />
                 <a
-                  href={`mailto:${customer.email}`}
+                  href={`mailto:${displayed.email}`}
                   className="text-sm text-primary hover:underline truncate"
                 >
-                  {customer.email}
+                  {displayed.email}
                 </a>
-                <CopyButton value={customer.email} label="Copy email" />
+                <CopyButton value={displayed.email} label="Copy email" />
               </div>
             )}
-            {customer.phone && (
+            {displayed.phone && (
               <div className="flex items-center gap-1">
                 <Phone className="size-4 shrink-0 text-muted-foreground" />
                 <a
-                  href={`tel:${customer.phone}`}
+                  href={`tel:${displayed.phone}`}
                   className="text-sm text-primary hover:underline"
                 >
-                  {customer.phone}
+                  {displayed.phone}
                 </a>
-                <CopyButton value={customer.phone} label="Copy phone" />
+                <CopyButton value={displayed.phone} label="Copy phone" />
               </div>
             )}
-            {!customer.email && !customer.phone && (
+            {!displayed.email && !displayed.phone && (
               <p className="text-xs text-muted-foreground">No contact details</p>
             )}
           </>
@@ -240,13 +277,14 @@ export function JobDetailCustomerCard({
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
+              type="button"
               variant="outline"
               onClick={() => setPendingValue(null)}
               disabled={isSaving}
             >
               Cancel
             </Button>
-            <Button onClick={handleConfirm} disabled={isSaving}>
+            <Button type="button" onClick={handleConfirm} disabled={isSaving}>
               {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
               Confirm
             </Button>

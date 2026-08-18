@@ -265,8 +265,22 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     getTenantSkills(tenantId),
   ]);
   const workerOptions = workers.map((w) => ({ id: w.id, full_name: w.full_name }));
+  const customerFromList = job.customer_id
+    ? customers.find((c) => c.id === job.customer_id) ?? null
+    : null;
   const jobForView: JobDetailJob = {
     ...job,
+    customer:
+      job.customer ??
+      (customerFromList
+        ? {
+            id: customerFromList.id,
+            name: customerFromList.name,
+            type: customerFromList.type,
+            email: null,
+            phone: null,
+          }
+        : null),
     worker: job.worker
       ? {
           ...job.worker,

@@ -36,7 +36,9 @@ export type CreateJobInput = z.infer<typeof createJobSchema>;
 
 export const updateJobCustomerSchema = z.object({
   jobId: z.string().uuid('Invalid job'),
-  customer_id: z.string().uuid('Invalid customer').nullable(),
+  customer_id: z
+    .union([z.string().uuid('Invalid customer'), z.literal(''), z.null()])
+    .transform((val) => (val === '' ? null : val)),
 });
 
 export type UpdateJobCustomerInput = z.infer<typeof updateJobCustomerSchema>;

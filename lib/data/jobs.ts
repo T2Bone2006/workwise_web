@@ -135,7 +135,8 @@ export async function getPendingSendJobsForTenant(
       .eq('tenant_id', tenantId)
       .eq('status', 'pending_send')
       .not('assigned_worker_id', 'is', null)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
 
     if (error) {
       return { jobs: [], error: toError(error) };
@@ -217,6 +218,14 @@ function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
   return q;
 }
 
+/** Primary column from filters, then `id` so tied timestamps (e.g. an import batch) stay in a fixed order. */
+function applyJobsListSort(query: JobsQuery, filters: JobsFilters): JobsQuery {
+  const sortCol =
+    filters.sort && filters.sort !== 'customer_name' ? filters.sort : 'created_at';
+  const ascending = filters.sort_dir === 'asc';
+  return query.order(sortCol, { ascending }).order('id', { ascending: false });
+}
+
 function mapJobRow(row: Record<string, unknown>): JobRow {
   const customer = row.customer as { id?: string; name?: string } | null;
   const worker = row.worker as { id?: string; full_name?: string } | null;
@@ -272,14 +281,7 @@ export async function getJobsForTenant(
       .range(from, to);
 
     query = applyJobsFilters(query, filters);
-
-    const sortCol = filters.sort ?? 'created_at';
-    const sortDir = filters.sort_dir === 'asc';
-    if (sortCol === 'customer_name') {
-      query = query.order('created_at', { ascending: sortDir });
-    } else {
-      query = query.order(sortCol, { ascending: sortDir });
-    }
+    query = applyJobsListSort(query, filters);
 
     const { data, error, count } = await query;
 
@@ -337,14 +339,7 @@ export async function getJobsForExport(
       .range(0, cappedLimit - 1);
 
     query = applyJobsFilters(query, filters);
-
-    const sortCol = filters.sort ?? 'created_at';
-    const sortDir = filters.sort_dir === 'asc';
-    if (sortCol === 'customer_name') {
-      query = query.order('created_at', { ascending: sortDir });
-    } else {
-      query = query.order(sortCol, { ascending: sortDir });
-    }
+    query = applyJobsListSort(query, filters);
 
     const { data, error } = await query;
 
@@ -426,6 +421,7 @@ export async function getUnassignedJobsForTenant(
       .is('assigned_worker_id', null)
       .is('network_dispatch_id', null)
       .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
       .limit(limit);
 
     if (error) {
@@ -735,6 +731,7 @@ export async function getRecentJobsForCustomer(
       .eq('tenant_id', tenantId)
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(limit);
 
     if (error) {

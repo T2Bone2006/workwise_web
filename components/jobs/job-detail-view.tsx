@@ -162,6 +162,7 @@ export function JobDetailView({
       <div className="space-y-6">
         <JobDetailCustomerCard
           jobId={job.id}
+          customerId={job.customer_id}
           customer={job.customer}
           customers={customers}
           readOnly={isNetworkOriginView}
