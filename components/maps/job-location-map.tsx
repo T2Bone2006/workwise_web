@@ -86,11 +86,11 @@ export function JobLocationMap({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-lg border border-border/80 bg-card',
+        'relative z-0 isolate overflow-hidden rounded-lg border border-border/80 bg-card',
         'shadow-[var(--shadow-soft)] dark:border-white/[0.06]'
       )}
     >
-      <div className="relative h-[400px] bg-muted/20">
+      <div className="relative z-0 h-[400px] bg-muted/20">
         <MapContainer
           center={[jobLocation.lat, jobLocation.lng]}
           zoom={workerLocation ? 12 : 14}
@@ -174,7 +174,7 @@ export function JobLocationMap({
 
         <div
           className={cn(
-            'absolute bottom-3 right-3 z-[1000] flex gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs backdrop-blur-sm',
+            'absolute bottom-3 right-3 z-10 flex gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs backdrop-blur-sm',
             'shadow-[var(--shadow-soft)]'
           )}
         >

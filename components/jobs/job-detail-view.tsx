@@ -16,6 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import type { TenantSkillRow } from '@/lib/actions/skills';
+import type { CustomerRow } from '@/lib/data/customers';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +45,7 @@ interface JobDetailViewProps {
   job: JobDetailJob;
   statusHistory: JobStatusHistoryEntry[];
   workers: WorkerOption[];
+  customers: CustomerRow[];
   tenantSkills: TenantSkillRow[];
   mapData?: JobDetailMapData | null;
   /** Set when the job report card should render, or when status is completed (completion section). */
@@ -61,6 +63,7 @@ export function JobDetailView({
   job,
   statusHistory,
   workers,
+  customers,
   tenantSkills,
   mapData,
   industryData,
@@ -157,14 +160,12 @@ export function JobDetailView({
 
       {/* Right column */}
       <div className="space-y-6">
-        {job.customer && (
-          <JobDetailCustomerCard
-            name={job.customer.name}
-            type={job.customer.type}
-            email={job.customer.email}
-            phone={job.customer.phone}
-          />
-        )}
+        <JobDetailCustomerCard
+          jobId={job.id}
+          customer={job.customer}
+          customers={customers}
+          readOnly={isNetworkOriginView}
+        />
         <div id="assignment">
           {isNetworkDispatched ? (
             <Card

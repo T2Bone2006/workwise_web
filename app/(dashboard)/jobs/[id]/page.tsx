@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { getWorkersForTenant } from '@/lib/data/workers';
+import { getCustomersForTenant } from '@/lib/data/customers';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
@@ -258,8 +259,9 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
 
   const completionNotesTrimmed = (jobRow.completion_notes ?? '').trim();
 
-  const [{ workers }, tenantSkills] = await Promise.all([
+  const [{ workers }, { customers }, tenantSkills] = await Promise.all([
     getWorkersForTenant(tenantId),
+    getCustomersForTenant(tenantId),
     getTenantSkills(tenantId),
   ]);
   const workerOptions = workers.map((w) => ({ id: w.id, full_name: w.full_name }));
@@ -281,6 +283,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         initialJob={jobForView}
         initialStatusHistory={statusHistory}
         workers={workerOptions}
+        customers={customers}
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryDataForDetail}
@@ -313,6 +316,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         job={jobForView}
         statusHistory={statusHistory}
         workers={workerOptions}
+        customers={customers}
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryDataForDetail}

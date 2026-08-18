@@ -33,3 +33,10 @@ export const createJobSchema = z.object({
 });
 
 export type CreateJobInput = z.infer<typeof createJobSchema>;
+
+export const updateJobCustomerSchema = z.object({
+  jobId: z.string().uuid('Invalid job'),
+  customer_id: z.string().uuid('Invalid customer').nullable(),
+});
+
+export type UpdateJobCustomerInput = z.infer<typeof updateJobCustomerSchema>;

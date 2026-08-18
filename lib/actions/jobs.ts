@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getJobsForExport, type ExportJobRow, type JobsFilters } from '@/lib/data/jobs';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
-import { createJobSchema } from '@/lib/validations/job';
+import { createJobSchema, updateJobCustomerSchema } from '@/lib/validations/job';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
@@ -231,6 +231,100 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to create job. Please try again.',
+    };
+  }
+}
+
+export type UpdateJobCustomerResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function updateJobCustomer(
+  jobId: string,
+  customerId: string | null
+): Promise<UpdateJobCustomerResult> {
+  try {
+    const parsed = updateJobCustomerSchema.safeParse({
+      jobId,
+      customer_id: customerId,
+    });
+    if (!parsed.success) {
+      const first = parsed.error.flatten().fieldErrors;
+      return {
+        success: false,
+        error: first.jobId?.[0] || first.customer_id?.[0] || 'Validation failed',
+      };
+    }
+
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const { data: job, error: fetchError } = await supabase
+      .from('jobs')
+      .select('id, customer_id')
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError || !job) {
+      return { success: false, error: 'Job not found or access denied.' };
+    }
+
+    const nextCustomerId = parsed.data.customer_id;
+    const currentCustomerId = (job.customer_id as string | null) ?? null;
+    if (nextCustomerId === currentCustomerId) {
+      return { success: true };
+    }
+
+    if (nextCustomerId) {
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('id', nextCustomerId)
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (customerError || !customer) {
+        return { success: false, error: 'Customer not found or is inactive.' };
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        customer_id: nextCustomerId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      console.error('[updateJobCustomer] update error:', updateError);
+      if (updateError.code === '23503') {
+        return { success: false, error: 'Customer not found.' };
+      }
+      return { success: false, error: updateError.message ?? 'Failed to update customer.' };
+    }
+
+    revalidatePath('/jobs');
+    revalidatePath(`/jobs/${parsed.data.jobId}`);
+    revalidatePath('/customers');
+    if (currentCustomerId) {
+      revalidatePath(`/customers/${currentCustomerId}`);
+    }
+    if (nextCustomerId) {
+      revalidatePath(`/customers/${nextCustomerId}`);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error('[updateJobCustomer]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to update customer. Please try again.',
     };
   }
 }

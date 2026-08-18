@@ -6,6 +6,7 @@ import { JobDetailView, type JobDetailMapData } from '@/components/jobs/job-deta
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import type { TenantSkillRow } from '@/lib/actions/skills';
+import type { CustomerRow } from '@/lib/data/customers';
 import type { JobStatus } from '@/lib/data/jobs';
 import { createBrowserClient } from '@/lib/supabase/client';
 
@@ -18,6 +19,7 @@ interface JobOriginRealtimeViewProps {
   initialJob: JobDetailJob;
   initialStatusHistory: JobStatusHistoryEntry[];
   workers: WorkerOption[];
+  customers: CustomerRow[];
   tenantSkills: TenantSkillRow[];
   mapData?: JobDetailMapData | null;
   industryData?: unknown;
@@ -31,6 +33,7 @@ export function JobOriginRealtimeView({
   initialJob,
   initialStatusHistory,
   workers,
+  customers,
   tenantSkills,
   mapData,
   industryData,
@@ -126,6 +129,7 @@ export function JobOriginRealtimeView({
         job={job}
         statusHistory={statusHistory}
         workers={workers}
+        customers={customers}
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryData}
