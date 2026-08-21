@@ -94,6 +94,10 @@ export function SetNewPasswordForm({ variant }: SetNewPasswordFormProps) {
       return;
     }
 
+    if (variant === 'worker') {
+      await supabase.auth.signOut();
+    }
+
     setPhase('success');
   }
 

@@ -4,6 +4,7 @@ import { DashboardShell } from '@/components/layout/dashboard-shell';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { getTenantFeatures } from '@/lib/data/tenant-features';
 import { getNetworkNotificationCounts } from '@/lib/data/network';
+import { WORKER_WEB_LOGIN_ERROR_PARAM } from '@/lib/auth/worker-web-access';
 import { isAdmin } from '@/lib/utils/admin';
 
 export default async function DashboardLayout({
@@ -18,6 +19,21 @@ export default async function DashboardLayout({
 
   if (!user) {
     redirect('/login');
+  }
+
+  const { data: profile } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle<{ role: string | null }>();
+
+  if (profile?.role === 'worker') {
+    await supabase.auth.signOut();
+    redirect(`/login?error=${WORKER_WEB_LOGIN_ERROR_PARAM}`);
+  }
+
+  if (profile?.role === 'customer_portal') {
+    redirect('/portal');
   }
 
   const [tenantName, admin, tenantId, features] = await Promise.all([

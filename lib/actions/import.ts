@@ -127,6 +127,8 @@ export async function importJobs(params: {
   valueTransforms?: Record<string, Record<string, string>>;
   csvData: Record<string, string>[];
   fileName?: string;
+  /** When true (default), auto-assign imported jobs to workers. */
+  autoAllocate?: boolean;
 }): Promise<ImportJobsResult> {
   try {
     const supabase = await createClient();
@@ -392,29 +394,33 @@ export async function importJobs(params: {
       }
     }
 
-    // Group jobs by site before allocating so several jobs in one building go
-    // to the same worker as a single visit. Jobs within a group are allocated
-    // sequentially (autoAllocateJobGroup); only separate sites run in parallel,
-    // which avoids two concurrent allocations racing for the same building.
-    const groups = new Map<string, string[]>();
-    for (const id of jobIds) {
-      const key = clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`;
-      const existing = groups.get(key);
-      if (existing) existing.push(id);
-      else groups.set(key, [id]);
-    }
-
+    const shouldAutoAllocate = params.autoAllocate !== false;
     let assignedCount = 0;
-    const groupList = [...groups.values()];
-    for (let i = 0; i < groupList.length; i += AUTO_ASSIGN_CONCURRENCY) {
-      const chunk = groupList.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
-      const results = await Promise.all(chunk.map((ids) => autoAllocateJobGroup(ids)));
-      results.forEach((r) => {
-        assignedCount += r.assignedCount;
-        if (r.failedJobIds.length > 0) {
-          console.warn('[importJobs] auto-assign failed for jobs', r.failedJobIds.join(', '));
-        }
-      });
+
+    if (shouldAutoAllocate && jobIds.length > 0) {
+      // Group jobs by site before allocating so several jobs in one building go
+      // to the same worker as a single visit. Jobs within a group are allocated
+      // sequentially (autoAllocateJobGroup); only separate sites run in parallel,
+      // which avoids two concurrent allocations racing for the same building.
+      const groups = new Map<string, string[]>();
+      for (const id of jobIds) {
+        const key = clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`;
+        const existing = groups.get(key);
+        if (existing) existing.push(id);
+        else groups.set(key, [id]);
+      }
+
+      const groupList = [...groups.values()];
+      for (let i = 0; i < groupList.length; i += AUTO_ASSIGN_CONCURRENCY) {
+        const chunk = groupList.slice(i, i + AUTO_ASSIGN_CONCURRENCY);
+        const results = await Promise.all(chunk.map((ids) => autoAllocateJobGroup(ids)));
+        results.forEach((r) => {
+          assignedCount += r.assignedCount;
+          if (r.failedJobIds.length > 0) {
+            console.warn('[importJobs] auto-assign failed for jobs', r.failedJobIds.join(', '));
+          }
+        });
+      }
     }
 
     const completedAt = new Date().toISOString();

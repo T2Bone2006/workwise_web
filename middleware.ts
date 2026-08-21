@@ -1,4 +1,7 @@
 import { updateSession } from '@/lib/supabase/middleware';
+import {
+  WORKER_WEB_LOGIN_ERROR_PARAM,
+} from '@/lib/auth/worker-web-access';
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -23,8 +26,21 @@ const UNPROTECTED_PATHS = [
   '/reset-password',
 ] as const;
 
+/** Paths workers may visit on the web (invite / password setup). */
+const WORKER_ALLOWED_PATHS = [
+  '/accept-invite',
+  '/reset-password',
+  '/login',
+] as const;
+
 function isUnprotectedPath(pathname: string): boolean {
   return UNPROTECTED_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`)
+  );
+}
+
+function isWorkerAllowedPath(pathname: string): boolean {
+  return WORKER_ALLOWED_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`)
   );
 }
@@ -45,8 +61,6 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');
-  const isAcceptInvitePage =
-    pathname === '/accept-invite' || pathname.startsWith('/accept-invite');
   const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard');
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
   const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
@@ -89,6 +103,28 @@ export async function middleware(request: NextRequest) {
         .maybeSingle<{ role: string | null }>();
 
       const isCustomerPortal = profile?.role === 'customer_portal';
+      const isWorker = profile?.role === 'worker';
+
+      // Workers are mobile-only: clear the web session and send them to login
+      // unless they are finishing invite / password reset.
+      if (isWorker) {
+        if (!isWorkerAllowedPath(pathname)) {
+          await supabase.auth.signOut();
+          const loginUrl = new URL('/login', request.url);
+          loginUrl.searchParams.set('error', WORKER_WEB_LOGIN_ERROR_PARAM);
+          const redirectResponse = NextResponse.redirect(loginUrl);
+          copyCookiesToResponse(response, redirectResponse);
+          return redirectResponse;
+        }
+
+        // Allow invite / reset / login pages, but never leave a worker web session on /login.
+        if (isLoginPage) {
+          await supabase.auth.signOut();
+          return response;
+        }
+
+        return response;
+      }
 
       if (isCustomerPortal && !isPortalPage && !isPortalAcceptInvite) {
         const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));

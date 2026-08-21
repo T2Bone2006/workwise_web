@@ -119,6 +119,7 @@ function AcceptInviteContent() {
         return;
       }
 
+      // Verify credentials work, then clear the web session — workers use the mobile app.
       const supabase = createBrowserClient();
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: data.email!,
@@ -131,6 +132,7 @@ function AcceptInviteContent() {
         return;
       }
 
+      await supabase.auth.signOut();
       setPhase('success');
     } catch {
       setSubmitError('Something went wrong. Please try again.');

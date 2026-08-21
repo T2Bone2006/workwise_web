@@ -146,6 +146,7 @@ CREATE TABLE public.jobs (
   required_skills jsonb DEFAULT '[]'::jsonb,
   auto_assign_failure_reason text,
   network_dispatch_id uuid,
+  job_length text CHECK (job_length = ANY (ARRAY['half_day'::text, 'full_day'::text])),
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
   CONSTRAINT jobs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT jobs_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
@@ -453,4 +454,38 @@ CREATE TABLE public.widget_leads (
   CONSTRAINT widget_leads_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.widget_clients(id),
   CONSTRAINT widget_leads_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.widget_conversations(id),
   CONSTRAINT widget_leads_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.leads (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  source text NOT NULL DEFAULT 'chatbot'::text,
+  name text NOT NULL,
+  phone text,
+  email text,
+  job_description text NOT NULL DEFAULT ''::text,
+  quote_given text NOT NULL DEFAULT ''::text,
+  status text NOT NULL DEFAULT 'new'::text,
+  notes text,
+  widget_conversation_id uuid,
+  source_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  converted_customer_id uuid,
+  converted_job_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT leads_pkey PRIMARY KEY (id),
+  CONSTRAINT leads_widget_conversation_id_fkey FOREIGN KEY (widget_conversation_id) REFERENCES public.widget_conversations(id),
+  CONSTRAINT leads_converted_customer_id_fkey FOREIGN KEY (converted_customer_id) REFERENCES public.customers(id),
+  CONSTRAINT leads_converted_job_id_fkey FOREIGN KEY (converted_job_id) REFERENCES public.jobs(id),
+  CONSTRAINT leads_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.automation_metrics (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  service_key text NOT NULL,
+  metric_type text NOT NULL,
+  value numeric NOT NULL,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  occurred_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT automation_metrics_pkey PRIMARY KEY (id),
+  CONSTRAINT automation_metrics_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );

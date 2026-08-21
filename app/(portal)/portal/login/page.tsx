@@ -40,13 +40,36 @@ export default function PortalLoginPage() {
       password,
     });
 
-    setIsSubmitting(false);
-
     if (error) {
+      setIsSubmitting(false);
       toast.error('Invalid email or password');
       return;
     }
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle<{ role: string | null }>();
+
+      if (profile?.role !== 'customer_portal') {
+        await supabase.auth.signOut();
+        setIsSubmitting(false);
+        toast.error(
+          profile?.role === 'worker'
+            ? 'Worker accounts use the WorkWise mobile app, not the customer portal.'
+            : 'This account cannot access the customer portal.'
+        );
+        return;
+      }
+    }
+
+    setIsSubmitting(false);
     router.push('/portal');
     router.refresh();
   }

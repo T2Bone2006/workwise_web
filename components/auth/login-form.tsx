@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -17,6 +18,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { login } from '@/lib/actions/auth';
+import {
+  WORKER_WEB_LOGIN_ERROR,
+  WORKER_WEB_LOGIN_ERROR_PARAM,
+} from '@/lib/auth/worker-web-access';
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Please enter a valid email'),
@@ -32,12 +37,20 @@ const initialState = {
 };
 
 export function LoginForm() {
+  const searchParams = useSearchParams();
   const [state, formAction, isPending] = useActionState(login, initialState);
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
   });
+
+  // Show error when middleware kicked a worker off the dashboard.
+  useEffect(() => {
+    if (searchParams.get('error') === WORKER_WEB_LOGIN_ERROR_PARAM) {
+      toast.error(WORKER_WEB_LOGIN_ERROR);
+    }
+  }, [searchParams]);
 
   // Show error toast on every login failure (wrong email or wrong password).
   // `attemptedAt` must be in the dep array: repeated failures return an

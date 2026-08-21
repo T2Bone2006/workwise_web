@@ -200,6 +200,8 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
   const [showRemap, setShowRemap] = useState(false);
   const [isAiMapping, setIsAiMapping] = useState(false);
   const [fileDiffersFromSaved, setFileDiffersFromSaved] = useState(false);
+  /** Default on: auto-assign after import. User can switch to import-only on step 4. */
+  const [autoAllocate, setAutoAllocate] = useState(true);
 
   const sources = initialSources;
 
@@ -399,15 +401,20 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
         valueTransforms,
         csvData,
         fileName: csvFile?.name ?? 'import.csv',
+        autoAllocate,
       });
       const duration = Math.round((Date.now() - started) / 1000);
       if (result.success && typeof result.count === 'number' && result.count > 0) {
         const assigned = 'assignedCount' in result ? result.assignedCount : 0;
         const unassigned = 'unassignedCount' in result ? result.unassignedCount : 0;
         let msg = `Imported ${result.count} job${result.count === 1 ? '' : 's'}.`;
-        if (assigned > 0) msg += ` ${assigned} assigned to workers by location and availability.`;
+        if (autoAllocate && assigned > 0) {
+          msg += ` ${assigned} assigned to workers by location and availability.`;
+        } else if (!autoAllocate) {
+          msg += ' Assign them manually from the Jobs list.';
+        }
         toast.success(msg);
-        if (unassigned > 0) {
+        if (autoAllocate && unassigned > 0) {
           toast.warning(
             `${unassigned} job${unassigned === 1 ? '' : 's'} need manual assignment`,
             {
@@ -875,6 +882,56 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                   </TableBody>
                 </Table>
               </div>
+
+              <fieldset className="space-y-3 rounded-lg border border-border p-4">
+                <legend className="px-1 text-sm font-medium">After import</legend>
+                <label
+                  className={cn(
+                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
+                    autoAllocate
+                      ? 'border-brand-primary/50 bg-brand-primary/5'
+                      : 'border-border hover:bg-muted/40'
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="import-allocate"
+                    className="mt-1"
+                    checked={autoAllocate}
+                    onChange={() => setAutoAllocate(true)}
+                    disabled={isImporting}
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Auto-allocate to workers</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Assign imported jobs by skills, location, and availability (recommended).
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={cn(
+                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
+                    !autoAllocate
+                      ? 'border-brand-primary/50 bg-brand-primary/5'
+                      : 'border-border hover:bg-muted/40'
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="import-allocate"
+                    className="mt-1"
+                    checked={!autoAllocate}
+                    onChange={() => setAutoAllocate(false)}
+                    disabled={isImporting}
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Import only — assign manually</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Create jobs unassigned; allocate them yourself from the Jobs list.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -904,7 +961,9 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
               ) : (
                 <Upload className="size-5" />
               )}
-              Import {csvData.length} jobs
+              {autoAllocate
+                ? `Import & allocate ${csvData.length} jobs`
+                : `Import ${csvData.length} jobs`}
             </Button>
             </div>
           </CardFooter>
