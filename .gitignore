@@ -33,6 +33,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Local DB dumps / exports — never commit real tenant data
+supabase/*_rows.json
+supabase/*_rows*.json
+supabase/jobs_rows*.json
+
 # vercel
 .vercel
 
