@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { WORKER_WEB_LOGIN_ERROR } from '@/lib/auth/worker-web-access';
 import { buildPasswordResetEmail } from '@/lib/emails/password-reset';
 import { resend, FROM_EMAIL } from '@/lib/resend';
+import { restoreViewAsTenantIfNeeded, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 
@@ -46,13 +47,16 @@ export async function login(
       password,
     });
 
-    if (error) {
+      if (error) {
       return {
         success: false,
         error: 'Invalid email or password',
         attemptedAt: Date.now(),
       };
     }
+
+    // Recover if a previous view-as session left tenant_id swapped
+    await recoverAbandonedViewAsIfNeeded();
 
     const {
       data: { user },
@@ -104,6 +108,9 @@ export async function logout(
   _formData?: FormData
 ): Promise<AuthResult> {
   try {
+    // If a prior view-as left cookies / tenant_id swapped, restore before sign-out.
+    // (When view-as is active, Topbar exits via API first because server actions are blocked.)
+    await restoreViewAsTenantIfNeeded();
     const supabase = await createClient();
     await supabase.auth.signOut();
     revalidatePath('/', 'layout');

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
+import { ViewAsBanner } from '@/components/admin/view-as-banner';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 
 interface DashboardShellProps {
@@ -15,6 +16,8 @@ interface DashboardShellProps {
   /** Sum of pending network notifications; sidebar shows a dot when > 0. */
   networkBadge?: number;
   features: TenantFeatures;
+  /** When set, platform admin is viewing another tenant's dashboard. */
+  viewAsTenantName?: string | null;
 }
 
 /**
@@ -27,6 +30,7 @@ export function DashboardShell({
   isAdmin = false,
   networkBadge,
   features,
+  viewAsTenantName = null,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -42,10 +46,12 @@ export function DashboardShell({
         features={features}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {viewAsTenantName && <ViewAsBanner tenantName={viewAsTenantName} />}
         <Topbar
           tenantName={tenantName}
           userEmail={userEmail}
           onMenuClick={() => setMobileOpen(true)}
+          viewAsActive={Boolean(viewAsTenantName)}
         />
         <main
           className={cn(

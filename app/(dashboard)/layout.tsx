@@ -6,6 +6,7 @@ import { getTenantFeatures } from '@/lib/data/tenant-features';
 import { getNetworkNotificationCounts } from '@/lib/data/network';
 import { WORKER_WEB_LOGIN_ERROR_PARAM } from '@/lib/auth/worker-web-access';
 import { isAdmin } from '@/lib/utils/admin';
+import { getViewAsState, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
 
 export default async function DashboardLayout({
   children,
@@ -36,11 +37,14 @@ export default async function DashboardLayout({
     redirect('/portal');
   }
 
-  const [tenantName, admin, tenantId, features] = await Promise.all([
+  await recoverAbandonedViewAsIfNeeded();
+
+  const [tenantName, admin, tenantId, features, viewAs] = await Promise.all([
     getTenantNameForCurrentUser(),
     isAdmin(),
     getTenantIdForCurrentUser(),
     getTenantFeatures(),
+    getViewAsState(),
   ]);
 
   // TODO: route protection — add per-page checks instead (layout has no pathname access in this codebase)
@@ -57,6 +61,7 @@ export default async function DashboardLayout({
       isAdmin={admin}
       networkBadge={networkBadge}
       features={features}
+      viewAsTenantName={viewAs.active ? viewAs.tenantName : null}
     >
       {children}
     </DashboardShell>

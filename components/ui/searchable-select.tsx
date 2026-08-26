@@ -22,6 +22,8 @@ interface SearchableSelectProps {
   emptyText?: string
   className?: string
   disabled?: boolean
+  /** Fired when the dropdown opens or closes. */
+  onOpenChange?: (open: boolean) => void
 }
 
 function normalize(input: string): string {
@@ -37,9 +39,18 @@ export function SearchableSelect({
   emptyText = "No options found.",
   className,
   disabled,
+  onOpenChange,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
+
+  const handleOpenChange = React.useCallback(
+    (next: boolean) => {
+      setOpen(next)
+      onOpenChange?.(next)
+    },
+    [onOpenChange]
+  )
 
   const selectedOption = React.useMemo(
     () => options.find((option) => option.value === value),
@@ -80,7 +91,7 @@ export function SearchableSelect({
   }, [open])
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -123,7 +134,7 @@ export function SearchableSelect({
                     value={option.value}
                     onSelect={() => {
                       onValueChange(option.value)
-                      setOpen(false)
+                      handleOpenChange(false)
                     }}
                     className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none"
                   >

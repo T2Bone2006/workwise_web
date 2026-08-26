@@ -91,6 +91,10 @@ CREATE TABLE public.customers (
   is_active boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  import_column_mapping jsonb,
+  import_value_transforms jsonb NOT NULL DEFAULT '{}'::jsonb,
+  import_expected_headers ARRAY NOT NULL DEFAULT '{}'::text[],
+  import_mapping_updated_at timestamp with time zone,
   CONSTRAINT customers_pkey PRIMARY KEY (id),
   CONSTRAINT customers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
@@ -147,6 +151,8 @@ CREATE TABLE public.jobs (
   auto_assign_failure_reason text,
   network_dispatch_id uuid,
   job_length text CHECK (job_length = ANY (ARRAY['half_day'::text, 'full_day'::text])),
+  source_fields jsonb NOT NULL DEFAULT '{}'::jsonb,
+  source_fields_text text GENERATED ALWAYS AS (source_fields::text) STORED,
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
   CONSTRAINT jobs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT jobs_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
@@ -232,7 +238,7 @@ CREATE TABLE public.notifications (
 CREATE TABLE public.ai_interactions (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   tenant_id uuid NOT NULL,
-  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text])),
+  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text, 'date_parsing'::text, 'description_summary'::text])),
   input_prompt text NOT NULL,
   input_data jsonb NOT NULL,
   ai_response text NOT NULL,

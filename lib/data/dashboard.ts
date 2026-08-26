@@ -7,9 +7,13 @@ export interface DashboardJobStatCards {
   activeJobs: number;
   /** Jobs marked completed today (`completed`, `completed_at` in local calendar day). */
   completedToday: number;
-  /** Jobs not yet assigned / started (`pending`). */
+  /** Jobs not yet assigned (`pending`). */
   notStarted: number;
-  /** Assigned but not yet in progress (`assigned`). */
+  /** Worker chosen — waiting to send to app (`pending_send`). */
+  readyToSend: number;
+  /** Assigned to a worker, not yet started (`assigned`). */
+  assigned: number;
+  /** Worker paused an in-progress job (`paused`). */
   paused: number;
 }
 
@@ -19,35 +23,48 @@ export async function getDashboardJobStatCards(tenantId: string): Promise<Dashbo
   const dayStart = startOfDay(now).toISOString();
   const dayEnd = endOfDay(now).toISOString();
 
-  const [activeRes, completedTodayRes, notStartedRes, pausedRes] = await Promise.all([
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'in_progress'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'completed')
-      .gte('completed_at', dayStart)
-      .lte('completed_at', dayEnd),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'assigned'),
-  ]);
+  const [activeRes, completedTodayRes, notStartedRes, readyToSendRes, assignedRes, pausedRes] =
+    await Promise.all([
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'in_progress'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'completed')
+        .gte('completed_at', dayStart)
+        .lte('completed_at', dayEnd),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending_send'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'assigned'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'paused'),
+    ]);
 
   return {
     activeJobs: activeRes.count ?? 0,
     completedToday: completedTodayRes.count ?? 0,
     notStarted: notStartedRes.count ?? 0,
+    readyToSend: readyToSendRes.count ?? 0,
+    assigned: assignedRes.count ?? 0,
     paused: pausedRes.count ?? 0,
   };
 }

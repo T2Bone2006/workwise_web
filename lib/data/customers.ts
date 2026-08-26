@@ -48,10 +48,13 @@ export interface CustomerJobStats {
 export interface CustomerImportOption {
   id: string;
   name: string;
+  import_column_mapping: Record<string, string> | null;
+  import_value_transforms: Record<string, Record<string, string>>;
+  import_expected_headers: string[];
 }
 
 /**
- * Active customers for the import wizard dropdown (id + name, ordered by name).
+ * Active customers for the import wizard dropdown (id + name + import profile).
  */
 export async function getCustomersForImport(
   tenantId: string
@@ -60,7 +63,9 @@ export async function getCustomersForImport(
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name')
+      .select(
+        'id, name, import_column_mapping, import_value_transforms, import_expected_headers'
+      )
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .order('name');
@@ -71,9 +76,22 @@ export async function getCustomersForImport(
     }
 
     const customers: CustomerImportOption[] = (Array.isArray(data) ? data : []).map(
-      (row: { id: string; name: string }) => ({
+      (row: {
+        id: string;
+        name: string;
+        import_column_mapping: unknown;
+        import_value_transforms: unknown;
+        import_expected_headers: unknown;
+      }) => ({
         id: row.id,
         name: row.name ?? '',
+        import_column_mapping:
+          (row.import_column_mapping as Record<string, string> | null) ?? null,
+        import_value_transforms:
+          (row.import_value_transforms as Record<string, Record<string, string>>) ?? {},
+        import_expected_headers: Array.isArray(row.import_expected_headers)
+          ? (row.import_expected_headers as string[])
+          : [],
       })
     );
     return { customers, error: null };

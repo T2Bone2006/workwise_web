@@ -1,0 +1,446 @@
+ai_interactions
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+System can insert AI interactions
+INSERT	
+public
+
+
+System can update AI interactions
+UPDATE	
+public
+
+
+Users can view their tenant's AI interactions
+SELECT	
+public
+
+ai_model_performance
+
+Disable RLS
+
+Create policy
+
+No data will be returned via the Data API as no RLS policies exist on this table.
+
+No policies created yet
+
+ai_training_datasets
+
+Disable RLS
+
+Create policy
+
+No data will be returned via the Data API as no RLS policies exist on this table.
+
+No policies created yet
+
+automation_metrics
+
+Disable RLS
+
+Create policy
+
+No data will be returned via the Data API as no RLS policies exist on this table.
+
+No policies created yet
+
+customer_invites
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Service role can manage customer_invites
+ALL	
+public
+
+customer_portal_users
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Portal users can read own rows
+SELECT	
+public
+
+
+Service role can manage customer_portal_users
+ALL	
+public
+
+customers
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Admins can manage customers
+ALL	
+public
+
+
+Portal users can read own customer
+SELECT	
+public
+
+
+Users can view own tenant customers
+SELECT	
+public
+
+import_history
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+import_history_tenant_insert
+INSERT	
+authenticated
+
+
+import_history_tenant_select
+SELECT	
+authenticated
+
+import_sources
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+import_sources_tenant_insert
+INSERT	
+authenticated
+
+
+import_sources_tenant_select
+SELECT	
+authenticated
+
+
+import_sources_tenant_update
+UPDATE	
+authenticated
+
+
+Users can view own tenant import sources
+SELECT	
+public
+
+job_attachments
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+tenant admins can read job attachments
+SELECT	
+authenticated
+
+
+workers can insert job attachments
+INSERT	
+authenticated
+
+job_status_history
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+job_history_tenant_insert
+INSERT	
+authenticated
+
+
+job_history_tenant_select
+SELECT	
+authenticated
+
+jobs
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Admins can manage jobs
+ALL	
+public
+
+
+Portal users can read own jobs
+SELECT	
+public
+
+
+Users and workers can view own tenant jobs
+SELECT	
+public
+
+
+Workers can update their own assigned jobs
+UPDATE	
+public
+
+leads
+
+Disable RLS
+
+Create policy
+
+No data will be returned via the Data API as no RLS policies exist on this table.
+
+No policies created yet
+
+network_job_dispatches
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+njd_originator_insert
+INSERT	
+public
+
+
+njd_participant_select
+SELECT	
+public
+
+notifications
+
+Disable RLS
+
+Create policy
+
+No data will be returned via the Data API as no RLS policies exist on this table.
+
+No policies created yet
+
+password_resets
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Service role can manage password_resets
+ALL	
+public
+
+tenant_network_connections
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+tnc_inviter_insert
+INSERT	
+public
+
+
+tnc_participant_select
+SELECT	
+public
+
+
+tnc_participant_update
+UPDATE	
+public
+
+tenant_skills
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+tenant_skills_delete
+DELETE	
+public
+
+
+tenant_skills_insert
+INSERT	
+public
+
+
+tenant_skills_select
+SELECT	
+public
+
+
+tenant_skills_update
+UPDATE	
+public
+
+tenants
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Admins can manage tenants
+ALL	
+public
+
+
+Portal users can read linked tenant
+SELECT	
+public
+
+
+tenants_read_for_network
+SELECT	
+public
+
+
+Users can view own tenant
+SELECT	
+public
+
+
+Workers can read their own tenant
+SELECT	
+public
+
+users
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+users_own_record
+SELECT	
+authenticated
+
+widget_clients
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Tenants can update own widget clients
+UPDATE	
+public
+
+
+Tenants can view own widget clients
+SELECT	
+public
+
+widget_conversations
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Tenants can view own widget conversations
+SELECT	
+public
+
+widget_leads
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Tenants can update own widget leads
+UPDATE	
+public
+
+
+Tenants can view own widget leads
+SELECT	
+public
+
+worker_invites
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Tenant users can read own worker invites
+ALL	
+public
+
+worker_tenants
+RLS Disabled
+
+Enable RLS
+
+Create policy
+
+This table can be accessed by anyone via the Data API as RLS is disabled.
+
+No policies created yet
+
+workers
+
+Disable RLS
+
+Create policy
+
+Name	Command	Applied to	Actions
+
+Admins can manage workers
+ALL	
+public
+
+
+Users can view own tenant workers
+SELECT	
+public
+
+
+Workers can read own row
+SELECT	
+authenticated
+
+
+workers can update own row
+UPDATE	
+authenticated
+

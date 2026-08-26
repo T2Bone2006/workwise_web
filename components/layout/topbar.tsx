@@ -19,6 +19,8 @@ interface TopbarProps {
   tenantName: string;
   userEmail: string | undefined;
   onMenuClick: () => void;
+  /** When true, exit view-as (API) before logout — server actions are blocked in view-as. */
+  viewAsActive?: boolean;
 }
 
 function getInitials(email: string | undefined): string {
@@ -28,7 +30,19 @@ function getInitials(email: string | undefined): string {
   return part.slice(0, 1).toUpperCase();
 }
 
-export function Topbar({ tenantName, userEmail, onMenuClick }: TopbarProps) {
+export function Topbar({
+  tenantName,
+  userEmail,
+  onMenuClick,
+  viewAsActive = false,
+}: TopbarProps) {
+  const handleLogout = async () => {
+    if (viewAsActive) {
+      await fetch('/api/admin/view-as/stop', { method: 'POST' });
+    }
+    await logout();
+  };
+
   return (
     <header
       className={cn(
@@ -81,21 +95,18 @@ export function Topbar({ tenantName, userEmail, onMenuClick }: TopbarProps) {
               </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <form
-              action={async (formData) => {
-                await logout(undefined, formData);
-              }}
-            >
-              <DropdownMenuItem asChild>
-                <button
-                  type="submit"
-                  className="w-full cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive dark:focus:bg-destructive/20"
-                >
-                  <LogOut className="mr-2 size-4" />
-                  Log out
-                </button>
-              </DropdownMenuItem>
-            </form>
+            <DropdownMenuItem asChild>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleLogout();
+                }}
+                className="w-full cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive dark:focus:bg-destructive/20"
+              >
+                <LogOut className="mr-2 size-4" />
+                Log out
+              </button>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

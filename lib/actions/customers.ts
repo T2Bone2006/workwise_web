@@ -54,16 +54,20 @@ export async function createCustomer(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from('customers').insert({
-    tenant_id: userData.tenant_id,
-    name: validated.name,
-    type: validated.type,
-    email: validated.email || null,
-    phone: validated.phone || null,
-    notes: validated.notes || null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
+  const { data: inserted, error } = await supabase
+    .from('customers')
+    .insert({
+      tenant_id: userData.tenant_id,
+      name: validated.name,
+      type: validated.type,
+      email: validated.email || null,
+      phone: validated.phone || null,
+      notes: validated.notes || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('Create customer error:', error);
@@ -71,7 +75,37 @@ export async function createCustomer(formData: FormData) {
   }
 
   revalidatePath('/customers');
-  return { success: true };
+  revalidatePath('/import');
+  return { success: true, id: inserted?.id as string };
+}
+
+/** Minimal create for the import wizard (name + bulk_client). Returns new customer id. */
+export async function createCustomerForImport(name: string): Promise<{
+  success: boolean;
+  id?: string;
+  name?: string;
+  error?: string;
+}> {
+  const trimmed = name.trim();
+  if (trimmed.length < 2) {
+    return { success: false, error: 'Name must be at least 2 characters' };
+  }
+  const fd = new FormData();
+  fd.set('name', trimmed);
+  fd.set('type', 'bulk_client');
+  fd.set('email', '');
+  fd.set('phone', '');
+  fd.set('address', '');
+  fd.set('notes', '');
+  const result = await createCustomer(fd);
+  if (!result.success) {
+    return { success: false, error: 'error' in result ? result.error : 'Failed to create customer' };
+  }
+  return {
+    success: true,
+    id: 'id' in result ? result.id : undefined,
+    name: trimmed,
+  };
 }
 
 export async function updateCustomer(customerId: string, formData: FormData) {

@@ -1,12 +1,13 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   Form,
   FormControl,
@@ -39,23 +40,19 @@ const initialState = {
 export function LoginForm() {
   const searchParams = useSearchParams();
   const [state, formAction, isPending] = useActionState(login, initialState);
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
   });
 
-  // Show error when middleware kicked a worker off the dashboard.
   useEffect(() => {
     if (searchParams.get('error') === WORKER_WEB_LOGIN_ERROR_PARAM) {
       toast.error(WORKER_WEB_LOGIN_ERROR);
     }
   }, [searchParams]);
 
-  // Show error toast on every login failure (wrong email or wrong password).
-  // `attemptedAt` must be in the dep array: repeated failures return an
-  // identical success/error pair, so without a changing value React skips the
-  // effect and only the first wrong password ever shows a toast.
   useEffect(() => {
     if (!state.success && state.error) {
       toast.error(state.error);
@@ -91,13 +88,29 @@ export function LoginForm() {
             <FormItem>
               <FormLabel>Password</FormLabel>
               <FormControl>
-                <Input
-                  type="password"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  disabled={isPending}
-                  {...field}
-                />
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    disabled={isPending}
+                    className="pr-10"
+                    {...field}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" aria-hidden />
+                    ) : (
+                      <Eye className="size-4" aria-hidden />
+                    )}
+                  </button>
+                </div>
               </FormControl>
               <FormMessage />
               <div className="flex justify-end">

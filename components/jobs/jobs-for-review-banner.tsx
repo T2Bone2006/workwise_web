@@ -16,7 +16,7 @@ export function JobsForReviewBanner({ count, className }: JobsForReviewBannerPro
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 shadow-[0_0_20px_-6px_rgba(245,158,11,0.2)]',
+        'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/35 bg-amber-500/8 px-4 py-3',
         'dark:border-amber-400/30 dark:bg-amber-500/5',
         className
       )}
@@ -29,7 +29,7 @@ export function JobsForReviewBanner({ count, className }: JobsForReviewBannerPro
           <p className="font-medium text-amber-900 dark:text-amber-100">
             {count} job{count === 1 ? '' : 's'} need{count === 1 ? 's' : ''} assignment
           </p>
-          <p className="text-sm text-amber-800/90 dark:text-amber-200/80">
+          <p className="text-sm text-amber-800/85 dark:text-amber-200/80">
             Assign workers from the review flow for a quick, one-by-one workflow.
           </p>
         </div>

@@ -8,8 +8,22 @@ import { clusterKeyForPostcode } from '@/lib/jobs/assignment-ranking';
 import { getTenantSkillsById } from '@/lib/actions/skills';
 import { detectSkills } from '@/lib/detect-skills';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
-import { normalizeUkPostcode } from '@/lib/utils/postcode';
-import { normalizeJobLength, normalizeJobLengthFromText } from '@/lib/jobs/normalize-job-length';
+import {
+  applyResolvedDate,
+  collectUnparsedDateValues,
+  isScheduledDateMapped,
+} from '@/lib/import/parse-scheduled-date';
+import { resolveImportDatesWithAI } from '@/lib/import/resolve-import-dates';
+import { resolveImportPostcodesWithAI } from '@/lib/import/resolve-import-postcodes';
+import { resolveImportJobLengthsWithAI } from '@/lib/import/resolve-import-job-lengths';
+import { summarizeJobDescriptionsBatch } from '@/lib/import/summarize-job-description';
+import {
+  collectJobLengthsNeedingAi,
+  collectPostcodesNeedingAi,
+  prepareImportRows,
+  areCoreColumnsMapped,
+  type ImportResolveMaps,
+} from '@/lib/import/prepare-import-rows';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
@@ -18,7 +32,6 @@ const SKILL_DETECT_BATCH_SIZE = 10;
 const SKILL_DETECT_DELAY_MS = 300;
 const GEOCODE_BATCH_SIZE = 5;
 const GEOCODE_DELAY_MS = 300;
-const VALID_PRIORITIES = ['low', 'normal', 'high', 'emergency'] as const;
 
 const AUTO_ASSIGN_CONCURRENCY = 5;
 
@@ -30,7 +43,7 @@ export type ImportJobsResult =
       unassignedCount: number;
       errors?: string[];
     }
-  | { success: false; error: string };
+  | { success: false; error: string; errors?: string[] };
 
 /** Strip ephemeral keys (e.g. _fullAddress) that must never be sent to PostgREST. */
 function toJobInsertRow(job: Record<string, unknown>): Record<string, unknown> {
@@ -55,7 +68,6 @@ function uniquifyReferenceNumber(
     used.add(candidate.toLowerCase());
     return candidate;
   }
-  // Keep colliding until unique (handles same CSV re-import + in-file dupes).
   let n = 0;
   let unique = '';
   do {
@@ -66,69 +78,28 @@ function uniquifyReferenceNumber(
   return unique;
 }
 
-function toPriority(val: unknown): (typeof VALID_PRIORITIES)[number] {
-  if (typeof val !== 'string') return 'normal';
-  const v = val.toLowerCase().trim();
-  if (v === 'urgent') return 'emergency';
-  return VALID_PRIORITIES.includes(v as (typeof VALID_PRIORITIES)[number])
-    ? (v as (typeof VALID_PRIORITIES)[number])
-    : 'normal';
-}
-
-/** YYYY-MM-DD unchanged; DD/MM/YYYY or DD-MM-YYYY → ISO date; unparseable → null. */
-function parseImportScheduledDate(value: string | null): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (!match) return null;
-  const day = Number(match[1]);
-  const month = Number(match[2]);
-  const year = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (
-    Number.isNaN(d.getTime()) ||
-    d.getUTCFullYear() !== year ||
-    d.getUTCMonth() + 1 !== month ||
-    d.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return iso;
-}
-
-/** CSV columns not assigned to any schema field, formatted for appending to job_description. */
-function formatUnmappedCsvColumns(
-  row: Record<string, string>,
-  columnMapping: Record<string, string>
-): string {
-  const mappedCsvHeaders = new Set(
-    Object.values(columnMapping).filter((c) => typeof c === 'string' && c.trim() !== '')
-  );
-  const parts: string[] = [];
-  for (const col of Object.keys(row)) {
-    if (!col.trim()) continue;
-    if (mappedCsvHeaders.has(col)) continue;
-    const val = String(row[col] ?? '').trim();
-    if (val === '') continue;
-    parts.push(`${col}: ${val}`);
-  }
-  return parts.join(' | ');
-}
-
 export async function importJobs(params: {
-  sourceId: string | null;
-  sourceName: string;
-  customerId?: string;
+  customerId: string;
   columnMapping: Record<string, string>;
   valueTransforms?: Record<string, Record<string, string>>;
   csvData: Record<string, string>[];
+  csvHeaders?: string[];
   fileName?: string;
   /** When true (default), auto-assign imported jobs to workers. */
+  /** When true (default), auto-assign imported jobs to workers. */
   autoAllocate?: boolean;
+  /**
+   * When false (default), any invalid row blocks the whole import.
+   * When true, valid rows import and invalid ones are skipped.
+   */
+  allowPartialImport?: boolean;
+  /**
+   * Resolve maps from preview (raw → cleaned). Import reuses these so Review
+   * matches write; AI only runs again for leftovers.
+   */
+  preResolvedDates?: Record<string, string>;
+  preResolvedPostcodes?: Record<string, string>;
+  preResolvedJobLengths?: Record<string, 'half_day' | 'full_day'>;
 }): Promise<ImportJobsResult> {
   try {
     const supabase = await createClient();
@@ -149,82 +120,76 @@ export async function importJobs(params: {
       return { success: false, error: 'No tenant assigned.' };
     }
 
+    const customerId = params.customerId?.trim();
+    if (!customerId) {
+      return { success: false, error: 'Select a customer before importing.' };
+    }
+
+    const { data: customerRow, error: customerErr } = await supabase
+      .from('customers')
+      .select('id, name')
+      .eq('id', customerId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (customerErr || !customerRow) {
+      return { success: false, error: 'Customer not found.' };
+    }
+
     const tenantSkillRows = await getTenantSkillsById(tenantId);
     const tenantSkillsForDetect = tenantSkillRows.map(({ key, label }) => ({
       key,
       label,
     }));
 
-    let resolvedSourceId: string | null = params.sourceId;
+    // Internal import_sources row per customer (FK for jobs / AI logs / batches).
+    // Mapping on this row is only updated after a successful import — same as customers.import_*.
+    const { data: existingSource } = await supabase
+      .from('import_sources')
+      .select('id, times_used')
+      .eq('tenant_id', tenantId)
+      .eq('customer_id', customerId)
+      .eq('is_active', true)
+      .order('last_used_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (resolvedSourceId) {
-      const { data: src } = await supabase
-        .from('import_sources')
-        .select('times_used')
-        .eq('id', resolvedSourceId)
-        .single();
-      const nextTimesUsed = (src?.times_used ?? 0) + 1;
-      await supabase
-        .from('import_sources')
-        .update({
-          column_mapping: params.columnMapping,
-          value_transforms: params.valueTransforms ?? {},
-          customer_id: params.customerId ?? null,
-          last_used_at: new Date().toISOString(),
-          times_used: nextTimesUsed,
-        })
-        .eq('id', resolvedSourceId);
-    } else {
+    let resolvedSourceId: string | null = existingSource?.id ?? null;
+    const priorTimesUsed = existingSource?.times_used ?? 0;
+
+    if (!resolvedSourceId) {
       const { data: newSource, error: insErr } = await supabase
         .from('import_sources')
         .insert({
           tenant_id: tenantId,
-          source_name: params.sourceName.trim() || 'Unnamed source',
-          column_mapping: params.columnMapping,
-          value_transforms: params.valueTransforms ?? {},
-          customer_id: params.customerId ?? null,
-          mapped_by: 'manual',
-          times_used: 1,
+          source_name: customerRow.name,
+          column_mapping: {},
+          value_transforms: {},
+          customer_id: customerId,
+          mapped_by: 'ai',
+          times_used: 0,
           last_used_at: new Date().toISOString(),
         })
         .select('id')
         .single();
       if (insErr) {
         console.error('[importJobs] insert import_sources', insErr);
-        return { success: false, error: insErr.message ?? 'Failed to create import source' };
+        return {
+          success: false,
+          error: insErr.message ?? 'Could not start import.',
+        };
       }
       resolvedSourceId = newSource?.id ?? null;
     }
 
     const map = params.columnMapping;
     const transforms = params.valueTransforms ?? {};
-    const get = (row: Record<string, string>, ourField: string): string => {
-      const csvCol = map[ourField];
-      let value = '';
-      if (csvCol && row[csvCol] != null) {
-        value = String(row[csvCol]).trim();
-      }
-      if (transforms[ourField]) {
-        const t = transforms[ourField];
-        const key = value === '' ? 'default' : value;
-        const mapped = t[key] ?? t['default'];
-        // "keep" means retain the CSV value (AI mapping sentinel), not replace with the word keep.
-        if (mapped != null && mapped !== 'keep') {
-          value = mapped;
-        }
-      }
-      return value;
-    };
 
-    const customersResult = await supabase
-      .from('customers')
-      .select('id, name')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true);
-    const customerByName = new Map<string, string>();
-    (customersResult.data ?? []).forEach((c: { id: string; name: string }) => {
-      if (c.name) customerByName.set(c.name.trim().toLowerCase(), c.id);
-    });
+    if (!areCoreColumnsMapped(map)) {
+      return {
+        success: false,
+        error: 'Map Address and Postcode before importing.',
+      };
+    }
 
     const { data: existingRefRows } = await supabase
       .from('jobs')
@@ -239,81 +204,160 @@ export async function importJobs(params: {
     const jobs: Record<string, unknown>[] = [];
     const errors: string[] = [];
     let refCounter = 0;
+    const dateMapped = isScheduledDateMapped(map);
 
-    for (let i = 0; i < params.csvData.length; i++) {
-      const row = params.csvData[i]!;
-      const address = get(row, 'address');
-      const rawPostcode = get(row, 'postcode');
-      const postcode = normalizeUkPostcode(rawPostcode) ?? '';
-      const description = get(row, 'description');
-      const customerName = get(row, 'customer_name');
+    // Same resolve pipeline as preview: start from pre-resolved maps, AI only leftovers.
+    const resolveMaps: ImportResolveMaps = {
+      dates: { ...(params.preResolvedDates ?? {}) },
+      postcodes: { ...(params.preResolvedPostcodes ?? {}) },
+      jobLengths: { ...(params.preResolvedJobLengths ?? {}) },
+    };
 
-      const unmappedAppendix = formatUnmappedCsvColumns(row, map);
-      const jobDescription =
-        description && unmappedAppendix
-          ? `${description} | ${unmappedAppendix}`
-          : description || unmappedAppendix;
+    if (dateMapped) {
+      const dateCol = map.scheduled_date;
+      const stillUnparsed = collectUnparsedDateValues(params.csvData, dateCol).filter(
+        (raw) => !applyResolvedDate(raw, resolveMaps.dates)
+      );
+      if (stillUnparsed.length > 0) {
+        const extra = await resolveImportDatesWithAI(stillUnparsed, resolvedSourceId);
+        resolveMaps.dates = { ...resolveMaps.dates, ...extra };
+      }
+    }
 
-      if (!address || !jobDescription) {
-        errors.push(
-          `Row ${i + 1}: missing address or job description (map Description and/or rely on unmapped columns)`
-        );
+    const postcodesNeedingAi = collectPostcodesNeedingAi(
+      params.csvData,
+      map,
+      transforms
+    ).filter((raw) => !resolveMaps.postcodes[raw]);
+    if (postcodesNeedingAi.length > 0) {
+      const extra = await resolveImportPostcodesWithAI(postcodesNeedingAi, resolvedSourceId);
+      resolveMaps.postcodes = { ...resolveMaps.postcodes, ...extra };
+    }
+
+    const lengthsNeedingAi = collectJobLengthsNeedingAi(
+      params.csvData,
+      map,
+      transforms
+    ).filter((raw) => !resolveMaps.jobLengths[raw]);
+    if (lengthsNeedingAi.length > 0) {
+      const extra = await resolveImportJobLengthsWithAI(lengthsNeedingAi, resolvedSourceId);
+      resolveMaps.jobLengths = { ...resolveMaps.jobLengths, ...extra };
+    }
+
+    // Shared prepare = same rules as Review preview.
+    const prepared = prepareImportRows(params.csvData, map, transforms, resolveMaps, {
+      absoluteFieldsReady: true,
+    });
+
+    const invalidPrepared = prepared.filter((row) => !row.ok);
+    if (invalidPrepared.length > 0 && params.allowPartialImport !== true) {
+      return {
+        success: false,
+        error: `${invalidPrepared.length} row${invalidPrepared.length === 1 ? '' : 's'} still have issues. Fix the spreadsheet and re-import, or opt in to a partial import.`,
+        errors: invalidPrepared.map((row) => `Row ${row.rowIndex + 1}: ${row.errors.join('; ')}`),
+      };
+    }
+
+    const descriptionInputs: Array<{
+      mappedDescription: string;
+      unmappedAppendix: string;
+      address: string;
+      descriptionFallback: string;
+    }> = [];
+
+    for (const row of prepared) {
+      if (!row.ok) {
+        errors.push(`Row ${row.rowIndex + 1}: ${row.errors.join('; ')}`);
+        descriptionInputs.push({
+          mappedDescription: '',
+          unmappedAppendix: '',
+          address: '',
+          descriptionFallback: '',
+        });
         continue;
       }
-      if (!postcode) {
-        errors.push(
-          `Row ${i + 1}: invalid UK postcode "${rawPostcode}" (expected e.g. M1 1AE)`
-        );
-        continue;
-      }
 
-      const customerId = params.customerId
-        ? params.customerId
-        : customerName
-          ? customerByName.get(customerName.toLowerCase()) ?? null
-          : null;
-      // Prefer CSV ref when mapped; uniquify against tenant + in-file duplicates
-      // (unique index idx_jobs_tenant_reference rejects the whole batch otherwise).
+      descriptionInputs.push({
+        mappedDescription: row.mappedDescription,
+        unmappedAppendix: row.unmappedAppendix,
+        address: row.address,
+        descriptionFallback: row.descriptionFallback,
+      });
+
       refCounter += 1;
-      const preferredRef = get(row, 'reference_number') || `IMP-${Date.now()}-${refCounter}`;
+      const preferredRef = row.referenceNumber || `IMP-${Date.now()}-${refCounter}`;
       const referenceNumber = uniquifyReferenceNumber(
         preferredRef,
         usedReferenceNumbers,
         refCounter
       );
 
-      const priority = toPriority(get(row, 'priority') || 'normal');
-      let scheduledDate = get(row, 'scheduled_date') || null;
-      scheduledDate = parseImportScheduledDate(scheduledDate);
-      const fullAddress = buildFullAddressString([address, postcode]);
-
-      // Try the mapped column first; if it's empty/unrecognized, fall back to
-      // scanning the assembled description (which includes unmapped columns
-      // dumped by formatUnmappedCsvColumns) as a last resort.
-      const jobLength =
-        normalizeJobLength(get(row, 'job_length')) ?? normalizeJobLengthFromText(jobDescription);
+      const fullAddress = buildFullAddressString([row.address, row.postcode]);
 
       jobs.push({
         tenant_id: tenantId,
         import_source_id: resolvedSourceId,
         reference_number: referenceNumber,
         customer_id: customerId,
-        address,
-        postcode,
-        job_description: jobDescription,
+        address: row.address,
+        postcode: row.postcode,
+        job_description: row.descriptionFallback,
+        source_fields: row.sourceFields,
         status: 'pending',
-        priority,
-        job_length: jobLength,
-        scheduled_date: scheduledDate || null,
+        priority: row.priority,
+        job_length: row.jobLength,
+        scheduled_date: row.scheduledDate,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         required_skills: [] as string[],
         lat: null,
         lng: null,
-        _description: jobDescription,
-        _address: address,
-        _priority: priority,
+        _description: row.descriptionFallback,
+        _address: row.address,
+        _priority: row.priority,
         _fullAddress: fullAddress,
+        _descIndex: descriptionInputs.length - 1,
+      });
+    }
+
+    // If a date column was mapped and every row failed, fail the import clearly.
+    if (dateMapped && jobs.length === 0 && params.csvData.length > 0) {
+      return {
+        success: false,
+        error:
+          errors[0] ??
+          'Scheduled date is mapped but no rows had a usable date. Fix the date column or unmap it.',
+        errors: errors.length ? errors : undefined,
+      };
+    }
+
+    // AI description summaries (fallback = mapped notes only — extras stay in source_fields).
+    const summaryTargets = jobs.map((job) => {
+      const idx = (job as Record<string, unknown>)._descIndex as number;
+      const input = descriptionInputs[idx]!;
+      return {
+        mappedDescription: input.mappedDescription,
+        unmappedAppendix: input.unmappedAppendix,
+        address: input.address,
+      };
+    });
+    try {
+      const summaries = await summarizeJobDescriptionsBatch(summaryTargets);
+      jobs.forEach((job, j) => {
+        const record = job as Record<string, unknown>;
+        const idx = record._descIndex as number;
+        const fallback =
+          descriptionInputs[idx]?.descriptionFallback ?? (record._description as string);
+        const summary = summaries[j]?.trim();
+        const finalDesc = summary || fallback;
+        record.job_description = finalDesc;
+        record._description = finalDesc;
+        delete record._descIndex;
+      });
+    } catch (e) {
+      console.error('[importJobs] description summaries failed', e);
+      jobs.forEach((job) => {
+        delete (job as Record<string, unknown>)._descIndex;
       });
     }
 
@@ -456,6 +500,7 @@ export async function importJobs(params: {
 
     revalidatePath('/jobs');
     revalidatePath('/monitor');
+    revalidatePath('/import');
     const unassignedCount = imported - assignedCount;
 
     if (imported === 0 && params.csvData.length > 0) {
@@ -463,7 +508,39 @@ export async function importJobs(params: {
       return {
         success: false,
         error: `Imported 0 jobs. ${detail}`,
+        errors: errors.length ? errors : undefined,
       };
+    }
+
+    // Persist mapping only after jobs were actually written.
+    const headers =
+      params.csvHeaders && params.csvHeaders.length > 0
+        ? params.csvHeaders
+        : Object.keys(params.csvData[0] ?? {});
+    await supabase
+      .from('customers')
+      .update({
+        import_column_mapping: params.columnMapping,
+        import_value_transforms: params.valueTransforms ?? {},
+        import_expected_headers: headers,
+        import_mapping_updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', customerId)
+      .eq('tenant_id', tenantId);
+
+    if (resolvedSourceId) {
+      await supabase
+        .from('import_sources')
+        .update({
+          column_mapping: params.columnMapping,
+          value_transforms: params.valueTransforms ?? {},
+          customer_id: customerId,
+          source_name: customerRow.name,
+          last_used_at: new Date().toISOString(),
+          times_used: priorTimesUsed + 1,
+        })
+        .eq('id', resolvedSourceId);
     }
 
     return {

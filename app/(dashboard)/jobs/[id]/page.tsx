@@ -15,6 +15,7 @@ import {
   splitJobAttachmentsForPhotos,
   type JobAttachmentRow,
 } from '@/lib/utils/job-attachments';
+import { parseSourceFields } from '@/lib/jobs/job-search-matches';
 
 interface JobDetailPageProps {
   params: Promise<{ id: string }>;
@@ -56,6 +57,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       required_skills,
       industry_data,
       completion_notes,
+      source_fields,
       customer:customers!customer_id(id, name, type, email, phone),
       worker:workers!assigned_worker_id(id, full_name, phone, skills, home_postcode, home_lat, home_lng)
     `
@@ -219,6 +221,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         }
       : null,
     required_skills: Array.isArray(jobRow.required_skills) ? (jobRow.required_skills as string[]) : [],
+    source_fields: parseSourceFields(jobRow.source_fields),
   };
 
   const statusHistory: JobStatusHistoryEntry[] = (statusHistoryRows ?? []).map(

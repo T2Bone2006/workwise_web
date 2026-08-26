@@ -1,5 +1,21 @@
 import { createClient } from '@/lib/supabase/server';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
+import {
+  buildJobsSearchOrFilter,
+  computeJobMatchPills,
+  parseSourceFields,
+  type JobMatchPill,
+} from '@/lib/jobs/job-search-matches';
+import {
+  decodeSourceFieldFilter,
+  fieldFilterPillLabel,
+  isSourceFieldFilter,
+  type FieldFilterValueOption,
+  type SystemFilterFieldKey,
+} from '@/lib/jobs/field-filter';
+import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
+
+export type { JobMatchPill };
 
 export type JobStatus =
   | 'pending'
@@ -20,6 +36,11 @@ export interface JobsFilters {
   import_source_id?: string;
   date_from?: string;
   date_to?: string;
+  /**
+   * Phase 6+: stacked Where/Is filters (AND).
+   * URL: f0/v0, f1/v1, … (legacy field/value maps to f0/v0).
+   */
+  field_filters?: Array<{ field: string; value: string }>;
   sort?: 'created_at' | 'reference_number' | 'status' | 'priority' | 'scheduled_date' | 'customer_name';
   sort_dir?: 'asc' | 'desc';
 }
@@ -45,6 +66,10 @@ export interface JobRow {
   required_skills?: string[];
   /** Last auto-assign failure message; cleared on successful assignment. */
   auto_assign_failure_reason?: string | null;
+  /** Extra spreadsheet columns from import (not always selected for display). */
+  source_fields?: Record<string, string>;
+  /** Why this row matched the active search (Phase 5). */
+  match_pills?: JobMatchPill[];
 }
 
 /** JobRow plus lifecycle timestamps/notes needed for export — not fetched by the paginated list query. */
@@ -59,7 +84,10 @@ export interface ExportJobRow extends JobRow {
 export interface JobsStatusSummary {
   notStarted: number;
   inProgress: number;
+  /** Worker paused an in-progress job (`paused`). */
   paused: number;
+  /** Assigned to a worker, not yet started (`assigned`). */
+  assigned: number;
   /** Assigned but not yet sent to worker app (`pending_send`). */
   readyToSend: number;
   completed: number;
@@ -67,7 +95,7 @@ export interface JobsStatusSummary {
 
 export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatusSummary> {
   const supabase = await createClient();
-  const [notStarted, inProgress, paused, readyToSend, completed] = await Promise.all([
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed] = await Promise.all([
     supabase
       .from('jobs')
       .select('id', { count: 'exact', head: true })
@@ -78,6 +106,11 @@ export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatus
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId)
       .eq('status', 'in_progress'),
+    supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'paused'),
     supabase
       .from('jobs')
       .select('id', { count: 'exact', head: true })
@@ -99,6 +132,7 @@ export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatus
     notStarted: notStarted.count ?? 0,
     inProgress: inProgress.count ?? 0,
     paused: paused.count ?? 0,
+    assigned: assigned.count ?? 0,
     readyToSend: readyToSend.count ?? 0,
     completed: completed.count ?? 0,
   };
@@ -112,6 +146,7 @@ export interface PendingSendJobRow {
   address: string | null;
   postcode: string | null;
   required_skills: string[];
+  source_fields: Record<string, string>;
 }
 
 export async function getPendingSendJobsForTenant(
@@ -129,6 +164,7 @@ export async function getPendingSendJobsForTenant(
         address,
         postcode,
         required_skills,
+        source_fields,
         worker:workers!assigned_worker_id(full_name)
       `
       )
@@ -154,6 +190,7 @@ export async function getPendingSendJobsForTenant(
         required_skills: Array.isArray(row.required_skills)
           ? (row.required_skills as string[])
           : [],
+        source_fields: parseSourceFields(row.source_fields),
       };
     });
 
@@ -210,12 +247,43 @@ function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
     q = q.lte('scheduled_date', filters.date_to);
   }
   if (filters.search?.trim()) {
-    const term = filters.search.trim();
-    q = q.or(
-      `address.ilike.%${term}%,reference_number.ilike.%${term}%,job_description.ilike.%${term}%`
-    );
+    const orFilter = buildJobsSearchOrFilter(filters.search);
+    if (orFilter) {
+      q = q.or(orFilter);
+    }
+  }
+
+  const fieldFilters = filters.field_filters ?? [];
+  for (const { field, value } of fieldFilters) {
+    if (!field?.trim() || value == null || value === '') continue;
+    q = applyFieldValueFilter(q, field.trim(), value);
   }
   return q;
+}
+
+function applyFieldValueFilter(query: JobsQuery, field: string, value: string): JobsQuery {
+  if (isSourceFieldFilter(field)) {
+    const key = decodeSourceFieldFilter(field);
+    if (!key) return query;
+    return query.contains('source_fields', { [key]: value });
+  }
+
+  switch (field as SystemFilterFieldKey) {
+    case 'status':
+      return query.eq('status', value);
+    case 'priority':
+      return query.eq('priority', value);
+    case 'customer_id':
+      if (value === 'none') return query.is('customer_id', null);
+      return query.eq('customer_id', value);
+    case 'assigned_worker_id':
+      if (value === 'none') return query.is('assigned_worker_id', null);
+      return query.eq('assigned_worker_id', value);
+    case 'postcode':
+      return query.eq('postcode', value);
+    default:
+      return query;
+  }
 }
 
 /** Primary column from filters, then `id` so tied timestamps (e.g. an import batch) stay in a fixed order. */
@@ -226,29 +294,105 @@ function applyJobsListSort(query: JobsQuery, filters: JobsFilters): JobsQuery {
   return query.order(sortCol, { ascending }).order('id', { ascending: false });
 }
 
-function mapJobRow(row: Record<string, unknown>): JobRow {
+function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow {
   const customer = row.customer as { id?: string; name?: string } | null;
   const worker = row.worker as { id?: string; full_name?: string } | null;
   const requiredSkills = row.required_skills;
-  return {
+  const sourceFields = parseSourceFields(row.source_fields);
+  const reference_number = row.reference_number as string | null;
+  const address = row.address as string | null;
+  const postcode = (row.postcode as string | null) ?? null;
+  const job_description = (row.job_description as string | null) ?? null;
+  const customer_name = customer?.name ?? null;
+  const worker_name = worker?.full_name ?? null;
+  const status = row.status as JobRow['status'];
+  const priority = row.priority as JobRow['priority'];
+
+  const mapped: JobRow = {
     id: row.id as string,
     tenant_id: row.tenant_id as string,
     customer_id: row.customer_id as string | null,
     assigned_worker_id: row.assigned_worker_id as string | null,
-    reference_number: row.reference_number as string | null,
-    address: row.address as string | null,
-    postcode: (row.postcode as string | null) ?? null,
-    job_description: (row.job_description as string | null) ?? null,
-    status: row.status as JobRow['status'],
-    priority: row.priority as JobRow['priority'],
+    reference_number,
+    address,
+    postcode,
+    job_description,
+    status,
+    priority,
     scheduled_date: row.scheduled_date as string | null,
     scheduled_time: (row.scheduled_time as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string | null,
-    customer_name: customer?.name ?? null,
-    worker_name: worker?.full_name ?? null,
+    customer_name,
+    worker_name,
     required_skills: Array.isArray(requiredSkills) ? (requiredSkills as string[]) : [],
+    source_fields: sourceFields,
   };
+
+  if (filters?.search?.trim()) {
+    mapped.match_pills = computeJobMatchPills({
+      search: filters.search,
+      reference_number,
+      address,
+      postcode,
+      job_description,
+      customer_name,
+      worker_name,
+      source_fields: sourceFields,
+    });
+  } else if (filters?.field_filters && filters.field_filters.length > 0) {
+    const pills = filters.field_filters
+      .map((f) => pillForActiveFieldFilter(mapped, f.field, f.value))
+      .filter((p): p is JobMatchPill => !!p)
+      .slice(0, 3);
+    if (pills.length > 0) mapped.match_pills = pills;
+  }
+
+  return mapped;
+}
+
+function pillForActiveFieldFilter(
+  job: JobRow,
+  field: string,
+  value: string
+): JobMatchPill | null {
+  if (isSourceFieldFilter(field)) {
+    const key = decodeSourceFieldFilter(field);
+    if (!key) return null;
+    const actual = job.source_fields?.[key];
+    if (actual == null || actual === '') return null;
+    return { label: `${key}: ${actual}` };
+  }
+
+  switch (field as SystemFilterFieldKey) {
+    case 'status': {
+      const label =
+        value in JOB_STATUS_DISPLAY
+          ? JOB_STATUS_DISPLAY[value as keyof typeof JOB_STATUS_DISPLAY].label
+          : value;
+      return { label: fieldFilterPillLabel(field, label) };
+    }
+    case 'priority':
+      return { label: fieldFilterPillLabel(field, value) };
+    case 'customer_id':
+      return {
+        label: fieldFilterPillLabel(
+          field,
+          value === 'none' ? 'No customer' : (job.customer_name ?? value)
+        ),
+      };
+    case 'assigned_worker_id':
+      return {
+        label: fieldFilterPillLabel(
+          field,
+          value === 'none' ? 'Unassigned' : (job.worker_name ?? value)
+        ),
+      };
+    case 'postcode':
+      return { label: fieldFilterPillLabel(field, job.postcode ?? value) };
+    default:
+      return { label: fieldFilterPillLabel(field, value) };
+  }
 }
 
 /**
@@ -294,7 +438,9 @@ export async function getJobsForTenant(
       };
     }
 
-    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map(mapJobRow);
+    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map((row) =>
+      mapJobRow(row as Record<string, unknown>, filters)
+    );
 
     return {
       jobs,
@@ -481,6 +627,7 @@ export interface ImportBatchRow {
   pending_send: number;
   assigned: number;
   in_progress: number;
+  paused: number;
   completed: number;
 }
 
@@ -507,7 +654,14 @@ export async function getImportBatchesForTenant(
 
     const countsBySource = new Map<
       string,
-      { pending: number; pending_send: number; assigned: number; in_progress: number; completed: number }
+      {
+        pending: number;
+        pending_send: number;
+        assigned: number;
+        in_progress: number;
+        paused: number;
+        completed: number;
+      }
     >();
 
     if (importSourceIds.length > 0) {
@@ -516,7 +670,7 @@ export async function getImportBatchesForTenant(
         .select('import_source_id, status')
         .eq('tenant_id', tenantId)
         .in('import_source_id', importSourceIds)
-        .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'completed']);
+        .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'paused', 'completed']);
 
       if (jobsError) {
         console.error('[getImportBatchesForTenant] jobs', jobsError);
@@ -533,6 +687,7 @@ export async function getImportBatchesForTenant(
             pending_send: 0,
             assigned: 0,
             in_progress: 0,
+            paused: 0,
             completed: 0,
           });
         }
@@ -541,6 +696,7 @@ export async function getImportBatchesForTenant(
         if (status === 'pending_send') counts.pending_send += 1;
         if (status === 'assigned') counts.assigned += 1;
         if (status === 'in_progress') counts.in_progress += 1;
+        if (status === 'paused') counts.paused += 1;
         if (status === 'completed') counts.completed += 1;
       }
     }
@@ -550,7 +706,7 @@ export async function getImportBatchesForTenant(
       .select('status')
       .eq('tenant_id', tenantId)
       .is('import_source_id', null)
-      .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'completed']);
+      .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'paused', 'completed']);
 
     if (ungroupedError) {
       console.error('[getImportBatchesForTenant] ungrouped jobs', ungroupedError);
@@ -562,6 +718,7 @@ export async function getImportBatchesForTenant(
       pending_send: 0,
       assigned: 0,
       in_progress: 0,
+      paused: 0,
       completed: 0,
     };
     for (const row of Array.isArray(ungroupedRows) ? ungroupedRows : []) {
@@ -571,8 +728,18 @@ export async function getImportBatchesForTenant(
       if (status === 'pending_send') ungroupedCounts.pending_send += 1;
       if (status === 'assigned') ungroupedCounts.assigned += 1;
       if (status === 'in_progress') ungroupedCounts.in_progress += 1;
+      if (status === 'paused') ungroupedCounts.paused += 1;
       if (status === 'completed') ungroupedCounts.completed += 1;
     }
+
+    const emptyCounts = {
+      pending: 0,
+      pending_send: 0,
+      assigned: 0,
+      in_progress: 0,
+      paused: 0,
+      completed: 0,
+    };
 
     const batches: ImportBatchRow[] = rows.map((row) => {
       const r = row as {
@@ -584,20 +751,8 @@ export async function getImportBatchesForTenant(
       };
       const sourceId = r.import_source_id ?? null;
       const counts = sourceId
-        ? countsBySource.get(sourceId) ?? {
-            pending: 0,
-            pending_send: 0,
-            assigned: 0,
-            in_progress: 0,
-            completed: 0,
-          }
-        : {
-            pending: 0,
-            pending_send: 0,
-            assigned: 0,
-            in_progress: 0,
-            completed: 0,
-          };
+        ? countsBySource.get(sourceId) ?? emptyCounts
+        : emptyCounts;
       return {
         id: r.id,
         file_name: r.file_name ?? null,
@@ -608,6 +763,7 @@ export async function getImportBatchesForTenant(
         pending_send: counts.pending_send,
         assigned: counts.assigned,
         in_progress: counts.in_progress,
+        paused: counts.paused,
         completed: counts.completed,
       };
     });
@@ -620,12 +776,14 @@ export async function getImportBatchesForTenant(
         ungroupedCounts.pending_send +
         ungroupedCounts.assigned +
         ungroupedCounts.in_progress +
+        ungroupedCounts.paused +
         ungroupedCounts.completed,
       import_source_id: null,
       pending: ungroupedCounts.pending,
       pending_send: ungroupedCounts.pending_send,
       assigned: ungroupedCounts.assigned,
       in_progress: ungroupedCounts.in_progress,
+      paused: ungroupedCounts.paused,
       completed: ungroupedCounts.completed,
     });
 
@@ -753,5 +911,186 @@ export async function getRecentJobsForCustomer(
       jobs: [],
       error: err instanceof Error ? err : new Error(String(err)),
     };
+  }
+}
+
+const SOURCE_FIELDS_SCAN_LIMIT = 5000;
+
+/**
+ * Distinct source_fields keys present on this tenant's jobs (for field filter dropdown).
+ */
+export async function getSourceFieldKeysForTenant(
+  tenantId: string
+): Promise<{ keys: string[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('source_fields')
+      .eq('tenant_id', tenantId)
+      .limit(SOURCE_FIELDS_SCAN_LIMIT);
+
+    if (error) {
+      console.error('[getSourceFieldKeysForTenant]', error);
+      return { keys: [], error: toError(error) };
+    }
+
+    const keys = new Set<string>();
+    for (const row of data ?? []) {
+      const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+      for (const key of Object.keys(fields)) keys.add(key);
+    }
+    return {
+      keys: [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getSourceFieldKeysForTenant]', err);
+    return { keys: [], error: toError(err) };
+  }
+}
+
+/**
+ * Distinct values for a Phase 6 field filter (system or source_fields key).
+ */
+export async function getFieldFilterValuesForTenant(
+  tenantId: string,
+  field: string
+): Promise<{ values: FieldFilterValueOption[]; error: Error | null }> {
+  try {
+    if (!field.trim()) return { values: [], error: null };
+
+    if (isSourceFieldFilter(field)) {
+      const key = decodeSourceFieldFilter(field);
+      if (!key) return { values: [], error: null };
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('source_fields')
+        .eq('tenant_id', tenantId)
+        .limit(SOURCE_FIELDS_SCAN_LIMIT);
+      if (error) {
+        console.error('[getFieldFilterValuesForTenant] source', error);
+        return { values: [], error: toError(error) };
+      }
+      const values = new Set<string>();
+      for (const row of data ?? []) {
+        const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+        const v = fields[key]?.trim();
+        if (v) values.add(v);
+      }
+      return {
+        values: [...values]
+          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          .map((v) => ({ value: v, label: v })),
+        error: null,
+      };
+    }
+
+    switch (field as SystemFilterFieldKey) {
+      case 'status': {
+        const statuses: JobStatus[] = [
+          'pending',
+          'pending_send',
+          'assigned',
+          'in_progress',
+          'paused',
+          'completed',
+          'declined',
+          'cancelled',
+        ];
+        return {
+          values: statuses.map((s) => ({
+            value: s,
+            label: JOB_STATUS_DISPLAY[s]?.label ?? s,
+          })),
+          error: null,
+        };
+      }
+      case 'priority': {
+        const priorities: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+        return {
+          values: priorities.map((p) => ({
+            value: p,
+            label: p.charAt(0).toUpperCase() + p.slice(1),
+          })),
+          error: null,
+        };
+      }
+      case 'customer_id': {
+        const { customers, error } = await getCustomerJobCounts(tenantId);
+        if (error) return { values: [], error };
+        return {
+          values: customers.map((c) => ({
+            value: c.customer_id ?? 'none',
+            label: `${c.name} (${c.count})`,
+          })),
+          error: null,
+        };
+      }
+      case 'assigned_worker_id': {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('assigned_worker_id, worker:workers!assigned_worker_id(id, full_name)')
+          .eq('tenant_id', tenantId)
+          .limit(SOURCE_FIELDS_SCAN_LIMIT);
+        if (error) {
+          console.error('[getFieldFilterValuesForTenant] workers', error);
+          return { values: [], error: toError(error) };
+        }
+        const byId = new Map<string, string>();
+        let unassigned = 0;
+        for (const row of data ?? []) {
+          const r = row as {
+            assigned_worker_id?: string | null;
+            worker?: { full_name?: string } | null;
+          };
+          if (!r.assigned_worker_id) {
+            unassigned += 1;
+            continue;
+          }
+          if (!byId.has(r.assigned_worker_id)) {
+            byId.set(r.assigned_worker_id, r.worker?.full_name?.trim() || 'Worker');
+          }
+        }
+        const values: FieldFilterValueOption[] = [...byId.entries()]
+          .map(([id, name]) => ({ value: id, label: name }))
+          .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+        if (unassigned > 0) {
+          values.unshift({ value: 'none', label: `Unassigned (${unassigned})` });
+        }
+        return { values, error: null };
+      }
+      case 'postcode': {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('postcode')
+          .eq('tenant_id', tenantId)
+          .not('postcode', 'is', null)
+          .limit(SOURCE_FIELDS_SCAN_LIMIT);
+        if (error) {
+          console.error('[getFieldFilterValuesForTenant] postcode', error);
+          return { values: [], error: toError(error) };
+        }
+        const values = new Set<string>();
+        for (const row of data ?? []) {
+          const pc = String((row as { postcode?: string | null }).postcode ?? '').trim();
+          if (pc) values.add(pc);
+        }
+        return {
+          values: [...values]
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+            .map((v) => ({ value: v, label: v })),
+          error: null,
+        };
+      }
+      default:
+        return { values: [], error: null };
+    }
+  } catch (err) {
+    console.error('[getFieldFilterValuesForTenant]', err);
+    return { values: [], error: toError(err) };
   }
 }

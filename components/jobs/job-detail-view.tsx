@@ -11,6 +11,7 @@ import { JobDetailJobReportCard } from '@/components/jobs/job-detail-job-report-
 import { JobDetailCompletionNotes } from '@/components/jobs/job-detail-completion-notes';
 import { JobDetailPhotosCard } from '@/components/jobs/job-detail-photos-card';
 import { JobDetailCompletionSection } from '@/components/jobs/job-detail-completion-section';
+import { JobDetailSourceFieldsCard } from '@/components/jobs/job-detail-source-fields-card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
@@ -156,6 +157,7 @@ export function JobDetailView({
             notes: e.notes,
           }))}
         />
+        <JobDetailSourceFieldsCard sourceFields={job.source_fields ?? {}} />
       </div>
 
       {/* Right column */}

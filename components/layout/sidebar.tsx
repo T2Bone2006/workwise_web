@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   Brain,
+  Eye,
 } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { useEffect, useState } from 'react';
@@ -161,6 +162,28 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
                 Admin
               </h2>
               <div className="space-y-1">
+                <Link
+                  href="/admin/view-as"
+                  onClick={isMobile ? onMobileClose : undefined}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                    'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                    pathname === '/admin/view-as'
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+                      : 'text-sidebar-foreground/90'
+                  )}
+                >
+                  <Eye className="size-5 shrink-0" aria-hidden />
+                  {(!collapsed || isMobile) && (
+                    <>
+                      <span>View as tenant</span>
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        Admin
+                      </Badge>
+                    </>
+                  )}
+                </Link>
                 <Link
                   href="/admin/ai-analytics"
                   onClick={isMobile ? onMobileClose : undefined}

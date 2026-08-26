@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -14,6 +13,9 @@ import {
   Loader2,
   MapPin,
   CheckCircle2,
+  Plus,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,13 +46,36 @@ import {
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { importJobs } from '@/lib/actions/import';
-import { normalizeUkPostcode } from '@/lib/utils/postcode';
-import { normalizeJobLength } from '@/lib/jobs/normalize-job-length';
-import type { ImportSourceRow } from '@/lib/data/import-sources';
+import { createCustomerForImport } from '@/lib/actions/customers';
+import {
+  collectUnparsedDateValues,
+  headerSetsEqual,
+  isScheduledDateMapped,
+  parseScheduledDate,
+} from '@/lib/import/parse-scheduled-date';
+import {
+  normalizeHeaders,
+  normalizeRowKeys,
+  snapColumnMapping,
+} from '@/lib/import/bind-columns';
+import {
+  EMPTY_RESOLVE_MAPS,
+  areCoreColumnsMapped,
+  collectJobLengthsNeedingAi,
+  collectPostcodesNeedingAi,
+  isJobLengthMapped,
+  prepareImportRow,
+  prepareImportRows,
+  type ImportResolveMaps,
+} from '@/lib/import/prepare-import-rows';
+import { resolveImportDatesWithAI } from '@/lib/import/resolve-import-dates';
+import { resolveImportPostcodesWithAI } from '@/lib/import/resolve-import-postcodes';
+import { resolveImportJobLengthsWithAI } from '@/lib/import/resolve-import-job-lengths';
 import type { CustomerImportOption } from '@/lib/data/customers';
+import { SourceFieldsPeek, SourceFieldsPeekProvider } from '@/components/import/source-fields-peek';
 
+/** WorkWise fields — customer comes from step 1, not the sheet. */
 const SCHEMA_FIELDS = [
-  { key: 'customer_name', label: 'Customer name' },
   { key: 'address', label: 'Address' },
   { key: 'postcode', label: 'Postcode' },
   { key: 'description', label: 'Description' },
@@ -62,94 +87,34 @@ const SCHEMA_FIELDS = [
 
 const PRIORITY_OPTIONS = ['low', 'normal', 'high', 'emergency'];
 
-function cleanSavedMapping(mapping: Record<string, string | null>): Record<string, string> {
+function cleanSavedMapping(
+  mapping: Record<string, string | null> | null,
+  headers?: string[]
+): Record<string, string> {
   const cleaned: Record<string, string> = {};
-  Object.entries(mapping).forEach(([k, v]) => {
+  if (!mapping) return cleaned;
+  const snapped = headers ? snapColumnMapping(mapping, headers) : mapping;
+  Object.entries(snapped).forEach(([k, v]) => {
+    if (k === 'customer_name') return;
     if (v != null && v !== '') cleaned[k] = v;
   });
   return cleaned;
 }
 
-function getSavedCsvColumns(columnMapping: Record<string, string | null>): string[] {
-  return Object.values(columnMapping).filter(
-    (v): v is string => v != null && v !== ''
-  );
-}
-
-function savedMappingMissingColumns(
-  savedMapping: Record<string, string | null>,
-  headers: string[]
-): boolean {
-  const headerSet = new Set(headers);
-  return getSavedCsvColumns(savedMapping).some((col) => !headerSet.has(col));
-}
-
-type MappedRowValidation =
-  | { valid: true }
-  | { valid: false; reasons: string[] };
-
-function validateMappedImportRow(row: Record<string, string>): MappedRowValidation {
-  const reasons: string[] = [];
-  if (!row.address?.trim()) reasons.push('Missing address');
-  const jobDescription = row.description?.trim() ?? '';
-  if (!jobDescription) reasons.push('Missing description');
-  const postcode = row.postcode?.trim() ?? '';
-  if (!postcode) reasons.push('Missing postcode');
-  else if (!normalizeUkPostcode(postcode)) reasons.push('Invalid postcode');
-  if (reasons.length > 0) return { valid: false, reasons };
-  return { valid: true };
-}
-
-/** Matches server formatUnmappedCsvColumns in lib/actions/import.ts */
-function formatUnmappedCsvColumns(
-  row: Record<string, string>,
-  columnMapping: Record<string, string>
-): string {
-  const mappedCsvHeaders = new Set(
-    Object.values(columnMapping).filter((c) => typeof c === 'string' && c.trim() !== '')
-  );
-  const parts: string[] = [];
-  for (const col of Object.keys(row)) {
-    if (!col.trim()) continue;
-    if (mappedCsvHeaders.has(col)) continue;
-    const val = String(row[col] ?? '').trim();
-    if (val === '') continue;
-    parts.push(`${col}: ${val}`);
+/** Decide whether saved mapping can be reused for this file's headers. */
+function resolveSavedMappingReuse(
+  headers: string[],
+  saved: Record<string, string>,
+  expected: string[]
+): { reuse: boolean; headersChanged: boolean } {
+  if (expected.length > 0) {
+    const equal = headerSetsEqual(headers, expected);
+    return { reuse: equal, headersChanged: !equal };
   }
-  return parts.join(' | ');
-}
-
-function mapCsvRowToSchema(
-  rawRow: Record<string, string>,
-  columnMapping: Record<string, string>,
-  valueTransforms: Record<string, Record<string, string>>
-): Record<string, string> {
-  const applyFieldTransforms = (field: string, raw: string): string => {
-    const t = valueTransforms[field];
-    if (!t) return raw;
-    const key = raw.trim();
-    return t[key] ?? t['default'] ?? raw;
-  };
-  const out: Record<string, string> = {};
-  SCHEMA_FIELDS.forEach(({ key }) => {
-    const csvCol = columnMapping[key];
-    let val = csvCol && rawRow[csvCol] != null ? String(rawRow[csvCol]).trim() : '';
-    if (val && valueTransforms[key]) val = applyFieldTransforms(key, val);
-    out[key] = val;
-  });
-  if (!out.priority) out.priority = valueTransforms.priority?.default ?? 'normal';
-  // Preview-only approximation: resolves the mapped column same as the server,
-  // but doesn't replicate the server's job_description-scanning fallback.
-  out.job_length = normalizeJobLength(out.job_length || null) ?? '';
-
-  const mappedDescription = out.description ?? '';
-  const unmappedAppendix = formatUnmappedCsvColumns(rawRow, columnMapping);
-  out.description =
-    mappedDescription && unmappedAppendix
-      ? `${mappedDescription} | ${unmappedAppendix}`
-      : mappedDescription || unmappedAppendix;
-
-  return out;
+  const headerSet = new Set(headers);
+  const mappedCols = Object.values(saved);
+  const allPresent = mappedCols.every((c) => headerSet.has(c));
+  return { reuse: allPresent, headersChanged: !allPresent };
 }
 
 function isSpreadsheetImportFile(fileName: string): boolean {
@@ -157,7 +122,6 @@ function isSpreadsheetImportFile(fileName: string): boolean {
   return lower.endsWith('.csv') || lower.endsWith('.xlsx');
 }
 
-/** Matches PapaParse `header: true` rows: object per row, string cell values, skipped empty lines. */
 function xlsxWorkbookToRowRecords(wb: XLSX.WorkBook): Record<string, string>[] {
   const firstSheet = wb.SheetNames[0];
   if (!firstSheet) return [];
@@ -177,430 +141,576 @@ function xlsxWorkbookToRowRecords(wb: XLSX.WorkBook): Record<string, string>[] {
     .filter((row) => Object.values(row).some((v) => v.trim() !== ''));
 }
 
+type ImportResultState = {
+  ok: boolean;
+  count: number;
+  assignedCount: number;
+  unassignedCount: number;
+  errors: string[];
+  autoAllocate: boolean;
+  /** Hard failure message when ok is false. */
+  errorMessage?: string;
+};
+
 interface ImportWizardProps {
   tenantId: string;
-  initialSources: ImportSourceRow[];
   customers: CustomerImportOption[];
 }
 
-export function ImportWizard({ tenantId, initialSources, customers }: ImportWizardProps) {
-  const router = useRouter();
-  const [step, setStep] = useState(1);
-  const [sourceId, setSourceId] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState('');
+export function ImportWizard({ customers: initialCustomers }: ImportWizardProps) {
+  const [step, setStep] = useState<1 | 2 | 3 | 'adjust' | 'done'>(1);
+  const [customers, setCustomers] = useState(initialCustomers);
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [showCreateCustomer, setShowCreateCustomer] = useState(false);
+
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<Record<string, string>[]>([]);
+  const [previewData, setPreviewData] = useState<Record<string, string>[]>([]);
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [valueTransforms, setValueTransforms] = useState<Record<string, Record<string, string>>>({});
-  const [previewData, setPreviewData] = useState<Record<string, string>[]>([]);
+  const [headersChanged, setHeadersChanged] = useState(false);
+  const [isAiMapping, setIsAiMapping] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [showRemap, setShowRemap] = useState(false);
-  const [isAiMapping, setIsAiMapping] = useState(false);
-  const [fileDiffersFromSaved, setFileDiffersFromSaved] = useState(false);
-  /** Default on: auto-assign after import. User can switch to import-only on step 4. */
   const [autoAllocate, setAutoAllocate] = useState(true);
+  /** When false (default), any invalid row blocks the whole import. */
+  const [allowPartialImport, setAllowPartialImport] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResultState | null>(null);
+  const [resolveMaps, setResolveMaps] = useState<ImportResolveMaps>(EMPTY_RESOLVE_MAPS);
+  const [isResolvingFields, setIsResolvingFields] = useState(false);
+  const [fieldsReady, setFieldsReady] = useState(true);
 
-  const sources = initialSources;
+  const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
-  const canGoStep2 = sourceId !== null || sourceName.trim().length > 0;
-  const canGoStep3 = csvFile && csvHeaders.length > 0 && csvData.length > 0;
-  const priorityMapped = columnMapping.priority ?? 'normal';
+  const runAiMapping = useCallback(async (headers: string[], rows: Record<string, string>[]) => {
+    if (!headers.length) return;
+    setIsAiMapping(true);
+    try {
+      const res = await fetch('/api/map-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          columnNames: headers,
+          sampleRows: rows.slice(0, 5),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? 'AI mapping failed');
+      }
+      const { mapping, transforms } = (await res.json()) as {
+        mapping?: Record<string, string | null>;
+        transforms?: Record<string, Record<string, string>>;
+      };
 
-  const applySavedSourceMapping = useCallback((source: ImportSourceRow) => {
-    setColumnMapping(cleanSavedMapping(source.column_mapping));
-    setValueTransforms(source.value_transforms ?? {});
+      // Belt-and-suspenders: snap again on the client against this file's headers.
+      const snapped = snapColumnMapping(mapping ?? {}, headers);
+      const cleaned: Record<string, string> = {};
+      Object.entries(snapped).forEach(([k, v]) => {
+        if (k === 'customer_name') return;
+        if (v) cleaned[k] = v;
+      });
+      setColumnMapping(cleaned);
+      setValueTransforms(transforms ?? {});
+
+      // Hard mapping failure only when address or postcode missing.
+      // (Description / date / job_length rules are separate; don't lecture in this toast.)
+      if (!cleaned.address || !cleaned.postcode) {
+        toast.error(
+          'Address and/or postcode could not be mapped. Open Adjust mapping and fix them.',
+          { duration: 14000 }
+        );
+      } else {
+        toast.success('Columns mapped', { duration: 6000 });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'AI mapping failed. Adjust mapping manually.', {
+        duration: 12000,
+      });
+    } finally {
+      setIsAiMapping(false);
+    }
   }, []);
 
-  const goToMappingOrPreview = useCallback(() => {
-    const source = sourceId ? sources.find((s) => s.id === sourceId) : null;
-    const saved = source?.column_mapping ?? {};
-    const hasSaved = source && Object.keys(saved).length > 0;
-    if (fileDiffersFromSaved) {
-      setStep(4);
-    } else if (hasSaved && !showRemap) {
-      applySavedSourceMapping(source);
-      setStep(4);
-    } else {
-      setStep(3);
-    }
-  }, [sourceId, sources, showRemap, applySavedSourceMapping, fileDiffersFromSaved]);
-
-  const runAiMapping = useCallback(
+  const resolveMappingAfterUpload = useCallback(
     async (headers: string[], rows: Record<string, string>[]) => {
-      if (!headers.length) return;
-      setIsAiMapping(true);
-      try {
-        const res = await fetch('/api/map-columns', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            columnNames: headers,
-            sampleRows: rows.slice(0, 5),
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error ?? 'AI mapping failed');
+      const saved = cleanSavedMapping(
+        selectedCustomer?.import_column_mapping ?? null,
+        headers
+      );
+      const expected = selectedCustomer?.import_expected_headers ?? [];
+      const hasSaved = Object.keys(saved).length > 0;
+
+      if (hasSaved) {
+        const { reuse, headersChanged: changed } = resolveSavedMappingReuse(
+          headers,
+          saved,
+          expected
+        );
+        if (reuse) {
+          setColumnMapping(saved);
+          setValueTransforms(selectedCustomer?.import_value_transforms ?? {});
+          setHeadersChanged(false);
+          setStep(3);
+          toast.success('Reused saved column mapping for this customer', { duration: 6000 });
+          return;
         }
-        const { mapping, transforms } = await res.json();
-        const cleaned: Record<string, string> = {};
-        Object.entries(mapping ?? {}).forEach(([k, v]) => {
-          if (v && typeof v === 'string') cleaned[k] = v;
-        });
-        setColumnMapping(cleaned);
-        setValueTransforms(transforms ?? {});
-        toast.success('AI mapped columns and value transforms');
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'AI mapping failed. Use manual mapping.');
-      } finally {
-        setIsAiMapping(false);
+        setHeadersChanged(changed);
+      } else {
+        setHeadersChanged(false);
       }
+      await runAiMapping(headers, rows);
+      setStep(3);
     },
-    []
+    [selectedCustomer, runAiMapping]
   );
 
-  const handleAiMapping = useCallback(() => {
-    void runAiMapping(csvHeaders, csvData);
-  }, [runAiMapping, csvHeaders, csvData]);
+  // Absolute fields (dates, postcodes, job lengths): rules first, then AI — before Import.
+  useEffect(() => {
+    if (step !== 3 && step !== 'adjust') return;
+    if (!csvData.length) return;
 
-  const handleFile = useCallback((file: File) => {
-    if (!isSpreadsheetImportFile(file.name)) {
-      toast.error('Please upload a .csv or .xlsx file.');
-      return;
-    }
-    setCsvFile(file);
+    let cancelled = false;
+    setIsResolvingFields(true);
+    setFieldsReady(false);
 
-    const applyParsedRows = (rows: Record<string, string>[]) => {
-      if (!rows.length) {
-        toast.error('File has no data rows.');
-        setCsvHeaders([]);
-        setCsvData([]);
-        setPreviewData([]);
-        setFileDiffersFromSaved(false);
+    void (async () => {
+      try {
+        const dateCol = columnMapping.scheduled_date;
+        const dateInputs =
+          isScheduledDateMapped(columnMapping) && dateCol
+            ? [
+                ...new Set(
+                  collectUnparsedDateValues(csvData, dateCol).filter(
+                    (v) => !parseScheduledDate(v)
+                  )
+                ),
+              ]
+            : [];
+        const postcodeInputs = [
+          ...new Set(collectPostcodesNeedingAi(csvData, columnMapping, valueTransforms)),
+        ];
+        const lengthInputs = [
+          ...new Set(collectJobLengthsNeedingAi(csvData, columnMapping, valueTransforms)),
+        ];
+
+        const [dates, postcodes, jobLengths] = await Promise.all([
+          dateInputs.length > 0
+            ? resolveImportDatesWithAI(dateInputs)
+            : Promise.resolve({} as Record<string, string>),
+          postcodeInputs.length > 0
+            ? resolveImportPostcodesWithAI(postcodeInputs)
+            : Promise.resolve({} as Record<string, string>),
+          lengthInputs.length > 0
+            ? resolveImportJobLengthsWithAI(lengthInputs)
+            : Promise.resolve({} as Record<string, 'half_day' | 'full_day'>),
+        ]);
+
+        if (!cancelled) {
+          setResolveMaps({ dates, postcodes, jobLengths });
+          setFieldsReady(true);
+        }
+      } catch (e) {
+        console.error('[ImportWizard] absolute field resolve failed', e);
+        if (!cancelled) {
+          setResolveMaps(EMPTY_RESOLVE_MAPS);
+          setFieldsReady(true);
+        }
+      } finally {
+        if (!cancelled) setIsResolvingFields(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, columnMapping, csvData, valueTransforms]);
+
+  const handleFile = useCallback(
+    (file: File) => {
+      if (!isSpreadsheetImportFile(file.name)) {
+        toast.error('Please upload a .csv or .xlsx file.', { duration: 8000 });
         return;
       }
-      const headers = Object.keys(rows[0]!);
-      setCsvHeaders(headers);
-      setCsvData(rows);
-      setPreviewData(rows.slice(0, 5));
-      setFileDiffersFromSaved(false);
-      setShowRemap(false);
+      setCsvFile(file);
 
-      if (sourceId === null) {
-        void runAiMapping(headers, rows);
-      } else {
-        const source = sources.find((s) => s.id === sourceId);
-        const saved = source?.column_mapping ?? {};
-        const hasSaved = source && Object.keys(saved).length > 0;
-        if (hasSaved && savedMappingMissingColumns(saved, headers)) {
-          setFileDiffersFromSaved(true);
-          setShowRemap(true);
-          void runAiMapping(headers, rows);
-        }
-      }
-    };
-
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith('.xlsx')) {
-      void (async () => {
-        try {
-          const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf, { type: 'array' });
-          const rows = xlsxWorkbookToRowRecords(wb);
-          applyParsedRows(rows);
-        } catch {
-          toast.error('Invalid Excel file. Could not parse workbook.');
+      const applyParsedRows = (rows: Record<string, string>[]) => {
+        if (!rows.length) {
+          toast.error('File has no data rows.', { duration: 8000 });
           setCsvHeaders([]);
           setCsvData([]);
           setPreviewData([]);
+          return;
         }
-      })();
-      return;
-    }
+        const rawHeaders = Object.keys(rows[0]!);
+        const headers = normalizeHeaders(rawHeaders);
+        if (!headers.length) {
+          toast.error('File has no usable column headers.', { duration: 8000 });
+          return;
+        }
+        const normalizedRows = rows.map((row) => normalizeRowKeys(row, headers));
+        setCsvHeaders(headers);
+        setCsvData(normalizedRows);
+        setPreviewData(normalizedRows.slice(0, 5));
+        setAllowPartialImport(false);
+        void resolveMappingAfterUpload(headers, normalizedRows);
+      };
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        applyParsedRows(results.data as Record<string, string>[]);
-      },
-      error: () => {
-        toast.error('Invalid CSV format. Could not parse file.');
-        setCsvHeaders([]);
-        setCsvData([]);
-        setPreviewData([]);
-      },
-    });
-  }, [sourceId, sources, runAiMapping]);
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith('.xlsx')) {
+        void (async () => {
+          try {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: 'array' });
+            applyParsedRows(xlsxWorkbookToRowRecords(wb));
+          } catch {
+            toast.error('Invalid Excel file.', { duration: 8000 });
+          }
+        })();
+        return;
+      }
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          applyParsedRows(results.data as Record<string, string>[]);
+        },
+        error: () => toast.error('Invalid CSV format.', { duration: 8000 }),
+      });
     },
-    [handleFile]
+    [resolveMappingAfterUpload]
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
-
   const importRowStats = useMemo(() => {
-    const validations = csvData.map((row) =>
-      validateMappedImportRow(mapCsvRowToSchema(row, columnMapping, valueTransforms))
+    const prepared = prepareImportRows(
+      csvData,
+      columnMapping,
+      valueTransforms,
+      resolveMaps,
+      { absoluteFieldsReady: fieldsReady && !isResolvingFields }
     );
-    const readyCount = validations.filter((v) => v.valid).length;
-    const invalidCount = csvData.length - readyCount;
+    const readyCount = prepared.filter((r) => r.ok).length;
+    const coreMapped = areCoreColumnsMapped(columnMapping);
     return {
-      validations,
       readyCount,
-      invalidCount,
-      hasInvalidRows: invalidCount > 0,
+      invalidCount: csvData.length - readyCount,
+      pendingFieldCount: prepared.filter((r) =>
+        r.warnings.some((w) => w.startsWith('Resolving '))
+      ).length,
+      hasInvalidRows: prepared.some((r) => !r.ok),
+      coreMapped,
     };
-  }, [csvData, columnMapping, valueTransforms]);
+  }, [csvData, columnMapping, valueTransforms, resolveMaps, fieldsReady, isResolvingFields]);
+
+  const applyMappingAndReview = () => {
+    setAllowPartialImport(false);
+    setResolveMaps(EMPTY_RESOLVE_MAPS);
+    setFieldsReady(false);
+    setStep(3);
+  };
 
   const mappedPreviewRows = useMemo(
     () =>
-      previewData.slice(0, 10).map((row) => {
-        const mapped = mapCsvRowToSchema(row, columnMapping, valueTransforms);
-        return { mapped, validation: validateMappedImportRow(mapped) };
-      }),
-    [previewData, columnMapping, valueTransforms]
+      previewData.slice(0, 10).map((row, i) =>
+        prepareImportRow(
+          row,
+          i,
+          columnMapping,
+          valueTransforms,
+          resolveMaps,
+          { absoluteFieldsReady: fieldsReady && !isResolvingFields }
+        )
+      ),
+    [previewData, columnMapping, valueTransforms, resolveMaps, fieldsReady, isResolvingFields]
   );
 
+  const previewExtrasKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of mappedPreviewRows) {
+      for (const k of Object.keys(row.sourceFields)) keys.add(k);
+    }
+    return [...keys].sort((a, b) => a.localeCompare(b));
+  }, [mappedPreviewRows]);
+
+  const handleCreateCustomer = async () => {
+    setCreatingCustomer(true);
+    try {
+      const result = await createCustomerForImport(newCustomerName);
+      if (!result.success || !result.id) {
+        toast.error(result.error ?? 'Could not create customer', { duration: 10000 });
+        return;
+      }
+      const option: CustomerImportOption = {
+        id: result.id,
+        name: result.name ?? newCustomerName.trim(),
+        import_column_mapping: null,
+        import_value_transforms: {},
+        import_expected_headers: [],
+      };
+      setCustomers((prev) => [...prev, option].sort((a, b) => a.name.localeCompare(b.name)));
+      setCustomerId(result.id);
+      setShowCreateCustomer(false);
+      setNewCustomerName('');
+      toast.success(`Created ${option.name}`, { duration: 6000 });
+    } finally {
+      setCreatingCustomer(false);
+    }
+  };
+
   const handleImport = async () => {
-    if (!csvData.length) {
-      toast.error('Ensure CSV has data.');
+    if (!customerId || !csvData.length) {
+      toast.error('Select a customer and upload a file first.', { duration: 8000 });
+      return;
+    }
+    if (isResolvingFields || !fieldsReady) {
+      toast.error('Still cleaning dates / postcodes / job lengths — wait a moment.', {
+        duration: 8000,
+      });
+      return;
+    }
+    if (!areCoreColumnsMapped(columnMapping)) {
+      toast.error('Map Address and Postcode before importing.', { duration: 10000 });
       return;
     }
     setIsImporting(true);
-    const started = Date.now();
     try {
       const mapping: Record<string, string> = {};
       Object.entries(columnMapping).forEach(([field, csvColumn]) => {
-        if (csvColumn && csvColumn !== '__NONE__') {
-          mapping[field] = csvColumn;
-        }
+        if (csvColumn && csvColumn !== '__NONE__') mapping[field] = csvColumn;
       });
       const result = await importJobs({
-        sourceId,
-        sourceName: sourceId ? sources.find((s) => s.id === sourceId)?.source_name ?? sourceName : sourceName,
-        customerId: customerId ?? undefined,
+        customerId,
         columnMapping: mapping,
         valueTransforms,
         csvData,
+        csvHeaders,
         fileName: csvFile?.name ?? 'import.csv',
         autoAllocate,
+        allowPartialImport,
+        preResolvedDates: resolveMaps.dates,
+        preResolvedPostcodes: resolveMaps.postcodes,
+        preResolvedJobLengths: resolveMaps.jobLengths,
       });
-      const duration = Math.round((Date.now() - started) / 1000);
-      if (result.success && typeof result.count === 'number' && result.count > 0) {
-        const assigned = 'assignedCount' in result ? result.assignedCount : 0;
-        const unassigned = 'unassignedCount' in result ? result.unassignedCount : 0;
-        let msg = `Imported ${result.count} job${result.count === 1 ? '' : 's'}.`;
-        if (autoAllocate && assigned > 0) {
-          msg += ` ${assigned} assigned to workers by location and availability.`;
-        } else if (!autoAllocate) {
-          msg += ' Assign them manually from the Jobs list.';
-        }
-        toast.success(msg);
-        if (autoAllocate && unassigned > 0) {
-          toast.warning(
-            `${unassigned} job${unassigned === 1 ? '' : 's'} need manual assignment`,
-            {
-              description: 'Auto-assign failed (e.g. invalid postcode or no available workers). Assign them from the Jobs list.',
-              duration: 8000,
-            }
-          );
-        }
-        if (result.errors?.length) {
-          toast.warning(`${result.errors.length} row warning${result.errors.length === 1 ? '' : 's'}`, {
-            description: result.errors.slice(0, 3).join(' · '),
-            duration: 10000,
-          });
-        }
-        router.push('/jobs');
-      } else if (result.success && result.count === 0) {
-        toast.error('Imported 0 jobs. No rows were saved — check mapping and try again.', {
-          duration: 12000,
+
+      if (result.success) {
+        setImportResult({
+          ok: true,
+          count: result.count,
+          assignedCount: result.assignedCount,
+          unassignedCount: result.unassignedCount,
+          errors: result.errors ?? [],
+          autoAllocate,
         });
-      } else if (!result.success) {
-        toast.error('error' in result ? result.error : 'Import failed', {
-          duration: 12000,
+        setStep('done');
+        setCustomers((prev) =>
+          prev.map((c) =>
+            c.id === customerId
+              ? {
+                  ...c,
+                  import_column_mapping: mapping,
+                  import_value_transforms: valueTransforms,
+                  import_expected_headers: csvHeaders,
+                }
+              : c
+          )
+        );
+      } else {
+        setImportResult({
+          ok: false,
+          count: 0,
+          assignedCount: 0,
+          unassignedCount: 0,
+          errors: result.errors ?? [],
+          autoAllocate,
+          errorMessage: result.error,
         });
+        setStep('done');
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Import failed');
+      setImportResult({
+        ok: false,
+        count: 0,
+        assignedCount: 0,
+        unassignedCount: 0,
+        errors: [],
+        autoAllocate,
+        errorMessage: e instanceof Error ? e.message : 'Import failed',
+      });
+      setStep('done');
     } finally {
       setIsImporting(false);
     }
   };
 
-  const selectedSource = sourceId ? sources.find((s) => s.id === sourceId) : null;
-  const savedMapping = selectedSource?.column_mapping ?? {};
-  const hasSavedMapping = selectedSource && Object.keys(savedMapping).length > 0;
+  const resetWizard = () => {
+    setStep(1);
+    setCsvFile(null);
+    setCsvHeaders([]);
+    setCsvData([]);
+    setPreviewData([]);
+    setColumnMapping({});
+    setValueTransforms({});
+    setHeadersChanged(false);
+    setImportResult(null);
+    setResolveMaps(EMPTY_RESOLVE_MAPS);
+    setFieldsReady(true);
+    setIsResolvingFields(false);
+    setAllowPartialImport(false);
+  };
 
-  const remappedWarningBanner = fileDiffersFromSaved ? (
-    <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-900 dark:text-yellow-100">
-      This file looks different from your last import. We&apos;ve automatically remapped it — please
-      review before importing.
-    </div>
-  ) : null;
+  const dismissImportResult = () => {
+    setImportResult(null);
+    setStep(3);
+  };
 
-  const stepProgress = (step / 4) * 100;
+  const stepLabel =
+    step === 1
+      ? 'Customer'
+      : step === 2
+        ? 'Upload'
+        : step === 3
+          ? 'Review'
+          : step === 'adjust'
+            ? 'Adjust mapping'
+            : 'Done';
 
   return (
     <div className="space-y-6">
-      {/* Step indicator + progress */}
-      <div
-        className={cn(
-          'rounded-2xl border p-6 transition-all duration-300',
-          'bg-[var(--glass-bg)] border-[var(--glass-border)] shadow-[var(--shadow-glass-value)]',
-          'backdrop-blur-[var(--blur-glass)]'
-        )}
-      >
-        <div className="mb-4 flex items-center justify-between text-sm font-medium text-muted-foreground">
-          <span>Step {step} of 4</span>
-          <span>
-            {step === 1 && 'Select source'}
-            {step === 2 && 'Upload file'}
-            {step === 3 && 'Map columns'}
-            {step === 4 && 'Preview & import'}
-          </span>
+      <div className="rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-6 shadow-[var(--shadow-glass-value)]">
+        <div className="mb-2 flex items-center justify-between text-sm font-medium text-muted-foreground">
+          <span>{typeof step === 'number' ? `Step ${step} of 3` : stepLabel}</span>
+          <span>{stepLabel}</span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-gradient-to-r from-brand-primary to-brand-secondary transition-all duration-500"
-            style={{ width: `${stepProgress}%` }}
+            style={{
+              width: `${
+                step === 1 ? 33 : step === 2 ? 66 : step === 3 || step === 'adjust' || step === 'done' ? 100 : 0
+              }%`,
+            }}
           />
-        </div>
-        <div className="mt-3 flex justify-between text-xs text-muted-foreground">
-          <span>1. Source</span>
-          <span>2. Upload</span>
-          <span>3. Map</span>
-          <span>4. Import</span>
         </div>
       </div>
 
-      {/* Step 1: Select/Create Import Source */}
       {step === 1 && (
-        <Card className="glass-card overflow-hidden rounded-2xl border-[var(--glass-border)] bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]">
+        <Card className="glass-card rounded-2xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileSpreadsheet className="size-5" />
-              Select or create import source
+              Who is this spreadsheet for?
             </CardTitle>
             <CardDescription>
-              Choose an existing source to reuse a saved column mapping, or create a new one.
+              Pick the customer these jobs belong to. We&apos;ll remember how their sheets map for
+              next time.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Import source</Label>
-              <Select
-                value={sourceId ?? 'new'}
-                onValueChange={(v) => {
-                  setSourceId(v === 'new' ? null : v);
-                  setColumnMapping({});
-                  setValueTransforms({});
-                  setShowRemap(false);
-                  setFileDiffersFromSaved(false);
-                  if (v !== 'new') {
-                    const s = sources.find((x) => x.id === v);
-                    if (s) {
-                      setSourceName(s.source_name);
-                      setCustomerId(s.customer_id ?? null);
-                    }
-                  } else {
-                    setSourceName('');
-                    setCustomerId(null);
-                  }
+              <Label>Customer</Label>
+              <SearchableSelect
+                value={customerId ?? ''}
+                onValueChange={(v) => setCustomerId(v || null)}
+                onOpenChange={(open) => {
+                  if (open) setShowCreateCustomer(false);
                 }}
-              >
-                <SelectTrigger className="w-full max-w-md">
-                  <SelectValue placeholder="Select or create..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="new">New source...</SelectItem>
-                  {sources.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.source_name} {s.times_used > 0 && `(used ${s.times_used}×)`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Select customer…"
+                searchPlaceholder="Search customers…"
+                className="max-w-md"
+                options={customers.map((c) => ({ value: c.id, label: c.name }))}
+              />
             </div>
-            {(sourceId === null || sourceId === 'new') && (
-              <div className="space-y-2">
-                <Label>New source name</Label>
-                <Input
-                  placeholder="e.g. Monthly Job Export"
-                  value={sourceName}
-                  onChange={(e) => setSourceName(e.target.value)}
-                  className="max-w-md"
-                />
+            {!showCreateCustomer ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setShowCreateCustomer(true)}
+              >
+                <Plus className="size-4" />
+                Create new customer
+              </Button>
+            ) : (
+              <div className="relative flex max-w-md flex-col gap-2 rounded-lg border p-3 pt-8 sm:flex-row sm:items-end">
+                <button
+                  type="button"
+                  aria-label="Close create customer"
+                  className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => {
+                    setShowCreateCustomer(false);
+                    setNewCustomerName('');
+                  }}
+                >
+                  <X className="size-4" />
+                </button>
+                <div className="flex-1 space-y-1">
+                  <Label>New customer name</Label>
+                  <Input
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    placeholder="Customer name"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  disabled={creatingCustomer || newCustomerName.trim().length < 2}
+                  onClick={() => void handleCreateCustomer()}
+                >
+                  {creatingCustomer ? <Loader2 className="size-4 animate-spin" /> : 'Create'}
+                </Button>
               </div>
             )}
-            <div className="space-y-2">
-              <Label>Link to customer (optional)</Label>
-              <SearchableSelect
-                value={customerId ?? '__NONE__'}
-                onValueChange={(v) => setCustomerId(v === '__NONE__' ? null : v)}
-                placeholder="No customer"
-                searchPlaceholder="Search customer..."
-                className="max-w-md"
-                options={[
-                  { value: '__NONE__', label: 'No customer' },
-                  ...customers.map((c) => ({ value: c.id, label: c.name })),
-                ]}
-              />
-              <p className="text-sm text-muted-foreground">
-                All jobs from this import will be linked to the selected customer and will appear
-                in their portal.
-              </p>
-            </div>
           </CardContent>
           <CardFooter>
-            <Button onClick={() => setStep(2)} disabled={!canGoStep2} className="gap-2">
+            <Button
+              disabled={!customerId}
+              onClick={() => setStep(2)}
+              className="gap-2"
+            >
               Next <ArrowRight className="size-4" />
             </Button>
           </CardFooter>
         </Card>
       )}
 
-      {/* Step 2: Upload spreadsheet */}
       {step === 2 && (
-        <Card className="glass-card overflow-hidden rounded-2xl border-[var(--glass-border)] bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]">
+        <Card className="glass-card rounded-2xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Upload className="size-5" />
               Upload spreadsheet
             </CardTitle>
             <CardDescription>
-              Drag and drop a CSV or Excel file, or click to browse. We'll detect headers and show a preview.
+              For {selectedCustomer?.name ?? 'customer'}. CSV or Excel — we&apos;ll map columns
+              automatically.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {remappedWarningBanner}
+          <CardContent>
             <div
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const f = e.dataTransfer.files[0];
+                if (f) handleFile(f);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+              }}
               className={cn(
-                'flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-all duration-200',
+                'flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8',
                 isDragging
-                  ? 'border-brand-primary bg-brand-primary/10 shadow-[var(--shadow-glow-sm-value)]'
-                  : 'border-muted-foreground/25 hover:border-brand-primary/50 hover:bg-muted/30'
+                  ? 'border-brand-primary bg-brand-primary/10'
+                  : 'border-muted-foreground/25 hover:border-brand-primary/50'
               )}
               onClick={() => document.getElementById('csv-file-input')?.click()}
             >
@@ -614,358 +724,488 @@ export function ImportWizard({ tenantId, initialSources, customers }: ImportWiza
                   if (f) handleFile(f);
                 }}
               />
-              <Upload className="size-10 text-muted-foreground" />
-              <p className="mt-2 text-sm font-medium text-foreground">
-                {csvFile ? csvFile.name : 'Drop file here or click to browse'}
+              {isAiMapping ? (
+                <Loader2 className="size-10 animate-spin text-muted-foreground" />
+              ) : (
+                <Upload className="size-10 text-muted-foreground" />
+              )}
+              <p className="mt-2 text-sm font-medium">
+                {isAiMapping
+                  ? 'Mapping columns…'
+                  : csvFile
+                    ? csvFile.name
+                    : 'Drop file here or click to browse'}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">.csv or .xlsx</p>
             </div>
-            {previewData.length > 0 && (
-              <div className="space-y-2">
-                <Label>Preview (first 3 rows)</Label>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {csvHeaders.map((h) => (
-                          <TableHead key={h} className="whitespace-nowrap">
-                            {h}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {previewData.slice(0, 3).map((row, i) => (
-                        <TableRow key={i}>
-                          {csvHeaders.map((h) => (
-                            <TableCell key={h} className="max-w-[200px] truncate">
-                              {row[h] ?? ''}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            )}
           </CardContent>
-          <CardFooter className="flex gap-2">
+          <CardFooter className="gap-2">
             <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
               <ArrowLeft className="size-4" /> Back
             </Button>
-            <Button
-              onClick={goToMappingOrPreview}
-              disabled={!canGoStep3 || isAiMapping}
-              className="gap-2"
-            >
-              Next <ArrowRight className="size-4" />
-            </Button>
           </CardFooter>
         </Card>
       )}
 
-      {/* Step 3: Column Mapping */}
       {step === 3 && (
-        <Card className="glass-card overflow-hidden rounded-2xl border-[var(--glass-border)] bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]">
+        <Card className="glass-card rounded-2xl">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MapPin className="size-5" />
-              Map columns
-            </CardTitle>
+            <CardTitle>Review & import</CardTitle>
             <CardDescription>
-              {hasSavedMapping && !showRemap
-                ? 'Saved mapping is applied. Remap if this file has different columns.'
-                : 'Let AI suggest mappings or choose manually.'}
+              Check a sample of jobs for {selectedCustomer?.name}. Fix mapping if anything looks
+              wrong.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {hasSavedMapping && !showRemap && (
-              <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
-                <p className="text-sm text-muted-foreground">
-                  Saved mapping and value transforms are applied for this source.
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (selectedSource) applySavedSourceMapping(selectedSource);
-                      setShowRemap(true);
-                    }}
-                  >
-                    Remap columns
-                  </Button>
-                </div>
+          <CardContent className="space-y-4">
+            {headersChanged && (
+              <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm">
+                This spreadsheet&apos;s columns changed since the last import for this customer.
+                We&apos;ve remapped it — review before importing. The new layout is saved when
+                import succeeds.
               </div>
             )}
-            {(showRemap || !hasSavedMapping) && (
-              <>
-                <div className="flex items-center gap-4">
-                  <Button
-                    variant="gradient"
-                    size="lg"
-                    onClick={handleAiMapping}
-                    disabled={isAiMapping || !csvHeaders.length}
-                    className="gap-2"
-                  >
-                    {isAiMapping ? (
-                      <Loader2 className="size-5 animate-spin" />
-                    ) : (
-                      <Sparkles className="size-5" />
-                    )}
-                    AI map columns
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    We'll match your CSV headers to our job fields.
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  <Label>Manual mapping</Label>
-                  <div className="overflow-hidden rounded-lg border border-border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Our field</TableHead>
-                          <TableHead className="w-12" />
-                          <TableHead>CSV column</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {SCHEMA_FIELDS.map(({ key, label }) => (
-                          <TableRow key={key} className={cn(key !== 'priority' && 'bg-muted/20')}>
-                            <TableCell className="font-medium">
-                              {label}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">←</TableCell>
-                            <TableCell>
-                              {key === 'priority' ? (
-                                <Select
-                                  value={columnMapping[key] ?? '__default__'}
-                                  onValueChange={(v) =>
-                                    setColumnMapping((m) =>
-                                      v === '__default__'
-                                        ? (() => {
-                                            const next = { ...m };
-                                            delete next.priority;
-                                            return next;
-                                          })()
-                                        : { ...m, priority: v }
-                                    )
-                                  }
-                                >
-                                  <SelectTrigger className="w-full max-w-[200px]">
-                                    <SelectValue placeholder="Default: normal" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__default__">Default: normal</SelectItem>
-                                    {PRIORITY_OPTIONS.map((p) => (
-                                      <SelectItem key={p} value={p}>
-                                        {p}
-                                      </SelectItem>
-                                    ))}
-                                    {csvHeaders.map((h) => (
-                                      <SelectItem key={h} value={h}>
-                                        From CSV: {h}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : (
-                                <Select
-                                  value={columnMapping[key] ?? '__NONE__'}
-                                  onValueChange={(v) =>
-                                    setColumnMapping((m) => {
-                                      const next = { ...m };
-                                      if (v && v !== '__NONE__') next[key] = v;
-                                      else delete next[key];
-                                      return next;
-                                    })
-                                  }
-                                >
-                                  <SelectTrigger className="w-full max-w-[200px]">
-                                    <SelectValue placeholder="Select column..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__NONE__">— None —</SelectItem>
-                                    {csvHeaders.map((h) => (
-                                      <SelectItem key={h} value={h}>
-                                        {h}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </>
+            {isAiMapping && (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Mapping columns…
+              </p>
             )}
-          </CardContent>
-          <CardFooter className="flex gap-2">
-            <Button variant="outline" onClick={() => setStep(2)} className="gap-2">
-              <ArrowLeft className="size-4" /> Back
-            </Button>
-            {(!hasSavedMapping || showRemap) && (
-              <Button
-                onClick={() => setStep(4)}
-                className="gap-2"
-              >
-                Next <ArrowRight className="size-4" />
-              </Button>
+            {isResolvingFields && (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Cleaning dates, postcodes & job
+                lengths…
+              </p>
             )}
-          </CardFooter>
-        </Card>
-      )}
-
-      {/* Step 4: Preview & Import */}
-      {step === 4 && (
-        <Card className="glass-card overflow-hidden rounded-2xl border-[var(--glass-border)] bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]">
-          <CardHeader>
-            <CardTitle>Preview & import</CardTitle>
-            <CardDescription>
-              First 10 rows mapped to our schema. All rows must pass validation before import.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {remappedWarningBanner}
-              <div className="max-h-[400px] overflow-auto rounded-lg border border-border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10" />
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Address</TableHead>
-                      <TableHead>Postcode</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead>Job length</TableHead>
-                      <TableHead>Issues</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mappedPreviewRows.map(({ mapped, validation }, i) => (
-                      <TableRow
-                        key={i}
-                        className={cn(!validation.valid && 'bg-destructive/10')}
-                      >
-                        <TableCell>
-                          {validation.valid ? (
-                            <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+            {previewExtrasKeys.length > 0 && (
+              <p className="text-sm text-muted-foreground">
+                Unmapped columns are stored with each job. After import you&apos;ll
+                be able to search and filter by them — hover the info icon on a row
+                to see which fields that job will keep. Description becomes a short
+                summary, not a spreadsheet dump.
+              </p>
+            )}
+            <div className="max-h-[400px] overflow-auto rounded-lg border">
+              <SourceFieldsPeekProvider>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10" />
+                    <TableHead>Address</TableHead>
+                    <TableHead>Postcode</TableHead>
+                    <TableHead>Scheduled date</TableHead>
+                    <TableHead>Job length</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead>Stored fields</TableHead>
+                    <TableHead>Issues</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {mappedPreviewRows.map((prepared, i) => {
+                    const extraCount = Object.keys(prepared.sourceFields).length;
+                    return (
+                    <TableRow
+                      key={i}
+                      className={cn(
+                        !prepared.ok && 'bg-destructive/10',
+                        prepared.ok && prepared.warnings.length > 0 && 'bg-amber-500/10'
+                      )}
+                    >
+                      <TableCell>
+                        {prepared.ok ? (
+                          prepared.warnings.length > 0 ? (
+                            <span className="inline-block size-2 rounded-full bg-amber-500" />
                           ) : (
-                            <span className="inline-block size-2 rounded-full bg-destructive" />
-                          )}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate">{mapped.customer_name}</TableCell>
-                        <TableCell className="max-w-[180px] truncate">{mapped.address}</TableCell>
-                        <TableCell>{mapped.postcode}</TableCell>
-                        <TableCell className="max-w-[200px] truncate">{mapped.description}</TableCell>
-                        <TableCell>{mapped.priority}</TableCell>
-                        <TableCell>
-                          {mapped.job_length === 'half_day'
-                            ? 'Half day'
-                            : mapped.job_length === 'full_day'
-                              ? 'Full day'
-                              : '—'}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {!validation.valid && (
-                            <span className="text-destructive">{validation.reasons.join(', ')}</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                            <CheckCircle2 className="size-4 text-green-600" />
+                          )
+                        ) : (
+                          <span className="inline-block size-2 rounded-full bg-destructive" />
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate">{prepared.address}</TableCell>
+                      <TableCell>{prepared.postcode || prepared.rawPostcode || '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {isScheduledDateMapped(columnMapping)
+                          ? prepared.scheduledDate || prepared.rawScheduledDate || '—'
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {isJobLengthMapped(columnMapping)
+                          ? prepared.jobLength || prepared.rawJobLength || '—'
+                          : prepared.jobLength || '—'}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-sm">
+                        {prepared.mappedDescription.trim() ||
+                          (extraCount > 0 ? '(summary on import)' : '—')}
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <SourceFieldsPeek sourceFields={prepared.sourceFields} />
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {!prepared.ok && (
+                          <span className="text-destructive">{prepared.errors.join(', ')}</span>
+                        )}
+                        {prepared.ok && prepared.warnings.length > 0 && (
+                          <span className="text-amber-700 dark:text-amber-300">
+                            {prepared.warnings.join(', ')}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              </SourceFieldsPeekProvider>
+            </div>
 
-              <fieldset className="space-y-3 rounded-lg border border-border p-4">
-                <legend className="px-1 text-sm font-medium">After import</legend>
-                <label
-                  className={cn(
-                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
-                    autoAllocate
-                      ? 'border-brand-primary/50 bg-brand-primary/5'
-                      : 'border-border hover:bg-muted/40'
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="import-allocate"
-                    className="mt-1"
-                    checked={autoAllocate}
-                    onChange={() => setAutoAllocate(true)}
-                    disabled={isImporting}
-                  />
-                  <span className="space-y-0.5">
-                    <span className="block text-sm font-medium">Auto-allocate to workers</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Assign imported jobs by skills, location, and availability (recommended).
-                    </span>
+            <fieldset className="space-y-3 rounded-lg border p-4">
+              <legend className="px-1 text-sm font-medium">After import</legend>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  className="mt-1"
+                  checked={autoAllocate}
+                  onChange={() => setAutoAllocate(true)}
+                  disabled={isImporting}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Auto-allocate to workers</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Assign by skills, location, and availability
                   </span>
-                </label>
-                <label
-                  className={cn(
-                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
-                    !autoAllocate
-                      ? 'border-brand-primary/50 bg-brand-primary/5'
-                      : 'border-border hover:bg-muted/40'
-                  )}
-                >
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  className="mt-1"
+                  checked={!autoAllocate}
+                  onChange={() => setAutoAllocate(false)}
+                  disabled={isImporting}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Import only — assign manually</span>
+                </span>
+              </label>
+            </fieldset>
+
+            {!importRowStats.coreMapped && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+                <p className="font-medium text-destructive">Address and Postcode must be mapped</p>
+                <p className="mt-1 text-muted-foreground">
+                  Unmapped postcode blocks the whole import (we won&apos;t guess a postcode
+                  column). Use Adjust mapping, then Apply &amp; review.
+                </p>
+              </div>
+            )}
+
+            {importRowStats.hasInvalidRows && importRowStats.coreMapped && (
+              <fieldset className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+                <legend className="px-1 text-sm font-medium text-amber-900 dark:text-amber-100">
+                  {importRowStats.invalidCount} row
+                  {importRowStats.invalidCount === 1 ? '' : 's'} can&apos;t be imported
+                </legend>
+                <p className="text-sm text-muted-foreground">
+                  By default the whole file is blocked so you can fix the spreadsheet and import
+                  everything together. Tick below only if you&apos;re happy to import the{' '}
+                  {importRowStats.readyCount} valid row
+                  {importRowStats.readyCount === 1 ? '' : 's'} and add the rest manually later.
+                </p>
+                <label className="flex cursor-pointer items-start gap-3">
                   <input
-                    type="radio"
-                    name="import-allocate"
+                    type="checkbox"
                     className="mt-1"
-                    checked={!autoAllocate}
-                    onChange={() => setAutoAllocate(false)}
-                    disabled={isImporting}
+                    checked={allowPartialImport}
+                    onChange={(e) => setAllowPartialImport(e.target.checked)}
+                    disabled={isImporting || importRowStats.readyCount === 0}
                   />
-                  <span className="space-y-0.5">
-                    <span className="block text-sm font-medium">Import only — assign manually</span>
+                  <span className="text-sm">
+                    <span className="font-medium">
+                      Import the {importRowStats.readyCount} valid row
+                      {importRowStats.readyCount === 1 ? '' : 's'} only
+                    </span>
                     <span className="block text-xs text-muted-foreground">
-                      Create jobs unassigned; allocate them yourself from the Jobs list.
+                      I&apos;ll add the skipped jobs manually later
                     </span>
                   </span>
                 </label>
               </fieldset>
-            </div>
+            )}
           </CardContent>
           <CardFooter className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1 text-sm">
               <p className="text-muted-foreground">
-                {importRowStats.readyCount} of {csvData.length} rows ready to import
+                {importRowStats.readyCount} of {csvData.length} rows ready
               </p>
-              {importRowStats.hasInvalidRows && (
-                <p className="text-amber-600 dark:text-amber-400">
-                  {importRowStats.invalidCount} row{importRowStats.invalidCount === 1 ? '' : 's'}{' '}
-                  have missing required fields and will be skipped
+              {importRowStats.hasInvalidRows && !allowPartialImport && importRowStats.coreMapped && (
+                <p className="text-amber-700 dark:text-amber-300">
+                  Import blocked until every row is valid, or you opt in to a partial import
                 </p>
               )}
+              {!importRowStats.coreMapped && (
+                <p className="text-destructive">Map Address and Postcode to import</p>
+              )}
+              {importRowStats.hasInvalidRows && allowPartialImport && (
+                <p className="text-amber-700 dark:text-amber-300">
+                  Partial import: {importRowStats.invalidCount} row
+                  {importRowStats.invalidCount === 1 ? '' : 's'} will be skipped
+                </p>
+              )}
+              {importRowStats.pendingFieldCount > 0 && (
+                <p className="text-muted-foreground">Cleaning fields before import…</p>
+              )}
             </div>
-            <div className="flex gap-4">
-            <Button variant="outline" onClick={() => setStep(3)} className="gap-2">
-              <ArrowLeft className="size-4" /> Back
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setStep(2)}>
+                <ArrowLeft className="size-4" /> Back
+              </Button>
+              <Button variant="outline" onClick={() => setStep('adjust')} className="gap-2">
+                <MapPin className="size-4" />
+                Adjust mapping
+              </Button>
+              <Button
+                variant="gradient"
+                disabled={
+                  isImporting ||
+                  importRowStats.readyCount === 0 ||
+                  isAiMapping ||
+                  isResolvingFields ||
+                  !fieldsReady ||
+                  !importRowStats.coreMapped ||
+                  (importRowStats.hasInvalidRows && !allowPartialImport)
+                }
+                onClick={() => void handleImport()}
+                className="gap-2"
+              >
+                {isImporting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <Upload className="size-5" />
+                )}
+                {!importRowStats.coreMapped
+                  ? 'Map address & postcode'
+                  : importRowStats.hasInvalidRows && !allowPartialImport
+                    ? 'Fix rows to import'
+                    : autoAllocate
+                      ? `Import & allocate ${importRowStats.readyCount}`
+                      : `Import ${importRowStats.readyCount}`}
+              </Button>
+            </div>
+          </CardFooter>
+        </Card>
+      )}
+
+      {step === 'adjust' && (
+        <Card className="glass-card rounded-2xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="size-5" />
+              Adjust column mapping
+            </CardTitle>
+            <CardDescription>
+              Match spreadsheet columns to WorkWise fields. Unmapped columns are kept in
+              source fields; description becomes a short summary on import.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <Button
               variant="gradient"
-              onClick={handleImport}
-              disabled={isImporting || importRowStats.hasInvalidRows}
+              onClick={() => void runAiMapping(csvHeaders, csvData)}
+              disabled={isAiMapping}
               className="gap-2"
             >
-              {isImporting ? (
+              {isAiMapping ? (
                 <Loader2 className="size-5 animate-spin" />
               ) : (
-                <Upload className="size-5" />
+                <Sparkles className="size-5" />
               )}
-              {autoAllocate
-                ? `Import & allocate ${csvData.length} jobs`
-                : `Import ${csvData.length} jobs`}
+              AI map columns
             </Button>
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Our field</TableHead>
+                    <TableHead className="w-12" />
+                    <TableHead>CSV column</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {SCHEMA_FIELDS.map(({ key, label }) => (
+                    <TableRow key={key}>
+                      <TableCell className="font-medium">{label}</TableCell>
+                      <TableCell className="text-muted-foreground">←</TableCell>
+                      <TableCell>
+                        {key === 'priority' ? (
+                          <Select
+                            value={columnMapping[key] ?? '__default__'}
+                            onValueChange={(v) =>
+                              setColumnMapping((m) => {
+                                if (v === '__default__') {
+                                  const next = { ...m };
+                                  delete next.priority;
+                                  return next;
+                                }
+                                return { ...m, priority: v };
+                              })
+                            }
+                          >
+                            <SelectTrigger className="max-w-[220px]">
+                              <SelectValue placeholder="Default: normal" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__default__">Default: normal</SelectItem>
+                              {PRIORITY_OPTIONS.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {p}
+                                </SelectItem>
+                              ))}
+                              {csvHeaders.map((h) => (
+                                <SelectItem key={h} value={h}>
+                                  From CSV: {h}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Select
+                            value={columnMapping[key] ?? '__NONE__'}
+                            onValueChange={(v) =>
+                              setColumnMapping((m) => {
+                                const next = { ...m };
+                                if (v && v !== '__NONE__') next[key] = v;
+                                else delete next[key];
+                                return next;
+                              })
+                            }
+                          >
+                            <SelectTrigger className="max-w-[220px]">
+                              <SelectValue placeholder="Not mapped" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__NONE__">Not mapped</SelectItem>
+                              {csvHeaders.map((h) => (
+                                <SelectItem key={h} value={h}>
+                                  {h}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
+          </CardContent>
+          <CardFooter className="gap-2">
+            <Button variant="gradient" onClick={applyMappingAndReview} className="gap-2">
+              Apply &amp; review
+              <ArrowRight className="size-4" />
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
+      {step === 'done' && importResult && importResult.ok && (
+        <Card className="glass-card rounded-2xl border-green-500/30">
+          <CardHeader className="relative pr-10">
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={resetWizard}
+            >
+              <X className="size-4" />
+            </button>
+            <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-400">
+              <CheckCircle2 className="size-5" />
+              Import complete
+            </CardTitle>
+            <CardDescription>Results stay here until you dismiss them.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p>
+              Imported <strong>{importResult.count}</strong> job
+              {importResult.count === 1 ? '' : 's'}
+              {importResult.autoAllocate
+                ? ` · ${importResult.assignedCount} assigned · ${importResult.unassignedCount} need manual assignment`
+                : ' · assign them from the Jobs list'}
+              .
+            </p>
+            <p className="text-muted-foreground">
+              Column mapping for {selectedCustomer?.name ?? 'this customer'} was saved for next
+              time.
+            </p>
+            {importResult.errors.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="font-medium text-amber-900 dark:text-amber-100">
+                  {importResult.errors.length} row warning
+                  {importResult.errors.length === 1 ? '' : 's'}
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-950/90 dark:text-amber-50/90">
+                  {importResult.errors.slice(0, 12).map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+                {importResult.errors.length > 12 && (
+                  <p className="mt-1 text-xs">…and {importResult.errors.length - 12} more</p>
+                )}
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="gap-2">
+            <Button variant="gradient" asChild>
+              <a href="/jobs">Go to Jobs</a>
+            </Button>
+            <Button variant="outline" onClick={resetWizard}>
+              Import another file
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
+      {step === 'done' && importResult && !importResult.ok && (
+        <Card className="glass-card rounded-2xl border-destructive/40">
+          <CardHeader className="relative pr-10">
+            <button
+              type="button"
+              aria-label="Close"
+              className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={dismissImportResult}
+            >
+              <X className="size-4" />
+            </button>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="size-5" />
+              Import failed
+            </CardTitle>
+            <CardDescription>
+              Nothing was saved for next time — fix the issues and try again. This stays until
+              you close it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p>{importResult.errorMessage ?? 'No jobs were imported.'}</p>
+            {importResult.errors.length > 0 && (
+              <ul className="max-h-48 list-disc space-y-1 overflow-auto pl-5 text-muted-foreground">
+                {importResult.errors.slice(0, 20).map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            )}
+            {importResult.errors.length > 20 && (
+              <p className="text-xs text-muted-foreground">
+                …and {importResult.errors.length - 20} more
+              </p>
+            )}
+          </CardContent>
+          <CardFooter className="gap-2">
+            <Button variant="outline" onClick={dismissImportResult}>
+              Back to review
+            </Button>
+            <Button variant="outline" onClick={resetWizard}>
+              Start over
+            </Button>
           </CardFooter>
         </Card>
       )}

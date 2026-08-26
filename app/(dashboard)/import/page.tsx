@@ -1,15 +1,11 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { getImportSourcesForTenant } from '@/lib/data/import-sources';
 import { getCustomersForImport } from '@/lib/data/customers';
 import { ImportWizard } from '@/components/import/import-wizard';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 export default async function ImportPage() {
   const tenantId = await getTenantIdForCurrentUser();
-  const [{ sources }, { customers }] = await Promise.all([
-    getImportSourcesForTenant(tenantId ?? ''),
-    getCustomersForImport(tenantId ?? ''),
-  ]);
+  const { customers } = await getCustomersForImport(tenantId ?? '');
 
   if (!tenantId) {
     return (
@@ -26,9 +22,9 @@ export default async function ImportPage() {
     <div className="space-y-6">
       <PageGradientHeader
         title="Import Jobs"
-        subtitle="Upload CSV and map columns with AI or manually. Save mappings to reuse."
+        subtitle="Choose a customer, upload their spreadsheet, review the jobs, then import."
       />
-      <ImportWizard tenantId={tenantId} initialSources={sources} customers={customers} />
+      <ImportWizard tenantId={tenantId} customers={customers} />
     </div>
   );
 }

@@ -28,30 +28,7 @@ interface PendingSendJobsBannerProps {
 }
 
 const UNASSIGNED_KEY = '__unassigned__';
-
-/**
- * Imported job descriptions arrive as pipe-delimited key/value strings, e.g.
- * `Cylinder Lock | Contract : EDF | W/O Mobile : 07579 837680 | ...`.
- * The leading segment is the job type; the rest is metadata that would swamp
- * the dialog if shown raw. Manually-created jobs are freeform, so they fall
- * through unchanged.
- */
-function parseDescription(description: string | null): {
-  jobType: string | null;
-  detail: string | null;
-} {
-  const trimmed = description?.trim();
-  if (!trimmed) return { jobType: null, detail: null };
-
-  if (!trimmed.includes('|')) {
-    return { jobType: trimmed, detail: null };
-  }
-
-  const [first, ...rest] = trimmed.split('|').map((part) => part.trim()).filter(Boolean);
-  const jobType = first && first.toLowerCase() !== 'unknown' ? first : null;
-  const detail = rest.length > 0 ? rest.join(' · ') : null;
-  return { jobType, detail };
-}
+const MAX_SOURCE_CHIPS = 4;
 
 export function PendingSendJobsBanner({
   jobs,
@@ -115,20 +92,20 @@ export function PendingSendJobsBanner({
     <>
       <div
         className={cn(
-          'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 shadow-[0_0_24px_-8px_rgba(6,182,212,0.35)]',
+          'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-400/35 bg-cyan-500/8 px-4 py-3',
           'dark:border-cyan-400/25 dark:bg-cyan-500/5',
           className
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-cyan-500/25 dark:bg-cyan-500/10">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-cyan-500/20 dark:bg-cyan-500/10">
             <RadioTower className="size-5 text-cyan-800 dark:text-cyan-300" />
           </div>
           <div>
             <p className="font-medium text-cyan-950 dark:text-cyan-100">
-              {count} job{count === 1 ? '' : 's'} ready to send — Review and send to workers
+              {count} job{count === 1 ? '' : 's'} ready to send
             </p>
-            <p className="text-sm text-cyan-900/90 dark:text-cyan-200/85">
+            <p className="text-sm text-cyan-900/85 dark:text-cyan-200/80">
               Workers are assigned but have not been notified in the app yet.
             </p>
           </div>
@@ -173,13 +150,22 @@ export function PendingSendJobsBanner({
 
                 <ul className="divide-y divide-border/40">
                   {group.jobs.map((job) => {
-                    const { jobType, detail } = parseDescription(job.job_description);
                     const location = [job.address, job.postcode].filter(Boolean).join(', ');
+                    const summary = job.job_description?.trim() || null;
+                    const sourceEntries = Object.entries(job.source_fields ?? {})
+                      .sort(([a], [b]) =>
+                        a.localeCompare(b, undefined, { sensitivity: 'base' })
+                      )
+                      .slice(0, MAX_SOURCE_CHIPS);
                     return (
                       <li key={job.id} className="space-y-1.5 px-3 py-2.5">
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                           <span className="font-medium text-foreground">
-                            {jobType ?? 'Job'}
+                            {summary
+                              ? summary.length > 80
+                                ? `${summary.slice(0, 77)}…`
+                                : summary
+                              : 'Job'}
                           </span>
                           <span className="font-mono text-xs text-muted-foreground">
                             {job.reference_number ?? job.id.slice(0, 8)}
@@ -193,8 +179,19 @@ export function PendingSendJobsBanner({
                           </p>
                         )}
 
-                        {detail && (
-                          <p className="line-clamp-1 text-xs text-muted-foreground/80">{detail}</p>
+                        {sourceEntries.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-0.5">
+                            {sourceEntries.map(([key, value]) => (
+                              <span
+                                key={key}
+                                title={`${key}: ${value}`}
+                                className="inline-flex max-w-[200px] truncate rounded-md border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                              >
+                                <span className="font-medium text-foreground/80">{key}:</span>{' '}
+                                {value}
+                              </span>
+                            ))}
+                          </div>
                         )}
 
                         {job.required_skills.length > 0 ? (

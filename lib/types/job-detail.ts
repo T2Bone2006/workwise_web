@@ -35,6 +35,8 @@ export interface JobDetailJob {
   customer: JobDetailCustomer | null;
   worker: JobDetailWorker | null;
   required_skills?: string[];
+  /** Extra spreadsheet columns from import. */
+  source_fields?: Record<string, string>;
 }
 
 export interface JobStatusHistoryEntry {

@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { Briefcase, CheckCircle2, CircleDashed, PauseCircle } from 'lucide-react';
+import {
+  Briefcase,
+  CheckCircle2,
+  CircleDashed,
+  PauseCircle,
+  RadioTower,
+  UserCheck,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardJobStatCards } from '@/lib/data/dashboard';
 
@@ -13,36 +20,50 @@ const STAT_DEFS: {
   {
     key: 'activeJobs',
     title: 'Active',
-    href: '/jobs?status=in_progress',
+    href: '/jobs?f0=status&v0=in_progress',
     icon: Briefcase,
     glow: 'rgb(59 130 246)',
   },
   {
     key: 'completedToday',
     title: 'Completed Today',
-    href: '/jobs?status=completed',
+    href: '/jobs?f0=status&v0=completed',
     icon: CheckCircle2,
     glow: 'rgb(16 185 129)',
   },
   {
     key: 'notStarted',
     title: 'Not Started',
-    href: '/jobs?status=pending',
+    href: '/jobs?f0=status&v0=pending',
     icon: CircleDashed,
+    glow: 'rgb(100 116 139)',
+  },
+  {
+    key: 'readyToSend',
+    title: 'Ready to send',
+    href: '/jobs?f0=status&v0=pending_send',
+    icon: RadioTower,
+    glow: 'rgb(6 182 212)',
+  },
+  {
+    key: 'assigned',
+    title: 'Assigned',
+    href: '/jobs?f0=status&v0=assigned',
+    icon: UserCheck,
     glow: 'rgb(245 158 11)',
   },
   {
     key: 'paused',
     title: 'Paused',
-    href: '/jobs?status=assigned',
+    href: '/jobs?f0=status&v0=paused',
     icon: PauseCircle,
-    glow: 'rgb(139 92 246)',
+    glow: 'rgb(180 83 9)',
   },
 ];
 
 export function DashboardStatCards({ stats }: { stats: DashboardJobStatCards }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {STAT_DEFS.map(({ key, title, href, icon: Icon, glow }) => (
         <Link
           key={key}

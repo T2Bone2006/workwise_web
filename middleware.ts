@@ -2,6 +2,7 @@ import { updateSession } from '@/lib/supabase/middleware';
 import {
   WORKER_WEB_LOGIN_ERROR_PARAM,
 } from '@/lib/auth/worker-web-access';
+import { VIEW_AS_TENANT_COOKIE } from '@/lib/impersonation/constants';
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -48,9 +49,24 @@ function isWorkerAllowedPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Allow all /api routes without redirect
+  // Allow all /api routes without redirect (view-as start/stop handle their own auth)
   if (pathname.startsWith('/api')) {
     return NextResponse.next();
+  }
+
+  // Read-only while platform admin is viewing as a client: block Server Actions
+  const viewAsTenant = request.cookies.get(VIEW_AS_TENANT_COOKIE)?.value;
+  const isServerAction =
+    request.method === 'POST' &&
+    (request.headers.has('next-action') || request.headers.has('Next-Action'));
+  if (viewAsTenant && isServerAction) {
+    return NextResponse.json(
+      {
+        error:
+          'Read-only while viewing as a client. Exit view-as mode to make changes.',
+      },
+      { status: 403 }
+    );
   }
 
   if (isUnprotectedPath(pathname)) {

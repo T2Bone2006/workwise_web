@@ -61,13 +61,15 @@ export async function updateSession(request: NextRequest): Promise<UpdateSession
 
   let user: { id: string } | null = null;
   try {
-    // getClaims() verifies the JWT locally against a cached JWKS (this project
-    // uses asymmetric signing keys) instead of getUser()'s per-request round
-    // trip to the Auth server, while still refreshing an expiring session via
-    // the same cookie adapter.
-    const { data } = await supabase.auth.getClaims();
-    if (data?.claims.sub) {
-      user = { id: data.claims.sub };
+    // Use getUser() (not getClaims()) so middleware matches Server Components.
+    // getClaims() only verifies the JWT locally — after logout in another tab the
+    // access token can still look valid while getUser() correctly reports no session,
+    // which caused /login ↔ /dashboard redirect loops.
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    if (authUser?.id) {
+      user = { id: authUser.id };
     }
   } catch {
     // Session refresh can fail (e.g. invalid token). Continue with the response

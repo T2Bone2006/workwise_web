@@ -5,13 +5,19 @@ import {
   getUnassignedJobsCountForTenant,
   getJobsStatusSummary,
   getPendingSendJobsForTenant,
-  getCustomerJobCounts,
   getImportBatchesForTenant,
+  getSourceFieldKeysForTenant,
+  getFieldFilterValuesForTenant,
   type JobsFilters,
   type JobStatus,
   type JobPriority,
-  type CustomerJobCount,
 } from '@/lib/data/jobs';
+import {
+  SYSTEM_FILTER_FIELDS,
+  encodeSourceFieldFilter,
+  parseFieldFiltersFromSearchParams,
+  type FieldFilterValueOption,
+} from '@/lib/jobs/field-filter';
 import { JobsTable } from '@/components/jobs/jobs-table';
 import { JobsForReviewBanner } from '@/components/jobs/jobs-for-review-banner';
 import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banner';
@@ -31,6 +37,18 @@ interface JobsPageProps {
     sort_dir?: string;
     view?: string;
     batchId?: string;
+    field?: string;
+    value?: string;
+    f0?: string;
+    v0?: string;
+    f1?: string;
+    v1?: string;
+    f2?: string;
+    v2?: string;
+    f3?: string;
+    v3?: string;
+    f4?: string;
+    v4?: string;
     error?: string;
   }>;
 }
@@ -73,6 +91,7 @@ function parseSearchParams(
       : undefined;
   const sort_dir = raw.sort_dir === 'asc' || raw.sort_dir === 'desc' ? raw.sort_dir : undefined;
   const view = raw.view === 'batches' ? raw.view : 'list';
+  const field_filters = parseFieldFiltersFromSearchParams(raw);
   return {
     search: raw.search?.trim() || undefined,
     status,
@@ -80,6 +99,7 @@ function parseSearchParams(
     customer_id: raw.customer_id?.trim() || undefined,
     date_from: raw.date_from?.trim() || undefined,
     date_to: raw.date_to?.trim() || undefined,
+    field_filters: field_filters.length > 0 ? field_filters : undefined,
     sort,
     sort_dir,
     page,
@@ -139,17 +159,44 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       { count: unassignedCount },
       statusSummary,
       { jobs: pendingSendJobs },
-      customerJobCountsResult,
       batchesResult,
       tenantSkills,
+      sourceKeysResult,
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
       getPendingSendJobsForTenant(tenantId),
-      getCustomerJobCounts(tenantId),
       getImportBatchesForTenant(tenantId),
       getTenantSkills(tenantId),
+      getSourceFieldKeysForTenant(tenantId),
     ]);
+
+    const fieldFilterOptions = [
+      ...SYSTEM_FILTER_FIELDS.map((f) => ({
+        value: f.key,
+        label: f.label,
+        group: 'System',
+      })),
+      ...(sourceKeysResult.keys ?? []).map((key) => ({
+        value: encodeSourceFieldFilter(key),
+        label: key,
+        group: 'Stored fields',
+      })),
+    ];
+
+    let fieldFilterValuesByField: Record<string, FieldFilterValueOption[]> = {};
+    const fieldsNeedingValues = [
+      ...new Set((filters.field_filters ?? []).map((f) => f.field)),
+    ];
+    if (fieldsNeedingValues.length > 0) {
+      const entries = await Promise.all(
+        fieldsNeedingValues.map(async (field) => {
+          const valuesResult = await getFieldFilterValuesForTenant(tenantId, field);
+          return [field, valuesResult.values] as const;
+        })
+      );
+      fieldFilterValuesByField = Object.fromEntries(entries);
+    }
 
     const activeBatch = activeBatchId
       ? batchesResult.batches.find((batch) => batch.id === activeBatchId) ?? null
@@ -168,19 +215,16 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
 
     const redirectError = rawParams.error ?? null;
-    const customerFilterOptions: CustomerJobCount[] = customerJobCountsResult.error
-      ? []
-      : customerJobCountsResult.customers;
 
     return (
       <div className="space-y-6">
         <JobsPageErrorToast error={redirectError} />
-        <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
-        <JobsForReviewBanner count={unassignedCount} />
         <PageGradientHeader
           title="Jobs"
           subtitle="Manage and track all your jobs"
         />
+        <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+        <JobsForReviewBanner count={unassignedCount} />
 
         <JobsTable
           initialJobs={Array.isArray(jobs) ? jobs : []}
@@ -188,9 +232,10 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           initialFilters={jobsFilters}
           fetchError={error}
           statusSummary={statusSummary}
-          customerFilterOptions={customerFilterOptions}
           batches={batchesResult.error ? [] : batchesResult.batches}
           activeBatchId={activeBatchId}
+          fieldFilterOptions={fieldFilterOptions}
+          fieldFilterValuesByField={fieldFilterValuesByField}
         />
       </div>
     );

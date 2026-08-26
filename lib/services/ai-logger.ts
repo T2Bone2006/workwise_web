@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { DEFAULT_AI_MODEL } from '@/lib/ai/model';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -13,13 +14,16 @@ export interface AICallParams {
     | 'quote_generation'
     | 'column_mapping'
     | 'value_transformation'
-    | 'worker_interview_parsing';
+    | 'worker_interview_parsing'
+    | 'date_parsing'
+    | 'description_summary';
   prompt: string;
   inputData: Record<string, unknown>;
   jobId?: string;
   workerId?: string;
   quoteId?: string;
   importSourceId?: string;
+  /** Override only for rare experiments; prefer DEFAULT_AI_MODEL / ANTHROPIC_MODEL. */
   model?: string;
   max_tokens?: number;
 }
@@ -32,17 +36,12 @@ export interface AICallResult<T> {
 }
 
 /**
- * Default model for AI calls. Overridable via env so a retired model is a
- * config change, not a code change — the previous hardcoded
- * `claude-sonnet-4-20250514` was retired and returned 404, which silently
- * disabled every AI feature (skill detection returned [] for every job).
- *
+ * Default model comes from `@/lib/ai/model` (ANTHROPIC_MODEL or Haiku).
  * Haiku is the default because these calls are constrained classification
- * (pick matching keys from a supplied list), which it handles as accurately
- * as larger models at roughly a fifth of the cost — and this runs once per
- * imported job, so volume is high.
+ * at much lower cost than larger models, and volume can be high (e.g. skills).
+ * Do not re-export DEFAULT_AI_MODEL from this file — 'use server' modules
+ * may only export async server actions.
  */
-const DEFAULT_AI_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-haiku-4-5';
 
 export async function callAIWithLogging<T>(
   params: AICallParams,

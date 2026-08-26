@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Plus,
   Search,
@@ -20,6 +20,11 @@ import {
   Check,
   X,
   Trash2,
+  CircleDashed,
+  RadioTower,
+  PauseCircle,
+  CheckCircle2,
+  UserCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -40,13 +45,23 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-  type CustomerJobCount,
   type ImportBatchRow,
   type JobRow,
   type JobsFilters,
   type JobStatus,
   type JobsStatusSummary,
 } from '@/lib/data/jobs';
+import type { FieldFilterValueOption } from '@/lib/jobs/field-filter';
+import {
+  MAX_FIELD_FILTERS,
+  writeFieldFiltersToSearchParams,
+} from '@/lib/jobs/field-filter';
+import type { SearchableSelectOption } from '@/components/ui/searchable-select';
+import { fetchFieldFilterValuesAction } from '@/lib/actions/jobs-field-filter';
+import {
+  jobDetailHref,
+  rememberJobsListState,
+} from '@/lib/jobs/jobs-list-query';
 import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
 import {
   Dialog,
@@ -76,16 +91,6 @@ const STATUS_TOOLTIPS: Record<JobStatus, string> = {
   declined: 'Worker declined this job.',
   cancelled: 'Cancelled; will not be completed.',
 };
-
-const FILTER_TABS: { value: 'all' | JobStatus; dbStatuses?: JobStatus[] }[] = [
-  { value: 'all' },
-  { value: 'pending' },
-  { value: 'pending_send' },
-  { value: 'in_progress' },
-  { value: 'paused' },
-  { value: 'assigned' },
-  { value: 'completed' },
-];
 
 function StatusBadge({ status }: { status: JobStatus | null }) {
   if (!status) return <span className="text-muted-foreground">—</span>;
@@ -133,15 +138,44 @@ function truncateAddress(addr: string | null, max = 48) {
   return addr.slice(0, max).trim() + '…';
 }
 
+interface FilterRowState {
+  id: string;
+  field: string | null;
+  value: string | null;
+}
+
+function newFilterRow(partial?: Partial<FilterRowState>): FilterRowState {
+  return {
+    id: `fr-${Math.random().toString(36).slice(2, 9)}`,
+    field: partial?.field ?? null,
+    value: partial?.value ?? null,
+  };
+}
+
+function committedFiltersKey(
+  rows: Array<{ field: string | null; value: string | null }>
+): string {
+  return JSON.stringify(committedFiltersFromRows(rows));
+}
+
+function committedFiltersFromRows(
+  rows: Array<{ field: string | null; value: string | null }>
+): Array<{ field: string; value: string }> {
+  return rows
+    .filter((r): r is { field: string; value: string } => !!(r.field && r.value))
+    .map((r) => ({ field: r.field, value: r.value }));
+}
+
 interface JobsTableProps {
   initialJobs: JobRow[];
   totalCount: number;
   initialFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' };
   fetchError: Error | null;
   statusSummary: JobsStatusSummary;
-  customerFilterOptions: CustomerJobCount[];
   batches: ImportBatchRow[];
   activeBatchId: string | null;
+  fieldFilterOptions: SearchableSelectOption[];
+  fieldFilterValuesByField: Record<string, FieldFilterValueOption[]>;
 }
 
 export function JobsTable({
@@ -150,13 +184,19 @@ export function JobsTable({
   initialFilters,
   fetchError,
   statusSummary,
-  customerFilterOptions,
   batches,
   activeBatchId,
+  fieldFilterOptions,
+  fieldFilterValuesByField,
 }: JobsTableProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [searchInput, setSearchInput] = useState(initialFilters.search ?? '');
+  const lastPushedSearch = useRef(initialFilters.search ?? '');
+  const lastPushedFieldFilters = useRef(
+    JSON.stringify(initialFilters.field_filters ?? [])
+  );
   const [isNavigating, setIsNavigating] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const stripScrollRef = useRef<HTMLDivElement>(null);
@@ -164,6 +204,14 @@ export function JobsTable({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [filterRows, setFilterRows] = useState<FilterRowState[]>(() => {
+    const fromUrl = initialFilters.field_filters ?? [];
+    if (fromUrl.length === 0) return [newFilterRow()];
+    return fromUrl.map((f) => newFilterRow({ field: f.field, value: f.value }));
+  });
+  const [valuesByField, setValuesByField] = useState<
+    Record<string, FieldFilterValueOption[]>
+  >(() => fieldFilterValuesByField);
 
   const deletableJobs = useMemo(
     () => initialJobs.filter((j) => j.status !== 'in_progress'),
@@ -217,31 +265,34 @@ export function JobsTable({
   const allDeletableSelected =
     deletableJobs.length > 0 && deletableJobs.every((j) => selectedIds.has(j.id));
 
-  const statusFilter = initialFilters.status;
-  const statusArray = Array.isArray(statusFilter)
-    ? statusFilter
-    : statusFilter
-      ? [statusFilter]
-      : [];
-
-  const resolvedTab: 'all' | JobStatus = (() => {
-    if (statusArray.length !== 1) return 'all';
-    const s = statusArray[0];
-    if (
-      s === 'pending' ||
-      s === 'pending_send' ||
-      s === 'in_progress' ||
-      s === 'paused' ||
-      s === 'assigned' ||
-      s === 'completed'
-    )
-      return s;
-    return 'all';
-  })();
-
   useEffect(() => {
-    setSearchInput(initialFilters.search ?? '');
-  }, [initialFilters.search]);
+    setValuesByField((prev) => ({ ...prev, ...fieldFilterValuesByField }));
+  }, [fieldFilterValuesByField]);
+
+  // Adopt URL filters only when they changed outside our own commits (back / clear).
+  // Rebuilding rows on every result refresh remounts selectors and wipes draft rows.
+  const fieldFiltersKey = JSON.stringify(initialFilters.field_filters ?? []);
+  useEffect(() => {
+    if (fieldFiltersKey === lastPushedFieldFilters.current) return;
+    lastPushedFieldFilters.current = fieldFiltersKey;
+    const fromUrl = initialFilters.field_filters ?? [];
+    setFilterRows(
+      fromUrl.length === 0
+        ? [newFilterRow()]
+        : fromUrl.map((f) => newFilterRow({ field: f.field, value: f.value }))
+    );
+  }, [fieldFiltersKey, initialFilters.field_filters]);
+
+  // Only persist while we are actually on the list. During detail navigation,
+  // useSearchParams can briefly update and would otherwise wipe the snapshot.
+  // Prefer committed rows from UI state so stacked filters aren't lost.
+  useEffect(() => {
+    if (pathname !== '/jobs') return;
+    rememberJobsListState(
+      searchParams.toString(),
+      committedFiltersFromRows(filterRows)
+    );
+  }, [pathname, searchParams, filterRows]);
 
   useEffect(() => {
     if (fetchError) {
@@ -263,24 +314,92 @@ export function JobsTable({
           next.set(key, value);
         }
       }
+      rememberJobsListState(next.toString(), committedFiltersFromRows(filterRows));
       router.push(`/jobs?${next.toString()}`, { scroll: false });
+      setIsNavigating(true);
+    },
+    [router, searchParams, filterRows]
+  );
+
+  // Debounced search → URL. Do not reset the input when results return mid-typing.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const trimmed = searchInput.trim();
+      const current = searchParams.get('search') ?? '';
+      if (trimmed !== current) {
+        lastPushedSearch.current = trimmed;
+        updateParams({ search: trimmed || undefined });
+      }
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [searchInput, searchParams, updateParams]);
+
+  // Adopt URL search only when it changed outside our debounce (back / clear).
+  useEffect(() => {
+    const urlSearch = searchParams.get('search') ?? '';
+    if (urlSearch === lastPushedSearch.current) return;
+    lastPushedSearch.current = urlSearch;
+    setSearchInput(urlSearch);
+  }, [searchParams]);
+
+  const commitFilterRows = useCallback(
+    (rows: FilterRowState[]) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('page');
+      const committed = committedFiltersFromRows(rows);
+      writeFieldFiltersToSearchParams(next, committed);
+      lastPushedFieldFilters.current = JSON.stringify(committed);
+      const qs = next.toString();
+      rememberJobsListState(qs, committed);
+      if (qs === searchParams.toString()) return;
+      router.push(`/jobs?${qs}`, { scroll: false });
       setIsNavigating(true);
     },
     [router, searchParams]
   );
 
-  const setStatusFilter = (tab: 'all' | JobStatus) => {
-    if (tab === 'all') {
-      updateParams({ status: undefined });
-      return;
-    }
-    updateParams({ status: tab });
+  const ensureValuesForField = useCallback(
+    async (field: string) => {
+      if (!field || valuesByField[field]) return;
+      const values = await fetchFieldFilterValuesAction(field);
+      setValuesByField((prev) => ({ ...prev, [field]: values }));
+    },
+    [valuesByField]
+  );
+
+  const updateFilterRow = (id: string, patch: Partial<FilterRowState>) => {
+    const prev = filterRows.find((r) => r.id === id);
+    const next = filterRows.map((row) => (row.id === id ? { ...row, ...patch } : row));
+    setFilterRows(next);
+
+    const wasCommitted = !!(prev?.field && prev.value);
+    const changed = next.find((r) => r.id === id);
+    const isCommitted = !!(changed?.field && changed.value);
+
+    // Only update the URL when the set of complete filters changes.
+    // Picking a field (Any value) stays local so drafts / extra rows aren't wiped.
+    if (!wasCommitted && !isCommitted) return;
+    const key = committedFiltersKey(next);
+    if (key === lastPushedFieldFilters.current) return;
+    commitFilterRows(next);
   };
 
-  const sortedCustomerFilterOptions = useMemo(
-    () => [...customerFilterOptions].sort((a, b) => a.name.localeCompare(b.name)),
-    [customerFilterOptions]
-  );
+  const removeFilterRow = (id: string) => {
+    const filtered = filterRows.filter((r) => r.id !== id);
+    const rows = filtered.length === 0 ? [newFilterRow()] : filtered;
+    setFilterRows(rows);
+
+    const key = committedFiltersKey(rows);
+    if (key === lastPushedFieldFilters.current) return;
+    commitFilterRows(rows);
+  };
+
+  const addFilterRow = () => {
+    setFilterRows((prev) => {
+      if (prev.length >= MAX_FIELD_FILTERS) return prev;
+      return [...prev, newFilterRow()];
+    });
+  };
 
   const sortedBatchFilterOptions = useMemo(
     () =>
@@ -290,7 +409,6 @@ export function JobsTable({
     [batches]
   );
 
-  const customerSelectValue = initialFilters.customer_id ?? '__all__';
   const activeBatch = activeBatchId
     ? batches.find((batch) => batch.id === activeBatchId) ?? null
     : null;
@@ -312,16 +430,6 @@ export function JobsTable({
   };
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      const current = searchParams.get('search') ?? '';
-      if (searchInput.trim() !== current) {
-        updateParams({ search: searchInput.trim() || undefined });
-      }
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [searchInput, updateParams, searchParams]);
-
-  useEffect(() => {
     setIsNavigating(false);
   }, [initialJobs, initialFilters]);
 
@@ -332,14 +440,8 @@ export function JobsTable({
     initialFilters.date_to ||
     initialFilters.customer_id ||
     initialFilters.priority ||
+    (initialFilters.field_filters && initialFilters.field_filters.length > 0) ||
     activeBatchId
-  );
-  const hasNonCustomerFilters = !!(
-    initialFilters.search ||
-    initialFilters.status ||
-    initialFilters.date_from ||
-    initialFilters.date_to ||
-    initialFilters.import_source_id
   );
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
   const currentPage = Math.min(Math.max(1, initialFilters.page ?? 1), totalPages);
@@ -377,54 +479,82 @@ export function JobsTable({
       key: 'pending',
       count: statusSummary.notStarted,
       title: 'Not Started',
-      className: JOB_STATUS_DISPLAY.pending.summaryBarClass,
+      icon: CircleDashed,
+      glow: 'rgb(100 116 139)',
     },
     {
       key: 'pending_send',
       count: statusSummary.readyToSend,
       title: 'Ready to send',
-      className: JOB_STATUS_DISPLAY.pending_send.summaryBarClass,
+      icon: RadioTower,
+      glow: 'rgb(6 182 212)',
+    },
+    {
+      key: 'assigned',
+      count: statusSummary.assigned,
+      title: 'Assigned',
+      icon: UserCheck,
+      glow: 'rgb(245 158 11)',
     },
     {
       key: 'in_progress',
       count: statusSummary.inProgress,
       title: 'In Progress',
-      className: JOB_STATUS_DISPLAY.in_progress.summaryBarClass,
+      icon: Briefcase,
+      glow: 'rgb(59 130 246)',
     },
     {
-      key: 'assigned',
+      key: 'paused',
       count: statusSummary.paused,
       title: 'Paused',
-      className: JOB_STATUS_DISPLAY.assigned.summaryBarClass,
+      icon: PauseCircle,
+      glow: 'rgb(180 83 9)',
     },
     {
       key: 'completed',
       count: statusSummary.completed,
       title: 'Completed',
-      className: JOB_STATUS_DISPLAY.completed.summaryBarClass,
+      icon: CheckCircle2,
+      glow: 'rgb(16 185 129)',
     },
   ] as const;
 
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        {/* Status summary */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {summaryItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => setStatusFilter(item.key)}
-              className={cn(
-                'rounded-xl px-4 py-3 text-left transition-all hover:opacity-95 hover:shadow-md',
-                item.className,
-                resolvedTab === item.key && 'ring-2 ring-primary/50 ring-offset-2 ring-offset-background'
-              )}
-            >
-              <p className="text-xs font-medium opacity-90">{item.title}</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">{item.count}</p>
-            </button>
-          ))}
+        {/* Status summary (counts only — filter via Where → Status) */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {summaryItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.key}
+                className={cn(
+                  'relative overflow-hidden rounded-2xl border bg-[var(--glass-bg)] p-4',
+                  'border-[var(--glass-border)] shadow-[var(--shadow-glass-value)]',
+                  'dark:border-white/[0.06]'
+                )}
+                style={{
+                  boxShadow: `0 0 0 1px ${item.glow}18, var(--shadow-glass-value)`,
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground">{item.title}</p>
+                    <p className="mt-1.5 text-2xl font-bold tracking-tight text-foreground tabular-nums">
+                      {item.count}
+                    </p>
+                  </div>
+                  <span
+                    className="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/75"
+                    style={{ backgroundColor: `${item.glow}22` }}
+                  >
+                    <Icon className="size-4" strokeWidth={2} />
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <Card
@@ -436,53 +566,36 @@ export function JobsTable({
         >
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-[180px] flex-1 sm:max-w-[280px]">
-                  <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
-                  <Input
-                    placeholder="Search ref, address, description…"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    className="pl-9 pr-9"
-                    aria-label="Search jobs"
-                  />
-                  {searchInput.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchInput('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-foreground"
-                      aria-label="Clear search"
-                    >
-                      <X className="size-4" />
-                    </button>
-                  )}
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex min-w-[180px] flex-1 flex-col gap-1.5 sm:max-w-[280px]">
+                  <label className="text-xs font-medium text-muted-foreground">Search</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      placeholder="Anything on the job…"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      className="pl-9 pr-9"
+                      aria-label="Search jobs"
+                    />
+                    {searchInput.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          lastPushedSearch.current = '';
+                          setSearchInput('');
+                          updateParams({ search: undefined });
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex min-w-[200px] max-w-[min(100%,320px)] flex-col gap-1.5">
-                  <label htmlFor="jobs-customer-filter" className="sr-only">
-                    Filter by customer
-                  </label>
-                  <SearchableSelect
-                    value={customerSelectValue}
-                    onValueChange={(v) => {
-                      if (v === '__all__') updateParams({ customer_id: undefined });
-                      else updateParams({ customer_id: v });
-                    }}
-                    placeholder="All customers"
-                    searchPlaceholder="Search customer..."
-                    className="h-10 w-full"
-                    options={[
-                      { value: '__all__', label: 'All customers' },
-                      ...sortedCustomerFilterOptions.map((c) => ({
-                        value: c.customer_id ?? 'none',
-                        label: `${c.name} (${c.count})${hasNonCustomerFilters ? ' (filtered)' : ''}`,
-                      })),
-                    ]}
-                  />
-                </div>
-                <div className="flex min-w-[200px] max-w-[min(100%,320px)] flex-col gap-1.5">
-                  <label htmlFor="jobs-batch-filter" className="sr-only">
-                    Filter by import batch
-                  </label>
+                <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Import batch</label>
                   <SearchableSelect
                     value={activeBatchId ?? '__all__'}
                     onValueChange={(v) => {
@@ -531,13 +644,17 @@ export function JobsTable({
                     Batches
                   </Button>
                 </div>
-                <div className="ml-auto flex items-center gap-2">
+                <div className="ml-auto flex items-center gap-2 self-end">
                   {hasFilters && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => {
+                        lastPushedSearch.current = '';
+                        lastPushedFieldFilters.current = '[]';
                         setSearchInput('');
+                        setFilterRows([newFilterRow()]);
+                        rememberJobsListState('', []);
                         router.push('/jobs', { scroll: false });
                       }}
                     >
@@ -548,29 +665,82 @@ export function JobsTable({
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
-                <span className="mr-1 w-full text-xs font-medium text-muted-foreground sm:w-auto sm:self-center">
-                  Status
-                </span>
-                {FILTER_TABS.map((tab) => {
-                  const isAll = tab.value === 'all';
-                  const active = isAll ? resolvedTab === 'all' : resolvedTab === tab.value;
-                  const label =
-                    tab.value === 'all'
-                      ? 'All'
-                      : JOB_STATUS_DISPLAY[tab.value as JobStatus].label;
+              <div className="space-y-2 border-t border-border/60 pt-3">
+                {filterRows.map((row, index) => {
+                  const valueOptions = row.field ? valuesByField[row.field] ?? [] : [];
                   return (
-                    <Button
-                      key={tab.value}
-                      variant={active ? 'secondary' : 'outline'}
-                      size="sm"
-                      className={cn('h-8 rounded-full', active && 'ring-1 ring-primary/30')}
-                      onClick={() => setStatusFilter(tab.value)}
-                    >
-                      {label}
-                    </Button>
+                    <div key={row.id} className="flex flex-wrap items-end gap-3">
+                      <div className="flex min-w-[160px] max-w-[min(100%,240px)] flex-col gap-1.5">
+                        {index === 0 ? (
+                          <label className="text-xs font-medium text-muted-foreground">Where</label>
+                        ) : (
+                          <label className="text-xs font-medium text-muted-foreground">And</label>
+                        )}
+                        <SearchableSelect
+                          value={row.field ?? '__none__'}
+                          onValueChange={(v) => {
+                            const field = v === '__none__' ? null : v;
+                            if (field) void ensureValuesForField(field);
+                            updateFilterRow(row.id, { field, value: null });
+                          }}
+                          placeholder="Choose field"
+                          searchPlaceholder="Search fields…"
+                          className="h-10 w-full"
+                          options={[
+                            { value: '__none__', label: 'Any field' },
+                            ...fieldFilterOptions,
+                          ]}
+                        />
+                      </div>
+                      <div className="flex min-w-[160px] max-w-[min(100%,240px)] flex-col gap-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Is</label>
+                        <SearchableSelect
+                          value={row.value ?? '__none__'}
+                          onValueChange={(v) => {
+                            updateFilterRow(row.id, {
+                              value: v === '__none__' ? null : v,
+                            });
+                          }}
+                          placeholder={row.field ? 'Choose value' : 'Pick a field first'}
+                          searchPlaceholder="Search values…"
+                          className="h-10 w-full"
+                          disabled={!row.field}
+                          options={[
+                            { value: '__none__', label: 'Any value' },
+                            ...valueOptions.map((v) => ({
+                              value: v.value,
+                              label: v.label,
+                            })),
+                          ]}
+                        />
+                      </div>
+                      {(filterRows.length > 1 || row.field || row.value) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-10 px-2 text-muted-foreground"
+                          onClick={() => removeFilterRow(row.id)}
+                          aria-label="Remove filter"
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                   );
                 })}
+                {filterRows.length < MAX_FIELD_FILTERS && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={addFilterRow}
+                  >
+                    <Plus className="size-3.5" />
+                    Add filter
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
@@ -805,7 +975,12 @@ export function JobsTable({
                             'dark:hover:bg-primary/10',
                             i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
                           )}
-                          onClick={() => router.push(`/jobs/${job.id}`)}
+                          onClick={() => {
+                            const committed = committedFiltersFromRows(filterRows);
+                            router.push(
+                              jobDetailHref(job.id, searchParams.toString(), committed)
+                            );
+                          }}
                         >
                           <TableCell
                             className="w-10 align-middle"
@@ -845,7 +1020,13 @@ export function JobsTable({
                             <Link
                               href={`/jobs/${job.id}`}
                               className="text-primary hover:underline"
-                              onClick={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                rememberJobsListState(
+                                  searchParams.toString(),
+                                  committedFiltersFromRows(filterRows)
+                                );
+                              }}
                             >
                               {job.reference_number || job.id.slice(0, 8)}
                             </Link>
@@ -855,8 +1036,21 @@ export function JobsTable({
                               <span className="text-muted-foreground/70">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="max-w-[240px] truncate text-muted-foreground">
-                            {truncateAddress(job.address, 44)}
+                          <TableCell className="max-w-[240px] text-muted-foreground">
+                            <div className="truncate">{truncateAddress(job.address, 44)}</div>
+                            {job.match_pills && job.match_pills.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {job.match_pills.map((pill) => (
+                                  <span
+                                    key={pill.label}
+                                    className="inline-flex max-w-full truncate rounded-md border border-border/80 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+                                    title={pill.label}
+                                  >
+                                    {pill.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>
                             {job.worker_name ?? (

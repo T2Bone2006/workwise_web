@@ -1,12 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { JobStatus, JobPriority } from '@/lib/data/jobs';
 import type { JobLength } from '@/lib/jobs/normalize-job-length';
+import { getRememberedJobsListHref } from '@/lib/jobs/jobs-list-query';
 import { JobDetailDeleteButton } from '@/components/jobs/job-detail-delete-button';
 
 const STATUS_LABELS: Record<JobStatus, string> = {
@@ -83,6 +85,8 @@ export function JobDetailHeader({
   createdAt,
   hideDeleteAction = false,
 }: JobDetailHeaderProps) {
+  const router = useRouter();
+
   const createdRelative = (() => {
     try {
       return formatDistanceToNow(new Date(createdAt), { addSuffix: true });
@@ -99,7 +103,14 @@ export function JobDetailHeader({
         className="w-fit -ml-2 text-muted-foreground hover:text-foreground"
         asChild
       >
-        <Link href="/jobs" className="gap-2">
+        <Link
+          href="/jobs"
+          className="gap-2"
+          onClick={(e) => {
+            e.preventDefault();
+            router.push(getRememberedJobsListHref());
+          }}
+        >
           <ArrowLeft className="size-4" />
           Back to Jobs
         </Link>

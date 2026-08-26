@@ -40,6 +40,7 @@ export function BatchesView({ batches }: BatchesViewProps) {
           pending_send: 0,
           assigned: 0,
           in_progress: 0,
+          paused: 0,
           completed: 0,
         },
       ];
@@ -63,7 +64,8 @@ export function BatchesView({ batches }: BatchesViewProps) {
             bar: JOB_STATUS_DISPLAY.pending_send.summaryBarClass,
           },
           { n: batch.in_progress, title: 'In Progress', bar: JOB_STATUS_DISPLAY.in_progress.summaryBarClass },
-          { n: batch.assigned, title: 'Paused', bar: JOB_STATUS_DISPLAY.assigned.summaryBarClass },
+          { n: batch.assigned, title: 'Assigned', bar: JOB_STATUS_DISPLAY.assigned.summaryBarClass },
+          { n: batch.paused, title: 'Paused', bar: JOB_STATUS_DISPLAY.paused.summaryBarClass },
           { n: batch.completed, title: 'Completed', bar: JOB_STATUS_DISPLAY.completed.summaryBarClass },
         ];
         const total = Math.max(batch.rows_imported, 0);
