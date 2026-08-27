@@ -741,51 +741,67 @@ export async function getImportBatchesForTenant(
       completed: 0,
     };
 
-    const batches: ImportBatchRow[] = rows.map((row) => {
-      const r = row as {
-        id: string;
-        file_name?: string | null;
-        started_at?: string | null;
-        rows_imported?: number | null;
-        import_source_id?: string | null;
-      };
-      const sourceId = r.import_source_id ?? null;
-      const counts = sourceId
-        ? countsBySource.get(sourceId) ?? emptyCounts
-        : emptyCounts;
-      return {
-        id: r.id,
-        file_name: r.file_name ?? null,
-        started_at: r.started_at ?? null,
-        rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
-        import_source_id: sourceId,
-        pending: counts.pending,
-        pending_send: counts.pending_send,
-        assigned: counts.assigned,
-        in_progress: counts.in_progress,
-        paused: counts.paused,
-        completed: counts.completed,
-      };
-    });
-    batches.push({
-      id: 'ungrouped',
-      file_name: 'Manual & ungrouped jobs',
-      started_at: null,
-      rows_imported:
-        ungroupedCounts.pending +
-        ungroupedCounts.pending_send +
-        ungroupedCounts.assigned +
-        ungroupedCounts.in_progress +
-        ungroupedCounts.paused +
-        ungroupedCounts.completed,
-      import_source_id: null,
-      pending: ungroupedCounts.pending,
-      pending_send: ungroupedCounts.pending_send,
-      assigned: ungroupedCounts.assigned,
-      in_progress: ungroupedCounts.in_progress,
-      paused: ungroupedCounts.paused,
-      completed: ungroupedCounts.completed,
-    });
+    const liveJobTotal = (counts: {
+      pending: number;
+      pending_send: number;
+      assigned: number;
+      in_progress: number;
+      paused: number;
+      completed: number;
+    }) =>
+      counts.pending +
+      counts.pending_send +
+      counts.assigned +
+      counts.in_progress +
+      counts.paused +
+      counts.completed;
+
+    // Drop import batches with no remaining jobs (history row kept for audit).
+    const batches: ImportBatchRow[] = rows
+      .map((row) => {
+        const r = row as {
+          id: string;
+          file_name?: string | null;
+          started_at?: string | null;
+          rows_imported?: number | null;
+          import_source_id?: string | null;
+        };
+        const sourceId = r.import_source_id ?? null;
+        const counts = sourceId
+          ? countsBySource.get(sourceId) ?? emptyCounts
+          : emptyCounts;
+        return {
+          id: r.id,
+          file_name: r.file_name ?? null,
+          started_at: r.started_at ?? null,
+          rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
+          import_source_id: sourceId,
+          pending: counts.pending,
+          pending_send: counts.pending_send,
+          assigned: counts.assigned,
+          in_progress: counts.in_progress,
+          paused: counts.paused,
+          completed: counts.completed,
+        };
+      })
+      .filter((batch) => liveJobTotal(batch) > 0);
+
+    const ungroupedTotal = liveJobTotal(ungroupedCounts);
+    if (ungroupedTotal > 0) {
+      batches.push({
+        id: 'ungrouped',
+        file_name: 'Manual & ungrouped jobs',
+        started_at: null,
+        rows_imported: ungroupedTotal,
+        import_source_id: null,
+        pending: ungroupedCounts.pending,
+        pending_send: ungroupedCounts.pending_send,
+        assigned: ungroupedCounts.assigned,
+        in_progress: ungroupedCounts.in_progress,
+        paused: ungroupedCounts.paused,
+        completed: ungroupedCounts.completed,
+      });
+    }
 
     return { batches, error: null };
   } catch (err) {

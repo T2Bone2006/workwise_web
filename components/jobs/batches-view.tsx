@@ -25,27 +25,8 @@ function formatBatchDate(value: string | null) {
 export function BatchesView({ batches }: BatchesViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const hasUngrouped = batches.some((batch) => batch.id === 'ungrouped');
-  const displayBatches = hasUngrouped
-    ? batches
-    : [
-        ...batches,
-        {
-          id: 'ungrouped',
-          file_name: 'Manual & ungrouped jobs',
-          started_at: null,
-          rows_imported: 0,
-          import_source_id: null,
-          pending: 0,
-          pending_send: 0,
-          assigned: 0,
-          in_progress: 0,
-          paused: 0,
-          completed: 0,
-        },
-      ];
 
-  if (displayBatches.length === 0) {
+  if (batches.length === 0) {
     return (
       <div className="rounded-xl border border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
         No import batches found.
@@ -55,7 +36,7 @@ export function BatchesView({ batches }: BatchesViewProps) {
 
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {displayBatches.map((batch) => {
+      {batches.map((batch) => {
         const chips = [
           { n: batch.pending, title: 'Not Started', bar: JOB_STATUS_DISPLAY.pending.summaryBarClass },
           {
@@ -68,7 +49,14 @@ export function BatchesView({ batches }: BatchesViewProps) {
           { n: batch.paused, title: 'Paused', bar: JOB_STATUS_DISPLAY.paused.summaryBarClass },
           { n: batch.completed, title: 'Completed', bar: JOB_STATUS_DISPLAY.completed.summaryBarClass },
         ];
-        const total = Math.max(batch.rows_imported, 0);
+        const liveTotal =
+          batch.pending +
+          batch.pending_send +
+          batch.assigned +
+          batch.in_progress +
+          batch.paused +
+          batch.completed;
+        const total = Math.max(liveTotal, batch.rows_imported, 0);
         const completed = Math.max(batch.completed, 0);
         const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
         return (
@@ -94,7 +82,14 @@ export function BatchesView({ batches }: BatchesViewProps) {
                 <p className="mt-1 text-xs text-muted-foreground">{formatBatchDate(batch.started_at)}</p>
               </div>
               <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground tabular-nums">{batch.rows_imported}</span> rows imported
+                <span className="font-medium text-foreground tabular-nums">{liveTotal}</span>{' '}
+                {liveTotal === 1 ? 'job' : 'jobs'}
+                {batch.rows_imported > liveTotal ? (
+                  <span className="text-muted-foreground/80">
+                    {' '}
+                    ({batch.rows_imported} imported)
+                  </span>
+                ) : null}
               </p>
               <div className="flex flex-wrap gap-2 text-xs">
                 {chips.map((chip) => (
