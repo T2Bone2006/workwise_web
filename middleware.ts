@@ -25,6 +25,7 @@ const UNPROTECTED_PATHS = [
   '/forgot-password',
   '/admin-reset-password',
   '/reset-password',
+  '/download',
 ] as const;
 
 /** Paths workers may visit on the web (invite / password setup). */
@@ -32,6 +33,7 @@ const WORKER_ALLOWED_PATHS = [
   '/accept-invite',
   '/reset-password',
   '/login',
+  '/download',
 ] as const;
 
 function isUnprotectedPath(pathname: string): boolean {

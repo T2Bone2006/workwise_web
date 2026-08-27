@@ -1,3 +1,5 @@
+import { APP_DOWNLOAD_URL } from '@/lib/app-stores';
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const LOGO_URL = SUPABASE_URL
   ? `${SUPABASE_URL}/storage/v1/object/public/assets/workwise_logo.png`
@@ -53,6 +55,12 @@ export function buildWorkerInviteEmail({
               </p>
               <p style="margin:0 0 24px;word-break:break-all;font-size:13px;">
                 <a href="${escapeHtml(inviteUrl)}" style="color:#2563eb;">${escapeHtml(inviteUrl)}</a>
+              </p>
+              <p style="margin:0 0 8px;color:#64748b;font-size:13px;">
+                Already set your password? Get the app:
+              </p>
+              <p style="margin:0 0 24px;font-size:13px;">
+                <a href="${escapeHtml(APP_DOWNLOAD_URL)}" style="color:#2563eb;font-weight:600;">Download WorkWise</a>
               </p>
               <p style="margin:0;color:#94a3b8;font-size:12px;">
                 This invitation link expires in 7 days. If you didn't expect this email, you can safely ignore it.

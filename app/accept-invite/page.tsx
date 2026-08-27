@@ -15,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { APP_DOWNLOAD_PATH } from '@/lib/app-stores';
 
 const DEFAULT_ERROR_MESSAGE =
   'Your invite link is invalid or has expired. Please ask your manager for a new invite.';
@@ -158,7 +159,7 @@ function AcceptInviteContent() {
         : phase === 'form'
           ? 'Create a password to finish setting up your account'
           : phase === 'success'
-            ? 'Open the WorkWise app on your phone to sign in.'
+            ? 'Download the WorkWise app on your phone, then sign in with the email and password you just set.'
             : phase === 'error'
               ? errorMessage ?? DEFAULT_ERROR_MESSAGE
               : null;
@@ -282,6 +283,15 @@ function AcceptInviteContent() {
               )}
             </Button>
           </form>
+        ) : phase === 'success' ? (
+          <div className="flex flex-col gap-3">
+            <Button variant="gradient" className="w-full" asChild>
+              <a href={APP_DOWNLOAD_PATH}>Download the app</a>
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              Opens the App Store or Google Play for your phone.
+            </p>
+          </div>
         ) : phase === 'error' ? (
           <p className="text-sm text-muted-foreground text-center">
             Please ask your manager to send a new invitation.
