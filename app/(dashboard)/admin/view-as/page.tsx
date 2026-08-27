@@ -25,7 +25,7 @@ export default async function ViewAsTenantPage() {
     <div className="space-y-6">
       <PageGradientHeader
         title="View as tenant"
-        subtitle="Open a client’s dashboard with your admin account. Their password is not required. Session is read-only."
+        subtitle="Open a client’s dashboard with your admin account. Their password is not required. You can make changes as that client."
       />
 
       {viewAs.active && (

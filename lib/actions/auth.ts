@@ -109,7 +109,7 @@ export async function logout(
 ): Promise<AuthResult> {
   try {
     // If a prior view-as left cookies / tenant_id swapped, restore before sign-out.
-    // (When view-as is active, Topbar exits via API first because server actions are blocked.)
+    // (When view-as is active, Topbar exits via API first so the admin tenant is restored.)
     await restoreViewAsTenantIfNeeded();
     const supabase = await createClient();
     await supabase.auth.signOut();

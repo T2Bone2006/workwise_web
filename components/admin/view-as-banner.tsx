@@ -40,7 +40,7 @@ export function ViewAsBanner({ tenantName }: { tenantName: string }) {
         Viewing as <span className="font-semibold">{tenantName}</span>
         <span className="text-amber-900/80 dark:text-amber-100/80">
           {' '}
-          — read-only. Changes are blocked until you exit.
+          — acting as this client. Exit when you&apos;re done.
         </span>
         {error && (
           <span className="ml-2 text-destructive" role="alert">

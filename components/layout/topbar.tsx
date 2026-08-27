@@ -19,7 +19,7 @@ interface TopbarProps {
   tenantName: string;
   userEmail: string | undefined;
   onMenuClick: () => void;
-  /** When true, exit view-as (API) before logout — server actions are blocked in view-as. */
+  /** When true, exit view-as (API) before logout so the admin tenant is restored. */
   viewAsActive?: boolean;
 }
 
