@@ -46,7 +46,7 @@ type SourceFieldsPeekProps = {
 };
 
 /**
- * Compact Review trigger: how many extra columns are kept with this job,
+ * Compact Review trigger: how many sheet columns are kept with this job,
  * plus a short note that jobs will be searchable by them after import.
  */
 export function SourceFieldsPeek({ sourceFields, className }: SourceFieldsPeekProps) {
@@ -101,8 +101,7 @@ export function SourceFieldsPeek({ sourceFields, className }: SourceFieldsPeekPr
     return <span className={cn('text-sm text-muted-foreground', className)}>—</span>;
   }
 
-  const label =
-    count === 1 ? '1 column stored' : `${count} columns stored`;
+  const label = count === 1 ? '1 sheet field' : `${count} sheet fields`;
 
   return (
     <Popover
@@ -151,10 +150,10 @@ export function SourceFieldsPeek({ sourceFields, className }: SourceFieldsPeekPr
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="border-b px-3 py-2">
-          <p className="text-sm font-medium">Stored with this job</p>
+          <p className="text-sm font-medium">Sheet fields</p>
           <p className="text-xs text-muted-foreground">
-            After import, you&apos;ll be able to search and filter jobs by these
-            fields — not only address or description.
+            Every non-empty column from the spreadsheet. After import you can search
+            and filter jobs by these — not only address or description.
           </p>
         </div>
         <ul className="max-h-56 overflow-auto py-1">

@@ -61,16 +61,57 @@ function stripTime(value: string): string {
   return s.trim();
 }
 
-function parseExcelSerial(value: string): string | null {
-  const trimmed = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
-  const n = Number(trimmed);
+function parseExcelSerialNumber(n: number): string | null {
   // Typical Excel date serials for 2000–2100 are roughly 36526–73050
-  if (n < 20000 || n > 80000) return null;
+  if (!Number.isFinite(n) || n < 20000 || n > 80000) return null;
   const ms = EXCEL_EPOCH_MS + Math.floor(n) * 86400000;
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return null;
   return toIso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+function parseExcelSerial(value: string): string | null {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  return parseExcelSerialNumber(Number(trimmed));
+}
+
+/**
+ * Convert a JS Date from SheetJS (`cellDates: true`) to YYYY-MM-DD.
+ * Prefer local YMD when the clock is local midnight (common SheetJS behaviour);
+ * otherwise use UTC YMD so timezone shifts don't flip the calendar day.
+ */
+function dateObjectToIso(d: Date): string | null {
+  if (Number.isNaN(d.getTime())) return null;
+  const localMidnight =
+    d.getHours() === 0 &&
+    d.getMinutes() === 0 &&
+    d.getSeconds() === 0 &&
+    d.getMilliseconds() === 0;
+  if (localMidnight) {
+    return toIso(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  return toIso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/**
+ * Normalise one spreadsheet cell for import rows.
+ * Excel date cells must become YYYY-MM-DD here — never locale strings like
+ * "9/1/2026", which our UK day-first parser would read as 9 January.
+ */
+export function spreadsheetCellToImportString(value: unknown): string {
+  if (value == null) return '';
+  if (value instanceof Date) {
+    return dateObjectToIso(value) ?? '';
+  }
+  if (typeof value === 'number') {
+    // Leave non-date numbers as digits. Date cells should arrive as Date when
+    // cellDates is on; if Excel only stores a serial, parseScheduledDate still
+    // converts it when that column is mapped to scheduled_date.
+    return String(value);
+  }
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  return String(value).trim();
 }
 
 /**

@@ -52,6 +52,7 @@ import {
   headerSetsEqual,
   isScheduledDateMapped,
   parseScheduledDate,
+  spreadsheetCellToImportString,
 } from '@/lib/import/parse-scheduled-date';
 import {
   normalizeHeaders,
@@ -126,15 +127,16 @@ function xlsxWorkbookToRowRecords(wb: XLSX.WorkBook): Record<string, string>[] {
   const firstSheet = wb.SheetNames[0];
   if (!firstSheet) return [];
   const ws = wb.Sheets[firstSheet];
+  // raw + cellDates: date cells become Date/serial, not locale strings like "9/1/2026".
   const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
     defval: '',
-    raw: false,
+    raw: true,
   });
   return json
     .map((row) => {
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(row)) {
-        out[k] = v == null ? '' : String(v);
+        out[k] = spreadsheetCellToImportString(v);
       }
       return out;
     })
@@ -364,7 +366,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         void (async () => {
           try {
             const buf = await file.arrayBuffer();
-            const wb = XLSX.read(buf, { type: 'array' });
+            const wb = XLSX.read(buf, { type: 'array', cellDates: true });
             applyParsedRows(xlsxWorkbookToRowRecords(wb));
           } catch {
             toast.error('Invalid Excel file.', { duration: 8000 });
@@ -776,10 +778,10 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
             )}
             {previewExtrasKeys.length > 0 && (
               <p className="text-sm text-muted-foreground">
-                Unmapped columns are stored with each job. After import you&apos;ll
-                be able to search and filter by them — hover the info icon on a row
-                to see which fields that job will keep. Description becomes a short
-                summary, not a spreadsheet dump.
+                Every spreadsheet column is kept with each job (sheet fields). After
+                import you can search by any of them — e.g. &quot;full day&quot; — hover the
+                info icon on a row to preview. Description becomes a short summary, not
+                a spreadsheet dump.
               </p>
             )}
             <div className="max-h-[400px] overflow-auto rounded-lg border">
@@ -793,7 +795,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
                     <TableHead>Scheduled date</TableHead>
                     <TableHead>Job length</TableHead>
                     <TableHead>Notes</TableHead>
-                    <TableHead>Stored fields</TableHead>
+                    <TableHead>Sheet fields</TableHead>
                     <TableHead>Issues</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1001,8 +1003,8 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
               Adjust column mapping
             </CardTitle>
             <CardDescription>
-              Match spreadsheet columns to WorkWise fields. Unmapped columns are kept in
-              source fields; description becomes a short summary on import.
+              Match spreadsheet columns to WorkWise fields. All columns are kept as
+              sheet fields for search; description becomes a short summary on import.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

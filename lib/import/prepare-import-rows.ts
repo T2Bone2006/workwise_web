@@ -37,9 +37,9 @@ export type PreparedImportRow = {
   postcode: string;
   rawPostcode: string;
   mappedDescription: string;
-  /** Non-core spreadsheet columns (header → value) for jobs.source_fields. */
+  /** All non-empty spreadsheet columns (header → value) for jobs.source_fields / search. */
   sourceFields: Record<string, string>;
-  /** Pipe appendix for AI summary context only — not written to job_description. */
+  /** Unmapped columns only — fed to AI description summary (not a spreadsheet dump of mapped fields). */
   unmappedAppendix: string;
   /** Fallback description if AI summary fails: mapped notes only (never the extras dump). */
   descriptionFallback: string;
@@ -84,18 +84,14 @@ export function areCoreColumnsMapped(
   return isAddressMapped(columnMapping) && isPostcodeMapped(columnMapping);
 }
 
-/** Non-core columns → source_fields object (empty cells omitted). */
-export function collectSourceFields(
-  row: Record<string, string>,
-  columnMapping: Record<string, string>
-): Record<string, string> {
-  const mappedCsvHeaders = new Set(
-    Object.values(columnMapping).filter((c) => typeof c === 'string' && c.trim() !== '')
-  );
+/**
+ * Every non-empty spreadsheet column → source_fields (for search / job detail).
+ * Includes columns mapped to WorkWise fields so values like "FULL DAY" stay searchable.
+ */
+export function collectSourceFields(row: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const col of Object.keys(row)) {
     if (!col.trim()) continue;
-    if (mappedCsvHeaders.has(col)) continue;
     const val = String(row[col] ?? '').trim();
     if (val === '') continue;
     out[col] = val;
@@ -103,19 +99,35 @@ export function collectSourceFields(
   return out;
 }
 
-/** AI-only appendix string from source_fields (not stored on the job). */
+/** Columns not bound to a WorkWise schema field — AI summary context only. */
+export function collectUnmappedSourceFields(
+  row: Record<string, string>,
+  columnMapping: Record<string, string>
+): Record<string, string> {
+  const mappedCsvHeaders = new Set(
+    Object.values(columnMapping).filter((c) => typeof c === 'string' && c.trim() !== '')
+  );
+  const out: Record<string, string> = {};
+  for (const [col, val] of Object.entries(collectSourceFields(row))) {
+    if (mappedCsvHeaders.has(col)) continue;
+    out[col] = val;
+  }
+  return out;
+}
+
+/** AI-only appendix string (not written to job_description). */
 export function formatSourceFieldsAppendix(sourceFields: Record<string, string>): string {
   return Object.entries(sourceFields)
     .map(([col, val]) => `${col}: ${val}`)
     .join(' | ');
 }
 
-/** @deprecated Prefer collectSourceFields + formatSourceFieldsAppendix. */
+/** @deprecated Prefer collectSourceFields / collectUnmappedSourceFields. */
 export function formatUnmappedCsvColumns(
   row: Record<string, string>,
   columnMapping: Record<string, string>
 ): string {
-  return formatSourceFieldsAppendix(collectSourceFields(row, columnMapping));
+  return formatSourceFieldsAppendix(collectUnmappedSourceFields(row, columnMapping));
 }
 
 function applyTransforms(
@@ -215,8 +227,10 @@ export function prepareImportRow(
     valueTransforms,
     'description'
   );
-  const sourceFields = collectSourceFields(rawRow, columnMapping);
-  const unmappedAppendix = formatSourceFieldsAppendix(sourceFields);
+  const sourceFields = collectSourceFields(rawRow);
+  const unmappedAppendix = formatSourceFieldsAppendix(
+    collectUnmappedSourceFields(rawRow, columnMapping)
+  );
   const descriptionFallback = mappedDescription.trim() || 'Imported job';
   const textForLengthScan = [mappedDescription, ...Object.values(sourceFields)]
     .filter(Boolean)

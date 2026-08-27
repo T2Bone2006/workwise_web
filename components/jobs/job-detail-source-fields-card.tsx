@@ -21,9 +21,10 @@ export function JobDetailSourceFieldsCard({ sourceFields }: JobDetailSourceField
       )}
     >
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Stored fields</CardTitle>
+        <CardTitle className="text-base">Sheet fields</CardTitle>
         <CardDescription>
-          Extra spreadsheet columns kept with this job. You can search and filter by these.
+          Spreadsheet columns kept with this job. Search and filter by any of these
+          values.
         </CardDescription>
       </CardHeader>
       <CardContent>
