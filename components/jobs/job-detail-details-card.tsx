@@ -4,6 +4,7 @@ import { MapPin, Calendar, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { CopyButton } from '@/components/jobs/copy-button';
+import { formatTimeRangeOrLength } from '@/lib/jobs/format-job-time';
 import { cn } from '@/lib/utils';
 
 interface JobDetailDetailsCardProps {
@@ -11,6 +12,9 @@ interface JobDetailDetailsCardProps {
   postcode: string;
   description: string;
   scheduledDate: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  jobLength?: 'half_day' | 'full_day' | null;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -20,9 +24,13 @@ export function JobDetailDetailsCard({
   postcode,
   description,
   scheduledDate,
+  startTime,
+  endTime,
+  jobLength,
   createdAt,
   updatedAt,
 }: JobDetailDetailsCardProps) {
+  const timeLabel = formatTimeRangeOrLength(startTime, endTime, jobLength);
   return (
     <Card
       className={cn(
@@ -38,7 +46,7 @@ export function JobDetailDetailsCard({
           <div className="flex items-start gap-2">
             <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">{address || '—'}</p>
+              <p className="text-sm font-medium break-words text-foreground">{address || '—'}</p>
               <div className="mt-1 flex items-center gap-1">
                 <span className="text-sm text-muted-foreground">{postcode || '—'}</span>
                 <CopyButton value={postcode} label="Copy postcode" />
@@ -51,16 +59,20 @@ export function JobDetailDetailsCard({
           <div>
             <div className="flex items-start gap-2">
               <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{description}</p>
+              <p className="break-words text-sm whitespace-pre-wrap text-muted-foreground">{description}</p>
             </div>
           </div>
         )}
 
-        {scheduledDate && (
+        {(scheduledDate || timeLabel) && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Calendar className="size-4 shrink-0" />
             <span>
-              Scheduled: {format(new Date(scheduledDate), 'EEEE, MMM d, yyyy')}
+              Scheduled:{' '}
+              {scheduledDate
+                ? format(new Date(scheduledDate), 'EEEE, MMM d, yyyy')
+                : 'date not set'}
+              {timeLabel && ` · ${timeLabel}`}
             </span>
           </div>
         )}

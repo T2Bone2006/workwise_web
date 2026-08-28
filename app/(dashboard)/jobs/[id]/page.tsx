@@ -46,6 +46,8 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       priority,
       job_length,
       scheduled_date,
+      scheduled_time,
+      end_time,
       created_at,
       updated_at,
       started_at,
@@ -197,6 +199,8 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     priority: (jobRow.priority as JobDetailJob['priority']) ?? 'normal',
     job_length: (jobRow.job_length as JobDetailJob['job_length']) ?? null,
     scheduled_date: jobRow.scheduled_date ?? null,
+    scheduled_time: jobRow.scheduled_time ?? null,
+    end_time: jobRow.end_time ?? null,
     created_at: jobRow.created_at,
     updated_at: jobRow.updated_at ?? null,
     started_at: jobRow.started_at ?? null,
@@ -319,7 +323,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <JobDetailHeader
         jobId={job.id}
         referenceNumber={job.reference_number}

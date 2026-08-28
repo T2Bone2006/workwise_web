@@ -26,6 +26,10 @@ export interface JobDetailJob {
   priority: JobPriority;
   job_length: 'half_day' | 'full_day' | null;
   scheduled_date: string | null;
+  /** Optional start time (e.g. `09:00:00`). */
+  scheduled_time: string | null;
+  /** Optional finish time paired with scheduled_time. */
+  end_time: string | null;
   created_at: string;
   updated_at: string | null;
   started_at: string | null;

@@ -39,6 +39,8 @@ export interface DispatchedJobsFilters {
   receiving_tenant_id?: string;
   status?: JobStatus;
   import_source_id?: string;
+  /** Filter dispatches whose canonical job is in this import batch. */
+  canonical_job_ids?: string[];
   page?: number;
 }
 
@@ -167,6 +169,10 @@ export async function getDispatchedJobs(
   filters: DispatchedJobsFilters = {}
 ): Promise<{ dispatches: NetworkDispatchedJobRow[]; totalCount: number; error: Error | null }> {
   try {
+    if (filters.canonical_job_ids && filters.canonical_job_ids.length === 0) {
+      return { dispatches: [], totalCount: 0, error: null };
+    }
+
     const supabase = await createClient();
     const page = Math.max(1, filters.page ?? 1);
     const from = (page - 1) * PAGE_SIZE;
@@ -204,7 +210,9 @@ export async function getDispatchedJobs(
     if (filters.status) {
       query = query.eq('canonical_job.status', filters.status);
     }
-    if (filters.import_source_id) {
+    if (filters.canonical_job_ids && filters.canonical_job_ids.length > 0) {
+      query = query.in('canonical_job_id', filters.canonical_job_ids);
+    } else if (filters.import_source_id) {
       if (filters.import_source_id === 'ungrouped') {
         query = query.is('canonical_job.import_source_id', null);
       } else {

@@ -37,7 +37,7 @@ export function DashboardShell({
   const dashboardHome = pathname === '/dashboard';
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
@@ -45,7 +45,7 @@ export function DashboardShell({
         networkBadge={networkBadge}
         features={features}
       />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {viewAsTenantName && <ViewAsBanner tenantName={viewAsTenantName} />}
         <Topbar
           tenantName={tenantName}
@@ -55,8 +55,8 @@ export function DashboardShell({
         />
         <main
           className={cn(
-            'min-h-0 flex-1 p-6',
-            dashboardHome ? 'overflow-hidden' : 'overflow-auto'
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden p-6',
+            dashboardHome ? 'overflow-y-hidden' : 'overflow-y-auto'
           )}
         >
           {children}

@@ -81,9 +81,9 @@ export function JobDetailView({
     industryData !== undefined && !isCompleted && !isIndustryDataEmpty(industryData);
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-      {/* Left column */}
-      <div className="space-y-6">
+    <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      {/* Left column — min-w-0 so Leaflet/map content cannot blow out the page width */}
+      <div className="min-w-0 space-y-6">
         {isNetworkOriginView && (
           <Alert className="border-primary/20 bg-primary/5 text-primary">
             <AlertDescription>
@@ -96,6 +96,9 @@ export function JobDetailView({
           postcode={job.postcode}
           description={job.job_description}
           scheduledDate={job.scheduled_date}
+          startTime={job.scheduled_time}
+          endTime={job.end_time}
+          jobLength={job.job_length}
           createdAt={job.created_at}
           updatedAt={job.updated_at}
         />
@@ -122,7 +125,7 @@ export function JobDetailView({
           />
         )}
         {mapData != null && (
-          <Card>
+          <Card className="min-w-0 overflow-hidden">
             <CardHeader>
               <CardTitle>Location</CardTitle>
               <CardDescription>
@@ -131,7 +134,7 @@ export function JobDetailView({
                   : 'Job location on map'}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="min-w-0">
               <JobLocationMap
                 jobLocation={mapData.jobLocation}
                 workerLocation={mapData.workerLocation}
@@ -161,7 +164,7 @@ export function JobDetailView({
       </div>
 
       {/* Right column */}
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6 lg:w-[340px] lg:shrink-0">
         <JobDetailCustomerCard
           jobId={job.id}
           customerId={job.customer_id}

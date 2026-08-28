@@ -35,6 +35,14 @@ async function setOriginMetadata(
   });
 }
 
+function readUuidCookie(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  name: string
+): string | null {
+  const value = cookieStore.get(name)?.value ?? null;
+  return value && isUuid(value) ? value : null;
+}
+
 /**
  * If a previous view-as left the admin on a client tenant (cookies gone),
  * restore their real tenant_id from app_metadata.
@@ -45,8 +53,9 @@ export async function recoverAbandonedViewAsIfNeeded(): Promise<void> {
     if (!admin) return;
 
     const cookieStore = await cookies();
-    const activeViewAs = cookieStore.get(VIEW_AS_TENANT_COOKIE)?.value;
-    if (activeViewAs && isUuid(activeViewAs)) return;
+    const activeViewAs = readUuidCookie(cookieStore, VIEW_AS_TENANT_COOKIE);
+    // Intentional view-as session — leave tenant_id alone.
+    if (activeViewAs) return;
 
     const supabase = await createClient();
     const {
@@ -62,6 +71,20 @@ export async function recoverAbandonedViewAsIfNeeded(): Promise<void> {
 
     const origin = authUser.user.app_metadata?.[VIEW_AS_ORIGIN_META_KEY];
     if (typeof origin !== 'string' || !isUuid(origin)) return;
+
+    const { data: userRow } = await adminClient
+      .from('users')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .maybeSingle();
+    const currentTenantId = (userRow?.tenant_id as string | null) ?? null;
+
+    // Already back on the origin tenant — just clear leftover metadata/cookies.
+    if (currentTenantId === origin) {
+      await setOriginMetadata(user.id, null);
+      await clearViewAsCookies();
+      return;
+    }
 
     await adminClient.from('users').update({ tenant_id: origin }).eq('id', user.id);
     await setOriginMetadata(user.id, null);
@@ -87,10 +110,10 @@ export async function getViewAsState(): Promise<ViewAsState> {
   if (!admin) return empty;
 
   const cookieStore = await cookies();
-  const tenantId = cookieStore.get(VIEW_AS_TENANT_COOKIE)?.value ?? null;
-  const originTenantId = cookieStore.get(VIEW_AS_ORIGIN_COOKIE)?.value ?? null;
+  const tenantId = readUuidCookie(cookieStore, VIEW_AS_TENANT_COOKIE);
+  const originTenantId = readUuidCookie(cookieStore, VIEW_AS_ORIGIN_COOKIE);
 
-  if (!tenantId || !isUuid(tenantId)) return empty;
+  if (!tenantId) return empty;
 
   let tenantName: string | null = null;
   try {
@@ -109,14 +132,16 @@ export async function getViewAsState(): Promise<ViewAsState> {
     active: true,
     tenantId,
     tenantName,
-    originTenantId: originTenantId && isUuid(originTenantId) ? originTenantId : null,
+    originTenantId,
   };
 }
 
+/** Clear view-as cookies with the same attributes they were set with (required for delete). */
 export async function clearViewAsCookies(): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.delete(VIEW_AS_TENANT_COOKIE);
-  cookieStore.delete(VIEW_AS_ORIGIN_COOKIE);
+  const expired = { ...VIEW_AS_COOKIE_OPTIONS, maxAge: 0 };
+  cookieStore.set(VIEW_AS_TENANT_COOKIE, '', expired);
+  cookieStore.set(VIEW_AS_ORIGIN_COOKIE, '', expired);
 }
 
 /**
@@ -125,39 +150,49 @@ export async function clearViewAsCookies(): Promise<void> {
  */
 export async function restoreViewAsTenantIfNeeded(): Promise<void> {
   const cookieStore = await cookies();
-  const originTenantId = cookieStore.get(VIEW_AS_ORIGIN_COOKIE)?.value ?? null;
-  const viewAsTenantId = cookieStore.get(VIEW_AS_TENANT_COOKIE)?.value ?? null;
+  const originFromCookie = readUuidCookie(cookieStore, VIEW_AS_ORIGIN_COOKIE);
+  const viewAsTenantId = readUuidCookie(cookieStore, VIEW_AS_TENANT_COOKIE);
 
-  try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    if (!user?.id) {
-      await clearViewAsCookies();
-      return;
-    }
-
-    const adminClient = createAdminClient();
-    const { data: authUser } = await adminClient.auth.admin.getUserById(user.id);
-    const metaOrigin = authUser.user?.app_metadata?.[VIEW_AS_ORIGIN_META_KEY];
-
-    const origin =
-      (originTenantId && isUuid(originTenantId) ? originTenantId : null) ??
-      (typeof metaOrigin === 'string' && isUuid(metaOrigin) ? metaOrigin : null);
-
-    if (!viewAsTenantId && !origin) return;
-
-    if (origin) {
-      await adminClient.from('users').update({ tenant_id: origin }).eq('id', user.id);
-      await setOriginMetadata(user.id, null);
-    }
-  } catch (err) {
-    console.error('[restoreViewAsTenantIfNeeded]', err);
-  } finally {
+  if (!user?.id) {
     await clearViewAsCookies();
+    return;
   }
+
+  const adminClient = createAdminClient();
+  const { data: authUser } = await adminClient.auth.admin.getUserById(user.id);
+  const metaOrigin = authUser.user?.app_metadata?.[VIEW_AS_ORIGIN_META_KEY];
+  const originFromMeta =
+    typeof metaOrigin === 'string' && isUuid(metaOrigin) ? metaOrigin : null;
+
+  const origin = originFromCookie ?? originFromMeta;
+
+  if (!viewAsTenantId && !origin) {
+    await clearViewAsCookies();
+    return;
+  }
+
+  if (!origin) {
+    throw new Error(
+      'Cannot exit view-as: original tenant is missing. Sign out and back in, or contact support.'
+    );
+  }
+
+  const { error } = await adminClient
+    .from('users')
+    .update({ tenant_id: origin })
+    .eq('id', user.id);
+  if (error) {
+    console.error('[restoreViewAsTenantIfNeeded] tenant restore failed', error);
+    throw new Error(error.message);
+  }
+
+  await setOriginMetadata(user.id, null);
+  await clearViewAsCookies();
 }
 
 export async function setViewAsCookies(
@@ -168,6 +203,11 @@ export async function setViewAsCookies(
   cookieStore.set(VIEW_AS_TENANT_COOKIE, tenantId, VIEW_AS_COOKIE_OPTIONS);
   if (originTenantId) {
     cookieStore.set(VIEW_AS_ORIGIN_COOKIE, originTenantId, VIEW_AS_COOKIE_OPTIONS);
+  } else {
+    cookieStore.set(VIEW_AS_ORIGIN_COOKIE, '', {
+      ...VIEW_AS_COOKIE_OPTIONS,
+      maxAge: 0,
+    });
   }
 }
 

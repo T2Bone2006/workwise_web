@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { DEFAULT_AI_MODEL } from '@/lib/ai/model';
+import { DEFAULT_AI_MODEL, estimateAiCostUsd } from '@/lib/ai/model';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -16,7 +16,8 @@ export interface AICallParams {
     | 'value_transformation'
     | 'worker_interview_parsing'
     | 'date_parsing'
-    | 'description_summary';
+    | 'description_summary'
+    | 'row_extraction';
   prompt: string;
   inputData: Record<string, unknown>;
   jobId?: string;
@@ -90,9 +91,7 @@ export async function callAIWithLogging<T>(
   const tokensOutput = response.usage.output_tokens;
   const tokensTotal = tokensInput + tokensOutput;
 
-  const costInput = (tokensInput / 1_000_000) * 3.0;
-  const costOutput = (tokensOutput / 1_000_000) * 15.0;
-  const totalCost = costInput + costOutput;
+  const totalCost = estimateAiCostUsd(model, tokensInput, tokensOutput);
 
   const { data: logData, error: logError } = await supabase
     .from('ai_interactions')

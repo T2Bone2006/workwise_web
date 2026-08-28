@@ -23,6 +23,11 @@ export const createJobSchema = z.object({
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid time')
     .optional()
     .or(z.literal('')),
+  end_time: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid time')
+    .optional()
+    .or(z.literal('')),
   assigned_worker_id: z
     .union([
       z.string().uuid(),

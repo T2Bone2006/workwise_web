@@ -86,17 +86,17 @@ export function JobLocationMap({
   return (
     <div
       className={cn(
-        'relative z-0 isolate overflow-hidden rounded-lg border border-border/80 bg-card',
+        'relative z-0 isolate w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border/80 bg-card',
         'shadow-[var(--shadow-soft)] dark:border-white/[0.06]'
       )}
     >
-      <div className="relative z-0 h-[400px] bg-muted/20">
+      <div className="relative z-0 h-[400px] w-full min-w-0 bg-muted/20">
         <MapContainer
           center={[jobLocation.lat, jobLocation.lng]}
           zoom={workerLocation ? 12 : 14}
-          style={{ height: '100%', width: '100%' }}
+          style={{ height: '100%', width: '100%', maxWidth: '100%' }}
           scrollWheelZoom={true}
-          className="rounded-lg"
+          className="h-full w-full max-w-full rounded-lg"
         >
           <TileLayer
             attribution='Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS'

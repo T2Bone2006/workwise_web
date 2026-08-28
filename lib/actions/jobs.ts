@@ -6,7 +6,6 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getJobsForExport, type ExportJobRow, type JobsFilters } from '@/lib/data/jobs';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 import { createJobSchema, updateJobCustomerSchema } from '@/lib/validations/job';
-import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { haversineDistance } from '@/lib/utils/haversine';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
@@ -51,6 +50,7 @@ type CreateJobPayload = {
   job_length?: 'half_day' | 'full_day';
   scheduled_date?: string;
   scheduled_time?: string;
+  end_time?: string;
   assigned_worker_id?: string;
   /** If provided, use these skills and log user edits for AI training. */
   overrideSkills?: OverrideSkillsPayload;
@@ -68,6 +68,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       job_length: payload.job_length,
       scheduled_date: payload.scheduled_date?.trim() || undefined,
       scheduled_time: payload.scheduled_time?.trim() || undefined,
+      end_time: payload.end_time?.trim() || undefined,
       assigned_worker_id: payload.assigned_worker_id?.trim() || undefined,
     };
 
@@ -176,6 +177,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
         job_length: parsed.data.job_length ?? null,
         scheduled_date: parsed.data.scheduled_date || null,
         scheduled_time: parsed.data.scheduled_time || null,
+        end_time: parsed.data.end_time || null,
         required_skills: requiredSkills,
         lat: geocoded?.lat ?? null,
         lng: geocoded?.lng ?? null,
@@ -735,7 +737,7 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
 
     const { data: job, error: jobFetchError } = await supabase
       .from('jobs')
-      .select('id, postcode, required_skills, tenant_id')
+      .select('id, postcode, address, lat, lng, required_skills, tenant_id')
       .eq('id', jobId)
       .eq('tenant_id', userData.tenant_id)
       .single();
@@ -744,7 +746,7 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
       return { success: false, error: 'Job not found' };
     }
 
-    const jobCoords = await postcodeToLatLng(job.postcode);
+    const jobCoords = await resolveJobCoordsForAllocation(job);
     const requiredSkills = (job.required_skills as string[] | null) ?? [];
 
     const { workers: workersList, error: workersError } = await getAssignableWorkers(
@@ -926,6 +928,32 @@ export async function getRankedWorkersForJob(jobId: string): Promise<RankedWorke
   }
 }
 
+/**
+ * Where a job is, for allocation purposes.
+ *
+ * Prefers the lat/lng stored at import — that was already resolved from the
+ * postcode *or* the address, so a well-formed-but-nonexistent postcode still
+ * has usable coordinates. Only then does it look the postcode up live, and
+ * finally geocode the address. A wrong postcode should not strand a job whose
+ * address we can place.
+ */
+async function resolveJobCoordsForAllocation(job: {
+  lat?: unknown;
+  lng?: unknown;
+  postcode?: string | null;
+  address?: string | null;
+}): Promise<{ lat: number; lng: number } | null> {
+  const storedLat = Number(job.lat);
+  const storedLng = Number(job.lng);
+  if (job.lat != null && job.lng != null && Number.isFinite(storedLat) && Number.isFinite(storedLng)) {
+    return { lat: storedLat, lng: storedLng };
+  }
+  return resolveJobCoordinates({
+    postcode: job.postcode ?? null,
+    fullAddress: buildFullAddressString([job.address ?? '', job.postcode ?? '']),
+  });
+}
+
 async function persistAutoAssignFailureReason(
   supabase: Awaited<ReturnType<typeof createClient>>,
   jobId: string,
@@ -987,7 +1015,7 @@ export async function autoAllocateJob(
 
     const { data: job, error: jobFetchError } = await supabase
       .from('jobs')
-      .select('id, postcode, required_skills, tenant_id')
+      .select('id, postcode, address, lat, lng, required_skills, tenant_id')
       .eq('id', jobId)
       .eq('tenant_id', tenantId)
       .single();
@@ -996,9 +1024,11 @@ export async function autoAllocateJob(
       return { success: false, error: 'Job not found' };
     }
 
-    const jobCoords = await postcodeToLatLng(job.postcode);
+    const jobCoords = await resolveJobCoordsForAllocation(job);
     if (!jobCoords) {
-      return await fail('Invalid job postcode');
+      return await fail(
+        `Could not locate this job — postcode ${job.postcode ? `"${job.postcode}"` : '(missing)'} did not resolve and the address could not be geocoded either.`
+      );
     }
 
     const requiredSkills =

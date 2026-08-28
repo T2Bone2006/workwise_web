@@ -1,14 +1,12 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Eye, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TenantListItem } from '@/lib/actions/impersonation';
 
 export function ViewAsTenantList({ tenants }: { tenants: TenantListItem[] }) {
-  const router = useRouter();
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -41,8 +39,7 @@ export function ViewAsTenantList({ tenants }: { tenants: TenantListItem[] }) {
           setPendingId(null);
           return;
         }
-        router.push(data.redirectTo ?? '/dashboard');
-        router.refresh();
+        window.location.assign(data.redirectTo ?? '/dashboard');
       } catch {
         setError('Failed to start view-as');
         setPendingId(null);

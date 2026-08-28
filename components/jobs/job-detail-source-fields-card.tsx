@@ -28,14 +28,14 @@ export function JobDetailSourceFieldsCard({ sourceFields }: JobDetailSourceField
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex min-w-0 flex-wrap gap-1.5">
           {entries.map(([key, value]) => (
             <span
               key={key}
               title={`${key}: ${value}`}
-              className="inline-flex max-w-full rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+              className="inline-flex max-w-full min-w-0 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
             >
-              <span className="truncate">
+              <span className="min-w-0 truncate">
                 <span className="font-medium text-foreground/80">{key}:</span> {value}
               </span>
             </span>

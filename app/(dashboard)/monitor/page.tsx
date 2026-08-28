@@ -59,18 +59,29 @@ export default async function MonitorPage({ searchParams }: MonitorPageProps) {
         ? (raw.status as MonitorStatus)
         : undefined;
     const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : 1;
+    const activeBatchId = raw.batchId?.trim() || undefined;
 
-    const [dispatchesResult, connectionsResult, batchesResult] = await Promise.all([
-      getDispatchedJobs(tenantId, {
-        search: raw.search?.trim() || undefined,
-        status: parsedStatus as JobStatus | undefined,
-        receiving_tenant_id: raw.receiving_tenant_id?.trim() || undefined,
-        import_source_id: raw.batchId?.trim() || undefined,
-        page,
-      }),
+    const [connectionsResult, batchesResult] = await Promise.all([
       getConnectionsForTenant(tenantId),
       getImportBatchesForTenant(tenantId),
     ]);
+
+    const batches = batchesResult.error ? [] : batchesResult.batches;
+    const activeBatch = activeBatchId
+      ? batches.find((batch) => batch.id === activeBatchId) ?? null
+      : null;
+
+    const dispatchesResult = await getDispatchedJobs(tenantId, {
+      search: raw.search?.trim() || undefined,
+      status: parsedStatus as JobStatus | undefined,
+      receiving_tenant_id: raw.receiving_tenant_id?.trim() || undefined,
+      canonical_job_ids:
+        activeBatchId && activeBatchId !== 'ungrouped'
+          ? (activeBatch?.job_ids ?? [])
+          : undefined,
+      import_source_id: activeBatchId === 'ungrouped' ? 'ungrouped' : undefined,
+      page,
+    });
 
     if (dispatchesResult.error) {
       return <MonitorErrorFallback />;
@@ -95,7 +106,7 @@ export default async function MonitorPage({ searchParams }: MonitorPageProps) {
           page,
         }}
         connections={activeConnections}
-        batches={batchesResult.error ? [] : batchesResult.batches}
+        batches={batchesResult.error ? [] : batches}
       />
     );
   } catch (err) {

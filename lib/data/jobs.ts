@@ -34,6 +34,8 @@ export interface JobsFilters {
   priority?: JobPriority;
   customer_id?: string;
   import_source_id?: string;
+  /** Jobs from a specific import run (`import_history.job_ids`), not the whole import source. */
+  job_ids?: string[];
   date_from?: string;
   date_to?: string;
   /**
@@ -57,8 +59,10 @@ export interface JobRow {
   status: JobStatus | null;
   priority: JobPriority | null;
   scheduled_date: string | null;
-  /** Time portion when scheduled (e.g. `14:30:00`). */
+  /** Start time when scheduled (e.g. `14:30:00`). */
   scheduled_time: string | null;
+  /** Optional finish time paired with scheduled_time (e.g. `16:00:00`). */
+  end_time?: string | null;
   created_at: string;
   updated_at: string | null;
   customer_name: string | null;
@@ -233,7 +237,9 @@ function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
       q = q.eq('customer_id', filters.customer_id);
     }
   }
-  if (filters.import_source_id) {
+  if (filters.job_ids && filters.job_ids.length > 0) {
+    q = q.in('id', filters.job_ids);
+  } else if (filters.import_source_id) {
     if (filters.import_source_id === 'ungrouped') {
       q = q.is('import_source_id', null);
     } else {
@@ -321,6 +327,7 @@ function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow 
     priority,
     scheduled_date: row.scheduled_date as string | null,
     scheduled_time: (row.scheduled_time as string | null) ?? null,
+    end_time: (row.end_time as string | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string | null,
     customer_name,
@@ -405,6 +412,10 @@ export async function getJobsForTenant(
   filters: JobsFilters & { page?: number }
 ): Promise<{ jobs: JobRow[]; totalCount: number; error: Error | null }> {
   try {
+    if (filters.job_ids && filters.job_ids.length === 0) {
+      return { jobs: [], totalCount: 0, error: null };
+    }
+
     const supabase = await createClient();
     const page = Math.max(1, filters.page ?? 1);
     const from = (page - 1) * PAGE_SIZE;
@@ -592,6 +603,7 @@ export async function getUnassignedJobsForTenant(
         priority: row.priority as JobRow['priority'],
         scheduled_date: row.scheduled_date as string | null,
         scheduled_time: (row.scheduled_time as string | null) ?? null,
+        end_time: (row.end_time as string | null) ?? null,
         created_at: row.created_at as string,
         updated_at: row.updated_at as string | null,
         customer_name: customer?.name ?? null,
@@ -623,12 +635,63 @@ export interface ImportBatchRow {
   started_at: string | null;
   rows_imported: number;
   import_source_id: string | null;
+  /** Job IDs from this import that still exist with a live status. */
+  job_ids: string[];
   pending: number;
   pending_send: number;
   assigned: number;
   in_progress: number;
   paused: number;
   completed: number;
+}
+
+const LIVE_BATCH_STATUSES: JobStatus[] = [
+  'pending',
+  'pending_send',
+  'assigned',
+  'in_progress',
+  'paused',
+  'completed',
+];
+
+type BatchStatusCounts = {
+  pending: number;
+  pending_send: number;
+  assigned: number;
+  in_progress: number;
+  paused: number;
+  completed: number;
+};
+
+function emptyBatchStatusCounts(): BatchStatusCounts {
+  return {
+    pending: 0,
+    pending_send: 0,
+    assigned: 0,
+    in_progress: 0,
+    paused: 0,
+    completed: 0,
+  };
+}
+
+function liveJobTotal(counts: BatchStatusCounts): number {
+  return (
+    counts.pending +
+    counts.pending_send +
+    counts.assigned +
+    counts.in_progress +
+    counts.paused +
+    counts.completed
+  );
+}
+
+function incrementBatchStatusCount(counts: BatchStatusCounts, status: JobStatus): void {
+  if (status === 'pending') counts.pending += 1;
+  if (status === 'pending_send') counts.pending_send += 1;
+  if (status === 'assigned') counts.assigned += 1;
+  if (status === 'in_progress') counts.in_progress += 1;
+  if (status === 'paused') counts.paused += 1;
+  if (status === 'completed') counts.completed += 1;
 }
 
 export async function getImportBatchesForTenant(
@@ -638,7 +701,7 @@ export async function getImportBatchesForTenant(
     const supabase = await createClient();
     const { data: historyRows, error: historyError } = await supabase
       .from('import_history')
-      .select('id, file_name, started_at, rows_imported, import_source_id')
+      .select('id, file_name, started_at, rows_imported, import_source_id, job_ids')
       .eq('tenant_id', tenantId)
       .order('started_at', { ascending: false });
 
@@ -648,113 +711,78 @@ export async function getImportBatchesForTenant(
     }
 
     const rows = Array.isArray(historyRows) ? historyRows : [];
-    const importSourceIds = rows
-      .map((row) => (row as { import_source_id?: string | null }).import_source_id ?? null)
-      .filter((id): id is string => !!id);
-
-    const countsBySource = new Map<
-      string,
-      {
-        pending: number;
-        pending_send: number;
-        assigned: number;
-        in_progress: number;
-        paused: number;
-        completed: number;
+    const allHistoryJobIds = new Set<string>();
+    for (const row of rows) {
+      const ids = (row as { job_ids?: string[] | null }).job_ids;
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        if (typeof id === 'string' && id.length > 0) allHistoryJobIds.add(id);
       }
-    >();
+    }
 
-    if (importSourceIds.length > 0) {
-      const { data: jobRows, error: jobsError } = await supabase
-        .from('jobs')
-        .select('import_source_id, status')
-        .eq('tenant_id', tenantId)
-        .in('import_source_id', importSourceIds)
-        .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'paused', 'completed']);
+    const statusByJobId = new Map<string, JobStatus>();
+    if (allHistoryJobIds.size > 0) {
+      const idList = [...allHistoryJobIds];
+      const CHUNK = 500;
+      for (let i = 0; i < idList.length; i += CHUNK) {
+        const chunk = idList.slice(i, i + CHUNK);
+        const { data: jobRows, error: jobsError } = await supabase
+          .from('jobs')
+          .select('id, status')
+          .eq('tenant_id', tenantId)
+          .in('id', chunk)
+          .in('status', LIVE_BATCH_STATUSES);
 
-      if (jobsError) {
-        console.error('[getImportBatchesForTenant] jobs', jobsError);
-        return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
-      }
-
-      for (const row of Array.isArray(jobRows) ? jobRows : []) {
-        const sourceId = (row as { import_source_id?: string | null }).import_source_id ?? null;
-        const status = (row as { status?: JobStatus | null }).status ?? null;
-        if (!sourceId || !status) continue;
-        if (!countsBySource.has(sourceId)) {
-          countsBySource.set(sourceId, {
-            pending: 0,
-            pending_send: 0,
-            assigned: 0,
-            in_progress: 0,
-            paused: 0,
-            completed: 0,
-          });
+        if (jobsError) {
+          console.error('[getImportBatchesForTenant] jobs', jobsError);
+          return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
         }
-        const counts = countsBySource.get(sourceId)!;
-        if (status === 'pending') counts.pending += 1;
-        if (status === 'pending_send') counts.pending_send += 1;
-        if (status === 'assigned') counts.assigned += 1;
-        if (status === 'in_progress') counts.in_progress += 1;
-        if (status === 'paused') counts.paused += 1;
-        if (status === 'completed') counts.completed += 1;
+
+        for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
+          const id = (jobRow as { id?: string }).id;
+          const status = (jobRow as { status?: JobStatus | null }).status;
+          if (id && status) statusByJobId.set(id, status);
+        }
       }
+    }
+
+    function summarizeHistoryJobIds(jobIds: string[] | null | undefined): {
+      counts: BatchStatusCounts;
+      liveJobIds: string[];
+    } {
+      const counts = emptyBatchStatusCounts();
+      const liveJobIds: string[] = [];
+      if (!Array.isArray(jobIds)) return { counts, liveJobIds };
+      for (const id of jobIds) {
+        const status = statusByJobId.get(id);
+        if (!status) continue;
+        liveJobIds.push(id);
+        incrementBatchStatusCount(counts, status);
+      }
+      return { counts, liveJobIds };
     }
 
     const { data: ungroupedRows, error: ungroupedError } = await supabase
       .from('jobs')
-      .select('status')
+      .select('id, status')
       .eq('tenant_id', tenantId)
       .is('import_source_id', null)
-      .in('status', ['pending', 'pending_send', 'assigned', 'in_progress', 'paused', 'completed']);
+      .in('status', LIVE_BATCH_STATUSES);
 
     if (ungroupedError) {
       console.error('[getImportBatchesForTenant] ungrouped jobs', ungroupedError);
       return { batches: [], error: new Error(ungroupedError.message ?? 'Failed to load ungrouped job counts') };
     }
 
-    const ungroupedCounts = {
-      pending: 0,
-      pending_send: 0,
-      assigned: 0,
-      in_progress: 0,
-      paused: 0,
-      completed: 0,
-    };
+    const ungroupedCounts = emptyBatchStatusCounts();
+    const ungroupedJobIds: string[] = [];
     for (const row of Array.isArray(ungroupedRows) ? ungroupedRows : []) {
+      const id = (row as { id?: string }).id;
       const status = (row as { status?: JobStatus | null }).status ?? null;
-      if (!status) continue;
-      if (status === 'pending') ungroupedCounts.pending += 1;
-      if (status === 'pending_send') ungroupedCounts.pending_send += 1;
-      if (status === 'assigned') ungroupedCounts.assigned += 1;
-      if (status === 'in_progress') ungroupedCounts.in_progress += 1;
-      if (status === 'paused') ungroupedCounts.paused += 1;
-      if (status === 'completed') ungroupedCounts.completed += 1;
+      if (!id || !status) continue;
+      ungroupedJobIds.push(id);
+      incrementBatchStatusCount(ungroupedCounts, status);
     }
-
-    const emptyCounts = {
-      pending: 0,
-      pending_send: 0,
-      assigned: 0,
-      in_progress: 0,
-      paused: 0,
-      completed: 0,
-    };
-
-    const liveJobTotal = (counts: {
-      pending: number;
-      pending_send: number;
-      assigned: number;
-      in_progress: number;
-      paused: number;
-      completed: number;
-    }) =>
-      counts.pending +
-      counts.pending_send +
-      counts.assigned +
-      counts.in_progress +
-      counts.paused +
-      counts.completed;
 
     // Drop import batches with no remaining jobs (history row kept for audit).
     const batches: ImportBatchRow[] = rows
@@ -765,17 +793,16 @@ export async function getImportBatchesForTenant(
           started_at?: string | null;
           rows_imported?: number | null;
           import_source_id?: string | null;
+          job_ids?: string[] | null;
         };
-        const sourceId = r.import_source_id ?? null;
-        const counts = sourceId
-          ? countsBySource.get(sourceId) ?? emptyCounts
-          : emptyCounts;
+        const { counts, liveJobIds } = summarizeHistoryJobIds(r.job_ids);
         return {
           id: r.id,
           file_name: r.file_name ?? null,
           started_at: r.started_at ?? null,
           rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
-          import_source_id: sourceId,
+          import_source_id: r.import_source_id ?? null,
+          job_ids: liveJobIds,
           pending: counts.pending,
           pending_send: counts.pending_send,
           assigned: counts.assigned,
@@ -794,6 +821,7 @@ export async function getImportBatchesForTenant(
         started_at: null,
         rows_imported: ungroupedTotal,
         import_source_id: null,
+        job_ids: ungroupedJobIds,
         pending: ungroupedCounts.pending,
         pending_send: ungroupedCounts.pending_send,
         assigned: ungroupedCounts.assigned,

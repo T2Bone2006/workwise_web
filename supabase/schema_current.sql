@@ -152,7 +152,7 @@ CREATE TABLE public.jobs (
   network_dispatch_id uuid,
   job_length text CHECK (job_length = ANY (ARRAY['half_day'::text, 'full_day'::text])),
   source_fields jsonb NOT NULL DEFAULT '{}'::jsonb,
-  source_fields_text text GENERATED ALWAYS AS (source_fields::text) STORED,
+  source_fields_text text DEFAULT (source_fields)::text,
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
   CONSTRAINT jobs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT jobs_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),

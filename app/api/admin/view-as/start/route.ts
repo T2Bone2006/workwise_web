@@ -3,7 +3,6 @@ import { requireAdmin } from '@/lib/utils/admin';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import {
-  getViewAsState,
   isUuid,
   persistViewAsOrigin,
   restoreViewAsTenantIfNeeded,
@@ -24,10 +23,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid tenant' }, { status: 400 });
     }
 
-    const existing = await getViewAsState();
-    if (existing.active) {
-      await restoreViewAsTenantIfNeeded();
-    }
+    // Always unwind any prior view-as before starting a new one, so origin
+    // is the admin's real tenant — not another client they were stuck on.
+    await restoreViewAsTenantIfNeeded();
 
     const supabase = await createClient();
     const {
@@ -58,6 +56,12 @@ export async function POST(request: Request) {
     }
 
     const originTenantId = (userRow?.tenant_id as string | null) ?? null;
+    if (originTenantId === tenantId) {
+      return NextResponse.json(
+        { error: 'Already on this tenant' },
+        { status: 400 }
+      );
+    }
 
     const { error: updateError } = await admin
       .from('users')

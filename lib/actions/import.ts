@@ -6,34 +6,32 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { autoAllocateJobGroup } from '@/lib/actions/jobs';
 import { clusterKeyForPostcode } from '@/lib/jobs/assignment-ranking';
 import { getTenantSkillsById } from '@/lib/actions/skills';
-import { detectSkills } from '@/lib/detect-skills';
+import { detectSkillsBatch } from '@/lib/jobs/detect-skills-batch';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import {
-  applyResolvedDate,
-  collectUnparsedDateValues,
-  isScheduledDateMapped,
-} from '@/lib/import/parse-scheduled-date';
-import { resolveImportDatesWithAI } from '@/lib/import/resolve-import-dates';
-import { resolveImportPostcodesWithAI } from '@/lib/import/resolve-import-postcodes';
-import { resolveImportJobLengthsWithAI } from '@/lib/import/resolve-import-job-lengths';
-import { summarizeJobDescriptionsBatch } from '@/lib/import/summarize-job-description';
-import {
-  collectJobLengthsNeedingAi,
-  collectPostcodesNeedingAi,
-  prepareImportRows,
-  areCoreColumnsMapped,
-  type ImportResolveMaps,
-} from '@/lib/import/prepare-import-rows';
+  descriptionForInsert,
+  prepareExtractedRow,
+  type ExtractedJobRow,
+  type RowEdits,
+} from '@/lib/import/extracted-job-row';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
-/** Process 10 jobs at a time for AI skill detection to avoid rate limits. */
-const SKILL_DETECT_BATCH_SIZE = 10;
+/** Jobs per skill-detection AI call (one call per batch, not per job). */
+const SKILL_DETECT_BATCH_SIZE = 20;
 const SKILL_DETECT_DELAY_MS = 300;
 const GEOCODE_BATCH_SIZE = 5;
 const GEOCODE_DELAY_MS = 300;
 
 const AUTO_ASSIGN_CONCURRENCY = 5;
+
+/** An imported job that could not be auto-allocated, with the reason why. */
+export type ImportAllocationFailure = {
+  reference: string;
+  address: string;
+  postcode: string;
+  reason: string;
+};
 
 export type ImportJobsResult =
   | {
@@ -42,6 +40,8 @@ export type ImportJobsResult =
       assignedCount: number;
       unassignedCount: number;
       errors?: string[];
+      /** Populated when auto-allocate ran and some jobs could not be assigned. */
+      allocationFailures?: ImportAllocationFailure[];
     }
   | { success: false; error: string; errors?: string[] };
 
@@ -80,12 +80,13 @@ function uniquifyReferenceNumber(
 
 export async function importJobs(params: {
   customerId: string;
-  columnMapping: Record<string, string>;
-  valueTransforms?: Record<string, Record<string, string>>;
+  /** AI-extracted rows from the preview step (re-validated here, never trusted as-is). */
+  extractedRows: ExtractedJobRow[];
+  /** Raw spreadsheet rows, index-aligned with the sheet — kept for source_fields. */
   csvData: Record<string, string>[];
-  csvHeaders?: string[];
+  /** Inline corrections the user made on failed preview rows, keyed by row index. */
+  rowEdits?: Record<number, RowEdits>;
   fileName?: string;
-  /** When true (default), auto-assign imported jobs to workers. */
   /** When true (default), auto-assign imported jobs to workers. */
   autoAllocate?: boolean;
   /**
@@ -93,13 +94,6 @@ export async function importJobs(params: {
    * When true, valid rows import and invalid ones are skipped.
    */
   allowPartialImport?: boolean;
-  /**
-   * Resolve maps from preview (raw → cleaned). Import reuses these so Review
-   * matches write; AI only runs again for leftovers.
-   */
-  preResolvedDates?: Record<string, string>;
-  preResolvedPostcodes?: Record<string, string>;
-  preResolvedJobLengths?: Record<string, 'half_day' | 'full_day'>;
 }): Promise<ImportJobsResult> {
   try {
     const supabase = await createClient();
@@ -135,6 +129,10 @@ export async function importJobs(params: {
       return { success: false, error: 'Customer not found.' };
     }
 
+    if (params.extractedRows.length === 0) {
+      return { success: false, error: 'Nothing to import.' };
+    }
+
     const tenantSkillRows = await getTenantSkillsById(tenantId);
     const tenantSkillsForDetect = tenantSkillRows.map(({ key, label }) => ({
       key,
@@ -142,7 +140,6 @@ export async function importJobs(params: {
     }));
 
     // Internal import_sources row per customer (FK for jobs / AI logs / batches).
-    // Mapping on this row is only updated after a successful import — same as customers.import_*.
     const { data: existingSource } = await supabase
       .from('import_sources')
       .select('id, times_used')
@@ -181,16 +178,6 @@ export async function importJobs(params: {
       resolvedSourceId = newSource?.id ?? null;
     }
 
-    const map = params.columnMapping;
-    const transforms = params.valueTransforms ?? {};
-
-    if (!areCoreColumnsMapped(map)) {
-      return {
-        success: false,
-        error: 'Map Address and Postcode before importing.',
-      };
-    }
-
     const { data: existingRefRows } = await supabase
       .from('jobs')
       .select('reference_number')
@@ -201,98 +188,43 @@ export async function importJobs(params: {
         .filter((r): r is string => !!r)
     );
 
-    const jobs: Record<string, unknown>[] = [];
-    const errors: string[] = [];
-    let refCounter = 0;
-    const dateMapped = isScheduledDateMapped(map);
-
-    // Same resolve pipeline as preview: start from pre-resolved maps, AI only leftovers.
-    const resolveMaps: ImportResolveMaps = {
-      dates: { ...(params.preResolvedDates ?? {}) },
-      postcodes: { ...(params.preResolvedPostcodes ?? {}) },
-      jobLengths: { ...(params.preResolvedJobLengths ?? {}) },
-    };
-
-    if (dateMapped) {
-      const dateCol = map.scheduled_date;
-      const stillUnparsed = collectUnparsedDateValues(params.csvData, dateCol).filter(
-        (raw) => !applyResolvedDate(raw, resolveMaps.dates)
-      );
-      if (stillUnparsed.length > 0) {
-        const extra = await resolveImportDatesWithAI(stillUnparsed, resolvedSourceId);
-        resolveMaps.dates = { ...resolveMaps.dates, ...extra };
-      }
-    }
-
-    const postcodesNeedingAi = collectPostcodesNeedingAi(
-      params.csvData,
-      map,
-      transforms
-    ).filter((raw) => !resolveMaps.postcodes[raw]);
-    if (postcodesNeedingAi.length > 0) {
-      const extra = await resolveImportPostcodesWithAI(postcodesNeedingAi, resolvedSourceId);
-      resolveMaps.postcodes = { ...resolveMaps.postcodes, ...extra };
-    }
-
-    const lengthsNeedingAi = collectJobLengthsNeedingAi(
-      params.csvData,
-      map,
-      transforms
-    ).filter((raw) => !resolveMaps.jobLengths[raw]);
-    if (lengthsNeedingAi.length > 0) {
-      const extra = await resolveImportJobLengthsWithAI(lengthsNeedingAi, resolvedSourceId);
-      resolveMaps.jobLengths = { ...resolveMaps.jobLengths, ...extra };
-    }
-
-    // Shared prepare = same rules as Review preview.
-    const prepared = prepareImportRows(params.csvData, map, transforms, resolveMaps, {
-      absoluteFieldsReady: true,
-    });
+    // Re-validate every AI-extracted row server-side. The preview ran the same
+    // rules client-side, but nothing reaches the database on the client's word.
+    const edits = params.rowEdits ?? {};
+    const prepared = params.extractedRows.map((extracted) =>
+      prepareExtractedRow(
+        extracted,
+        params.csvData[extracted.row_index] ?? {},
+        edits[extracted.row_index] ?? {}
+      )
+    );
 
     const invalidPrepared = prepared.filter((row) => !row.ok);
     if (invalidPrepared.length > 0 && params.allowPartialImport !== true) {
       return {
         success: false,
-        error: `${invalidPrepared.length} row${invalidPrepared.length === 1 ? '' : 's'} still have issues. Fix the spreadsheet and re-import, or opt in to a partial import.`,
+        error: `${invalidPrepared.length} row${invalidPrepared.length === 1 ? '' : 's'} still have issues. Fix them in the preview, or opt in to a partial import.`,
         errors: invalidPrepared.map((row) => `Row ${row.rowIndex + 1}: ${row.errors.join('; ')}`),
       };
     }
 
-    const descriptionInputs: Array<{
-      mappedDescription: string;
-      unmappedAppendix: string;
-      address: string;
-      descriptionFallback: string;
-    }> = [];
+    const jobs: Record<string, unknown>[] = [];
+    const errors: string[] = [];
+    let refCounter = 0;
 
     for (const row of prepared) {
       if (!row.ok) {
         errors.push(`Row ${row.rowIndex + 1}: ${row.errors.join('; ')}`);
-        descriptionInputs.push({
-          mappedDescription: '',
-          unmappedAppendix: '',
-          address: '',
-          descriptionFallback: '',
-        });
         continue;
       }
 
-      descriptionInputs.push({
-        mappedDescription: row.mappedDescription,
-        unmappedAppendix: row.unmappedAppendix,
-        address: row.address,
-        descriptionFallback: row.descriptionFallback,
-      });
-
       refCounter += 1;
-      const preferredRef = row.referenceNumber || `IMP-${Date.now()}-${refCounter}`;
       const referenceNumber = uniquifyReferenceNumber(
-        preferredRef,
+        row.referenceNumber || `IMP-${Date.now()}-${refCounter}`,
         usedReferenceNumbers,
         refCounter
       );
-
-      const fullAddress = buildFullAddressString([row.address, row.postcode]);
+      const description = descriptionForInsert(row);
 
       jobs.push({
         tenant_id: tenantId,
@@ -301,64 +233,32 @@ export async function importJobs(params: {
         customer_id: customerId,
         address: row.address,
         postcode: row.postcode,
-        job_description: row.descriptionFallback,
+        job_description: description,
         source_fields: row.sourceFields,
         status: 'pending',
         priority: row.priority,
         job_length: row.jobLength,
         scheduled_date: row.scheduledDate,
+        scheduled_time: row.startTime,
+        end_time: row.endTime,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         required_skills: [] as string[],
         lat: null,
         lng: null,
-        _description: row.descriptionFallback,
+        _description: description,
         _address: row.address,
         _priority: row.priority,
-        _fullAddress: fullAddress,
-        _descIndex: descriptionInputs.length - 1,
+        _fullAddress: buildFullAddressString([row.address, row.postcode]),
       });
     }
 
-    // If a date column was mapped and every row failed, fail the import clearly.
-    if (dateMapped && jobs.length === 0 && params.csvData.length > 0) {
+    if (jobs.length === 0) {
       return {
         success: false,
-        error:
-          errors[0] ??
-          'Scheduled date is mapped but no rows had a usable date. Fix the date column or unmap it.',
+        error: errors[0] ?? 'No rows could be imported.',
         errors: errors.length ? errors : undefined,
       };
-    }
-
-    // AI description summaries (fallback = mapped notes only — extras stay in source_fields).
-    const summaryTargets = jobs.map((job) => {
-      const idx = (job as Record<string, unknown>)._descIndex as number;
-      const input = descriptionInputs[idx]!;
-      return {
-        mappedDescription: input.mappedDescription,
-        unmappedAppendix: input.unmappedAppendix,
-        address: input.address,
-      };
-    });
-    try {
-      const summaries = await summarizeJobDescriptionsBatch(summaryTargets);
-      jobs.forEach((job, j) => {
-        const record = job as Record<string, unknown>;
-        const idx = record._descIndex as number;
-        const fallback =
-          descriptionInputs[idx]?.descriptionFallback ?? (record._description as string);
-        const summary = summaries[j]?.trim();
-        const finalDesc = summary || fallback;
-        record.job_description = finalDesc;
-        record._description = finalDesc;
-        delete record._descIndex;
-      });
-    } catch (e) {
-      console.error('[importJobs] description summaries failed', e);
-      jobs.forEach((job) => {
-        delete (job as Record<string, unknown>)._descIndex;
-      });
     }
 
     try {
@@ -383,24 +283,29 @@ export async function importJobs(params: {
       console.error('[importJobs] geocoding failed', e);
     }
 
+    // Skill detection stays its own step: it matches a job against THIS tenant's
+    // skill vocabulary, which the extraction call never sees. One call per batch
+    // of jobs — not one per job — so the vocabulary is sent once per batch.
     try {
       for (let i = 0; i < jobs.length; i += SKILL_DETECT_BATCH_SIZE) {
         const batch = jobs.slice(i, i + SKILL_DETECT_BATCH_SIZE);
-        await Promise.all(
-          batch.map(async (job) => {
-            const { data: skills } = await detectSkills({
-              description: (job as Record<string, unknown>)._description as string,
-              address: (job as Record<string, unknown>)._address as string,
-              priority: (job as Record<string, unknown>)._priority as string,
-              tenantSkills: tenantSkillsForDetect,
-            });
-            (job as Record<string, unknown>).required_skills = skills;
-            delete (job as Record<string, unknown>)._description;
-            delete (job as Record<string, unknown>)._address;
-            delete (job as Record<string, unknown>)._priority;
-            delete (job as Record<string, unknown>)._fullAddress;
-          })
-        );
+        const skillsPerJob = await detectSkillsBatch({
+          supabase,
+          tenantId,
+          tenantSkills: tenantSkillsForDetect,
+          importSourceId: resolvedSourceId,
+          jobs: batch.map((job) => {
+            const record = job as Record<string, unknown>;
+            return {
+              description: record._description as string,
+              address: record._address as string,
+              priority: record._priority as string,
+            };
+          }),
+        });
+        batch.forEach((job, j) => {
+          (job as Record<string, unknown>).required_skills = skillsPerJob[j] ?? [];
+        });
         if (i + SKILL_DETECT_BATCH_SIZE < jobs.length) {
           await new Promise((r) => setTimeout(r, SKILL_DETECT_DELAY_MS));
         }
@@ -414,8 +319,8 @@ export async function importJobs(params: {
     const insertedPostcodes = new Map<string, string | null>();
     const startedAt = new Date().toISOString();
 
-    // Always strip ephemeral `_` keys — skill-detect cleanup can be skipped on errors,
-    // and leftover `_fullAddress` makes PostgREST reject the entire batch.
+    // Always strip ephemeral `_` keys — leftover `_fullAddress` makes PostgREST
+    // reject the entire batch.
     const jobsToInsert = jobs.map((j) => toJobInsertRow(j as Record<string, unknown>));
 
     for (let i = 0; i < jobsToInsert.length; i += BATCH_SIZE) {
@@ -440,6 +345,7 @@ export async function importJobs(params: {
 
     const shouldAutoAllocate = params.autoAllocate !== false;
     let assignedCount = 0;
+    const failedAllocationIds: string[] = [];
 
     if (shouldAutoAllocate && jobIds.length > 0) {
       // Group jobs by site before allocating so several jobs in one building go
@@ -461,8 +367,27 @@ export async function importJobs(params: {
         results.forEach((r) => {
           assignedCount += r.assignedCount;
           if (r.failedJobIds.length > 0) {
+            failedAllocationIds.push(...r.failedJobIds);
             console.warn('[importJobs] auto-assign failed for jobs', r.failedJobIds.join(', '));
           }
+        });
+      }
+    }
+
+    // autoAllocate* already persisted a per-job reason; read them back so the
+    // import result can say WHY a job is unassigned, not just how many are.
+    const allocationFailures: ImportAllocationFailure[] = [];
+    if (failedAllocationIds.length > 0) {
+      const { data: failedRows } = await supabase
+        .from('jobs')
+        .select('reference_number, address, postcode, auto_assign_failure_reason')
+        .in('id', failedAllocationIds);
+      for (const row of failedRows ?? []) {
+        allocationFailures.push({
+          reference: row.reference_number ?? '',
+          address: row.address ?? '',
+          postcode: row.postcode ?? '',
+          reason: row.auto_assign_failure_reason ?? 'No eligible worker found',
         });
       }
     }
@@ -489,7 +414,7 @@ export async function importJobs(params: {
     };
 
     // Authenticated INSERT on import_history is blocked by RLS (no INSERT policy).
-    // Write via service role after tenant checks; migration adds a proper policy too.
+    // Write via service role after tenant checks.
     const { error: historyError } = await createAdminClient()
       .from('import_history')
       .insert(historyPayload);
@@ -503,7 +428,7 @@ export async function importJobs(params: {
     revalidatePath('/import');
     const unassignedCount = imported - assignedCount;
 
-    if (imported === 0 && params.csvData.length > 0) {
+    if (imported === 0) {
       const detail = errors[0] ?? 'No rows could be imported.';
       return {
         success: false,
@@ -512,29 +437,10 @@ export async function importJobs(params: {
       };
     }
 
-    // Persist mapping only after jobs were actually written.
-    const headers =
-      params.csvHeaders && params.csvHeaders.length > 0
-        ? params.csvHeaders
-        : Object.keys(params.csvData[0] ?? {});
-    await supabase
-      .from('customers')
-      .update({
-        import_column_mapping: params.columnMapping,
-        import_value_transforms: params.valueTransforms ?? {},
-        import_expected_headers: headers,
-        import_mapping_updated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', customerId)
-      .eq('tenant_id', tenantId);
-
     if (resolvedSourceId) {
       await supabase
         .from('import_sources')
         .update({
-          column_mapping: params.columnMapping,
-          value_transforms: params.valueTransforms ?? {},
           customer_id: customerId,
           source_name: customerRow.name,
           last_used_at: new Date().toISOString(),
@@ -549,6 +455,7 @@ export async function importJobs(params: {
       assignedCount,
       unassignedCount,
       errors: errors.length ? errors : undefined,
+      allocationFailures: allocationFailures.length ? allocationFailures : undefined,
     };
   } catch (e) {
     console.error('[importJobs]', e);

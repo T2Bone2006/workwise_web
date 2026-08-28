@@ -100,6 +100,7 @@ export function JobForm({
       job_length: undefined,
       scheduled_date: '',
       scheduled_time: '',
+      end_time: '',
       assigned_worker_id: '',
     },
   });
@@ -161,6 +162,7 @@ export function JobForm({
         job_length: values.job_length,
         scheduled_date: values.scheduled_date || undefined,
         scheduled_time: values.scheduled_time || undefined,
+        end_time: values.end_time || undefined,
         assigned_worker_id: useAutoAssign
           ? undefined
           : values.assigned_worker_id,
@@ -564,7 +566,29 @@ export function JobForm({
                 name="scheduled_time"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Scheduled Time (optional)</FormLabel>
+                    <FormLabel>Start Time (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="time"
+                        className={cn(
+                          'h-10 bg-white/80 dark:bg-white/5 dark:border-white/10',
+                          'border-input focus-visible:border-brand-primary focus-visible:ring-brand-primary/20',
+                          'focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
+                        )}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-destructive text-xs" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="end_time"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Finish Time (optional)</FormLabel>
                     <FormControl>
                       <Input
                         type="time"

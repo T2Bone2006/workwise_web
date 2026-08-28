@@ -280,16 +280,21 @@ export function MonitorView({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All batches</SelectItem>
-                  {sortedBatches
-                    .filter((batch) => batch.id === 'ungrouped' || !!batch.import_source_id)
-                    .map((batch) => (
-                      <SelectItem
-                        key={batch.id}
-                        value={batch.id === 'ungrouped' ? 'ungrouped' : (batch.import_source_id as string)}
-                      >
+                  {sortedBatches.map((batch) => {
+                    const liveTotal =
+                      batch.pending +
+                      batch.pending_send +
+                      batch.assigned +
+                      batch.in_progress +
+                      batch.paused +
+                      batch.completed;
+                    return (
+                      <SelectItem key={batch.id} value={batch.id}>
                         {batch.file_name ?? 'Unnamed batch'}
+                        {liveTotal > 0 ? ` (${liveTotal})` : ''}
                       </SelectItem>
-                    ))}
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {hasFilters ? (

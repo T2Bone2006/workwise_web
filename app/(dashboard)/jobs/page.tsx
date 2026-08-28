@@ -206,11 +206,11 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     // and customer dropdowns can be used together.
     const jobsFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' } = {
       ...filters,
-      import_source_id: activeBatchId
-        ? activeBatchId === 'ungrouped'
-          ? 'ungrouped'
-          : (activeBatch?.import_source_id ?? undefined)
-        : undefined,
+      job_ids:
+        activeBatchId && activeBatchId !== 'ungrouped'
+          ? (activeBatch?.job_ids ?? [])
+          : undefined,
+      import_source_id: activeBatchId === 'ungrouped' ? 'ungrouped' : undefined,
     };
     const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
 

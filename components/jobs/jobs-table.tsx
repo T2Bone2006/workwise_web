@@ -51,6 +51,7 @@ import {
   type JobStatus,
   type JobsStatusSummary,
 } from '@/lib/data/jobs';
+import { formatTimeRange } from '@/lib/jobs/format-job-time';
 import type { FieldFilterValueOption } from '@/lib/jobs/field-filter';
 import {
   MAX_FIELD_FILTERS,
@@ -115,10 +116,14 @@ function StatusBadge({ status }: { status: JobStatus | null }) {
   );
 }
 
-function formatScheduledDateTime(dateStr: string | null, timeStr: string | null) {
-  if (!dateStr && !timeStr) return '—';
+function formatScheduledDateTime(
+  dateStr: string | null,
+  timeStr: string | null,
+  endTimeStr?: string | null
+) {
+  if (!dateStr && !timeStr && !endTimeStr) return '—';
   try {
-    const timeShort = timeStr && timeStr.length >= 5 ? timeStr.slice(0, 5) : null;
+    const timeShort = formatTimeRange(timeStr, endTimeStr);
     if (dateStr) {
       const iso = dateStr.length <= 10 ? `${dateStr}T12:00:00` : dateStr;
       const d = parseISO(iso);
@@ -607,10 +612,19 @@ export function JobsTable({
                     className="h-10 w-full"
                     options={[
                       { value: '__all__', label: 'All batches' },
-                      ...sortedBatchFilterOptions.map((b) => ({
-                        value: b.id,
-                        label: `${b.file_name ?? 'Unnamed import'} (${b.rows_imported})`,
-                      })),
+                      ...sortedBatchFilterOptions.map((b) => {
+                        const liveTotal =
+                          b.pending +
+                          b.pending_send +
+                          b.assigned +
+                          b.in_progress +
+                          b.paused +
+                          b.completed;
+                        return {
+                          value: b.id,
+                          label: `${b.file_name ?? 'Unnamed import'} (${liveTotal})`,
+                        };
+                      }),
                     ]}
                   />
                 </div>
@@ -1058,7 +1072,11 @@ export function JobsTable({
                             )}
                           </TableCell>
                           <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
-                            {formatScheduledDateTime(job.scheduled_date, job.scheduled_time)}
+                            {formatScheduledDateTime(
+                              job.scheduled_date,
+                              job.scheduled_time,
+                              job.end_time
+                            )}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={job.status} />
