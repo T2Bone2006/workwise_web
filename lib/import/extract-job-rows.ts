@@ -7,6 +7,7 @@ import { EXTRACTION_AI_MODEL, supportsEffort } from '@/lib/ai/model';
 import { logStructuredAiInteraction } from '@/lib/services/ai-interaction-log';
 import {
   ExtractionBatchSchema,
+  blankExtractedRow,
   type ExtractedJobRow,
 } from '@/lib/import/extracted-job-row';
 
@@ -45,19 +46,110 @@ function formatRowsForPrompt(
     .join('\n\n');
 }
 
-/** Placeholder for a row the model failed to return — always fails validation. */
-function missingExtraction(rowIndex: number): ExtractedJobRow {
+/** Attempts before a batch falls back to unconstrained JSON. */
+const MAX_EXTRACTION_ATTEMPTS = 3;
+
+function isRetryableExtractionError(e: unknown): boolean {
+  if (
+    e instanceof Anthropic.RateLimitError ||
+    e instanceof Anthropic.APIConnectionError ||
+    e instanceof Anthropic.InternalServerError
+  ) {
+    return true;
+  }
+  // "Grammar compilation timed out" comes back as a 400, which the SDK never
+  // retries. It is a transient server-side compile of our schema, not a bad
+  // request — the identical call usually succeeds moments later.
+  return (
+    e instanceof Anthropic.APIError &&
+    /grammar compilation/i.test(String((e as { message?: unknown }).message ?? ''))
+  );
+}
+
+const FALLBACK_JSON_INSTRUCTION = `Return ONLY a JSON object of the form {"jobs": [...]}, one entry per input row, each with exactly these keys:
+row_index (number), address, postcode, description, reference_number, scheduled_date, start_time, end_time (strings, "" when absent),
+priority (one of "low", "normal", "high", "emergency"), job_length (one of "half_day", "full_day", "unknown").
+No markdown, no commentary.`;
+
+type ExtractionCall = {
+  jobs: ExtractedJobRow[];
+  tokensInput: number;
+  tokensOutput: number;
+};
+
+/**
+ * Constrained decoding first, plain JSON as the backstop.
+ *
+ * The schema-enforced call is preferred because the model then cannot emit an
+ * invalid enum or a malformed shape at all. When the server cannot compile
+ * that grammar we retry, then fall back to an ordinary request parsed through
+ * the same Zod schema — so an outage in constrained decoding degrades the
+ * guarantee from "impossible" to "checked" instead of failing the batch and
+ * losing the rows. Either way `prepareExtractedRow` still validates every
+ * field before anything reaches the database.
+ */
+async function runExtractionCall(userPrompt: string): Promise<ExtractionCall> {
+  const effort = supportsEffort(EXTRACTION_AI_MODEL)
+    ? { effort: 'low' as const }
+    : {};
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= MAX_EXTRACTION_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await anthropic.messages.parse({
+        model: EXTRACTION_AI_MODEL,
+        max_tokens: 16000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+        output_config: { ...effort, format: zodOutputFormat(ExtractionBatchSchema) },
+      });
+      if (response.parsed_output) {
+        return {
+          jobs: response.parsed_output.jobs,
+          tokensInput: response.usage.input_tokens,
+          tokensOutput: response.usage.output_tokens,
+        };
+      }
+      lastError = new Error('Model returned no parseable output');
+    } catch (e) {
+      if (!isRetryableExtractionError(e)) throw e;
+      lastError = e;
+    }
+    if (attempt < MAX_EXTRACTION_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+    }
+  }
+
+  console.warn(
+    '[extractJobRowsBatch] constrained decoding unavailable, falling back to JSON',
+    lastError
+  );
+
+  const response = await anthropic.messages.create({
+    model: EXTRACTION_AI_MODEL,
+    max_tokens: 16000,
+    system: SYSTEM_PROMPT,
+    messages: [
+      { role: 'user', content: `${userPrompt}\n\n${FALLBACK_JSON_INSTRUCTION}` },
+    ],
+    output_config: effort,
+  });
+
+  const text = response.content
+    .map((block) => (block.type === 'text' ? block.text : ''))
+    .join('')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '');
+
+  const parsed = ExtractionBatchSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    throw new Error('AI returned these rows in an unreadable shape');
+  }
   return {
-    row_index: rowIndex,
-    address: '',
-    postcode: '',
-    description: '',
-    priority: 'normal',
-    scheduled_date: '',
-    start_time: '',
-    end_time: '',
-    job_length: 'unknown',
-    reference_number: '',
+    jobs: parsed.data.jobs,
+    tokensInput: response.usage.input_tokens,
+    tokensOutput: response.usage.output_tokens,
   };
 }
 
@@ -104,35 +196,18 @@ export async function extractJobRowsBatch(params: {
   const startedAt = Date.now();
 
   try {
-    const response = await anthropic.messages.parse({
-      model: EXTRACTION_AI_MODEL,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userPrompt }],
-      output_config: {
-        // Extraction is structured reading, not hard reasoning — low effort keeps
-        // imports fast. Thinking stays adaptive (disabling it misbehaves on Opus 5).
-        // Older models 400 on `effort`, so only send it where it is supported.
-        ...(supportsEffort(EXTRACTION_AI_MODEL) ? { effort: 'low' as const } : {}),
-        format: zodOutputFormat(ExtractionBatchSchema),
-      },
-    });
-
-    const parsed = response.parsed_output;
-    if (!parsed) {
-      return { success: false, error: 'AI could not read these rows. Try importing again.' };
-    }
+    const call = await runExtractionCall(userPrompt);
 
     // Key by row_index — never trust array position.
     const byIndex = new Map<number, ExtractedJobRow>();
-    for (const job of parsed.jobs) {
+    for (const job of call.jobs) {
       byIndex.set(job.row_index, job);
     }
 
     // One row out per row in, in sheet order — a row the model skipped becomes a
     // blank extraction, which then fails validation loudly instead of vanishing.
     const extracted = indexed.map(
-      ({ rowIndex }) => byIndex.get(rowIndex) ?? missingExtraction(rowIndex)
+      ({ rowIndex }) => byIndex.get(rowIndex) ?? blankExtractedRow(rowIndex)
     );
 
     await logStructuredAiInteraction(supabase, {
@@ -140,10 +215,10 @@ export async function extractJobRowsBatch(params: {
       interactionType: 'row_extraction',
       prompt: userPrompt,
       inputData: { row_count: rows.length, start_index: startIndex },
-      parsedOutput: parsed,
+      parsedOutput: { jobs: call.jobs },
       model: EXTRACTION_AI_MODEL,
-      tokensInput: response.usage.input_tokens,
-      tokensOutput: response.usage.output_tokens,
+      tokensInput: call.tokensInput,
+      tokensOutput: call.tokensOutput,
       latencyMs: Date.now() - startedAt,
       importSourceId: params.importSourceId,
     });
@@ -156,6 +231,9 @@ export async function extractJobRowsBatch(params: {
     }
     if (e instanceof Anthropic.APIConnectionError) {
       return { success: false, error: 'Could not reach the AI service. Check your connection.' };
+    }
+    if (e instanceof SyntaxError) {
+      return { success: false, error: 'AI returned these rows in an unreadable shape.' };
     }
     return {
       success: false,

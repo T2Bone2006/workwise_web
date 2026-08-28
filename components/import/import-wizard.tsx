@@ -43,6 +43,7 @@ import { spreadsheetCellToImportString } from '@/lib/import/parse-scheduled-date
 import { normalizeHeaders, normalizeRowKeys } from '@/lib/import/normalize-import-headers';
 import {
   EXTRACTION_BATCH_SIZE,
+  blankExtractedRow,
   prepareExtractedRow,
   type EditableRowField,
   type ExtractedJobRow,
@@ -216,6 +217,11 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
             collected.push(...result.rows);
           } else {
             failures.push(result.error);
+            // Keep the rows visible as unreadable instead of dropping them —
+            // a silently shorter import is worse than a row you can see and fix.
+            for (let k = 0; k < batch.rows.length; k += 1) {
+              collected.push(blankExtractedRow(batch.startIndex + k));
+            }
           }
           setExtractedCount((n) => n + batch.rows.length);
         });
@@ -225,8 +231,8 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
 
       if (failures.length > 0) {
         toast.error(
-          `${failures.length} batch${failures.length === 1 ? '' : 'es'} could not be read: ${failures[0]}`,
-          { duration: 12000 }
+          `${failures.length} batch${failures.length === 1 ? '' : 'es'} could not be read — those rows are marked below and can be filled in by hand. ${failures[0]}`,
+          { duration: 14000 }
         );
       } else {
         toast.success(`Read ${collected.length} row${collected.length === 1 ? '' : 's'}`, {

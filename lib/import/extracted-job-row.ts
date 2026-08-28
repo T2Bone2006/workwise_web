@@ -131,6 +131,26 @@ export function normalizeTimeOfDay(value: string | null | undefined): string | n
   return null;
 }
 
+/**
+ * Placeholder for a row we could not read — a model that skipped it, or a
+ * batch whose AI call failed. Always fails validation, so an unreadable row
+ * shows up red in the preview instead of silently vanishing from the import.
+ */
+export function blankExtractedRow(rowIndex: number): ExtractedJobRow {
+  return {
+    row_index: rowIndex,
+    address: '',
+    postcode: '',
+    description: '',
+    priority: 'normal',
+    scheduled_date: '',
+    start_time: '',
+    end_time: '',
+    job_length: 'unknown',
+    reference_number: '',
+  };
+}
+
 /** Every non-empty spreadsheet column → source_fields (searchable after import). */
 export function collectSourceFields(row: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
