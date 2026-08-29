@@ -101,6 +101,17 @@ export function JobDetailWorkerCard({
       <CardContent className="space-y-3">
         {editable ? (
           <>
+            {worker && (
+              <div className="flex items-center gap-2">
+                <User className="size-4 shrink-0 text-muted-foreground" />
+                <Link
+                  href={`/workers/${worker.id}`}
+                  className="font-medium text-foreground hover:text-primary hover:underline"
+                >
+                  {worker.full_name}
+                </Link>
+              </div>
+            )}
             <div className="space-y-2">
               <label htmlFor={`assign-worker-${jobId}`} className="sr-only">
                 Assigned worker

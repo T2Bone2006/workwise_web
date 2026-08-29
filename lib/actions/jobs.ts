@@ -1388,22 +1388,36 @@ export type SendPendingJobsResult =
   | { success: false; error: string };
 
 /**
- * Confirms all jobs in `pending_send`: sets status to `assigned` and sends Expo push per worker token.
+ * Confirms jobs in `pending_send`: sets status to `assigned` and sends Expo push per worker token.
+ * Pass `jobIds` to send only those (badge click, selected rows); omit to send everything
+ * ready — the "Send out jobs" banner action. `jobIds` comes from on-page selection, so it's
+ * always small — safe to filter with `.in('id', ...)` without the URL-length issue a
+ * tenant-wide id list would risk.
  */
-export async function sendPendingJobsToWorkers(): Promise<SendPendingJobsResult> {
+export async function sendPendingJobsToWorkers(
+  jobIds?: string[]
+): Promise<SendPendingJobsResult> {
   try {
+    if (jobIds && jobIds.length === 0) {
+      return { success: false, error: 'No jobs selected.' };
+    }
+
     const tenantId = await getTenantIdForCurrentUser();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
 
     const supabase = await createClient();
-    const { data: jobs, error: listError } = await supabase
+    let query = supabase
       .from('jobs')
       .select('id, reference_number, assigned_worker_id')
       .eq('tenant_id', tenantId)
       .eq('status', 'pending_send')
       .not('assigned_worker_id', 'is', null);
+    if (jobIds) {
+      query = query.in('id', jobIds);
+    }
+    const { data: jobs, error: listError } = await query;
 
     if (listError) {
       console.error('[sendPendingJobsToWorkers] list', listError);

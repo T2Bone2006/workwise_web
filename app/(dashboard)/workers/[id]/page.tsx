@@ -326,7 +326,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
                     Last 10 jobs assigned to this worker
                   </CardDescription>
                 </div>
-                <Link href={`/jobs?worker_id=${id}`}>
+                <Link href={`/jobs?f0=assigned_worker_id&v0=${id}`}>
                   <Button variant="outline" size="sm">
                     View All
                   </Button>

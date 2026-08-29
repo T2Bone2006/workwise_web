@@ -72,7 +72,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { bulkDeleteJobs } from '@/lib/actions/jobs';
+import { bulkDeleteJobs, sendPendingJobsToWorkers } from '@/lib/actions/jobs';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { BatchesView } from '@/components/jobs/batches-view';
@@ -111,6 +111,59 @@ function StatusBadge({ status }: { status: JobStatus | null }) {
       </TooltipTrigger>
       <TooltipContent side="top" className="text-left">
         {STATUS_TOOLTIPS[status]}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const SEND_ARM_TIMEOUT_MS = 4000;
+
+/**
+ * The "Ready to send" badge, made clickable — but a single tap can't fire a
+ * real notification to a worker by accident. First click arms it (badge
+ * flips to a distinct "Click to send" state); the SAME click target must be
+ * tapped again to actually send. Arming clears itself after a few seconds,
+ * or the moment any other row is armed, so a stray armed badge never sits
+ * there waiting to be mis-tapped later.
+ */
+function SendJobBadge({
+  jobId,
+  armed,
+  sending,
+  onArm,
+  onConfirm,
+}: {
+  jobId: string;
+  armed: boolean;
+  sending: boolean;
+  onArm: (jobId: string) => void;
+  onConfirm: (jobId: string) => void;
+}) {
+  const meta = JOB_STATUS_DISPLAY.pending_send;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          disabled={sending}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (armed) onConfirm(jobId);
+            else onArm(jobId);
+          }}
+          className={cn(
+            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm transition-all',
+            armed
+              ? 'animate-pulse border-cyan-500 bg-cyan-600 text-white shadow-[0_0_0_2px_rgba(8,145,178,0.25)]'
+              : cn('cursor-pointer hover:brightness-95', meta?.badgeClass),
+            sending && 'cursor-wait opacity-70'
+          )}
+        >
+          {sending ? 'Sending…' : armed ? 'Click to send' : meta?.label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-left">
+        {armed ? 'Click again to send this job to the worker now.' : 'Click to send this job now.'}
       </TooltipContent>
     </Tooltip>
   );
@@ -209,6 +262,11 @@ export function JobsTable({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [armedSendId, setArmedSendId] = useState<string | null>(null);
+  const [sendingSingleId, setSendingSingleId] = useState<string | null>(null);
+  const armedSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sendSelectedOpen, setSendSelectedOpen] = useState(false);
+  const [isSendingSelected, setIsSendingSelected] = useState(false);
   const [filterRows, setFilterRows] = useState<FilterRowState[]>(() => {
     const fromUrl = initialFilters.field_filters ?? [];
     if (fromUrl.length === 0) return [newFilterRow()];
@@ -269,6 +327,69 @@ export function JobsTable({
 
   const allDeletableSelected =
     deletableJobs.length > 0 && deletableJobs.every((j) => selectedIds.has(j.id));
+
+  const armSend = (jobId: string) => {
+    if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
+    setArmedSendId(jobId);
+    armedSendTimeoutRef.current = setTimeout(() => {
+      setArmedSendId((current) => (current === jobId ? null : current));
+    }, SEND_ARM_TIMEOUT_MS);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
+    };
+  }, []);
+
+  const confirmSend = async (jobId: string) => {
+    if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
+    setArmedSendId(null);
+    setSendingSingleId(jobId);
+    try {
+      const result = await sendPendingJobsToWorkers([jobId]);
+      if (result.success) {
+        toast.success('Job sent to worker');
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to send job');
+    } finally {
+      setSendingSingleId(null);
+    }
+  };
+
+  const sendableSelectedIds = useMemo(
+    () =>
+      Array.from(selectedIds).filter(
+        (id) => initialJobs.find((j) => j.id === id)?.status === 'pending_send'
+      ),
+    [selectedIds, initialJobs]
+  );
+
+  const handleSendSelected = async () => {
+    if (sendableSelectedIds.length === 0) return;
+    setIsSendingSelected(true);
+    try {
+      const result = await sendPendingJobsToWorkers(sendableSelectedIds);
+      setSendSelectedOpen(false);
+      if (result.success) {
+        setSelectedIds(new Set());
+        toast.success(
+          result.sent === 1 ? 'Job sent to worker' : `${result.sent} jobs sent to workers`
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to send jobs');
+    } finally {
+      setIsSendingSelected(false);
+    }
+  };
 
   useEffect(() => {
     setValuesByField((prev) => ({ ...prev, ...fieldFilterValuesByField }));
@@ -786,6 +907,33 @@ export function JobsTable({
           </DialogContent>
         </Dialog>
 
+        <Dialog open={sendSelectedOpen} onOpenChange={setSendSelectedOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                Send {sendableSelectedIds.length} job
+                {sendableSelectedIds.length === 1 ? '' : 's'} to workers?
+              </DialogTitle>
+              <DialogDescription>
+                Each worker will be notified in the app and the job marked as assigned.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setSendSelectedOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSendSelected()}
+                disabled={isSendingSelected}
+                className="bg-cyan-600 text-white hover:bg-cyan-700"
+              >
+                {isSendingSelected ? <Loader2 className="size-4 animate-spin" /> : null}
+                Send {sendableSelectedIds.length} job{sendableSelectedIds.length === 1 ? '' : 's'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Card
           className={cn(
             'glass-card overflow-hidden border-border/80 transition-all duration-300',
@@ -880,6 +1028,17 @@ export function JobsTable({
                 {selectedIds.size > 0 && (
                   <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border/80 bg-primary/5 px-4 py-2">
                     <span className="text-sm font-medium">{selectedIds.size} selected</span>
+                    {sendableSelectedIds.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-cyan-700 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
+                        onClick={() => setSendSelectedOpen(true)}
+                      >
+                        <RadioTower className="size-4" />
+                        Send selected ({sendableSelectedIds.length})
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1067,7 +1226,15 @@ export function JobsTable({
                             )}
                           </TableCell>
                           <TableCell>
-                            {job.worker_name ?? (
+                            {job.worker_name && job.assigned_worker_id ? (
+                              <Link
+                                href={`/workers/${job.assigned_worker_id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-primary hover:underline"
+                              >
+                                {job.worker_name}
+                              </Link>
+                            ) : (
                               <span className="text-muted-foreground">Unassigned</span>
                             )}
                           </TableCell>
@@ -1079,7 +1246,17 @@ export function JobsTable({
                             )}
                           </TableCell>
                           <TableCell>
-                            <StatusBadge status={job.status} />
+                            {job.status === 'pending_send' ? (
+                              <SendJobBadge
+                                jobId={job.id}
+                                armed={armedSendId === job.id}
+                                sending={sendingSingleId === job.id}
+                                onArm={armSend}
+                                onConfirm={(id) => void confirmSend(id)}
+                              />
+                            ) : (
+                              <StatusBadge status={job.status} />
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
