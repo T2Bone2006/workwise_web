@@ -18,6 +18,7 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   in_progress: 'In progress',
   paused: 'Paused',
   completed: 'Completed',
+  incomplete: 'Not completed',
   declined: 'Declined',
   cancelled: 'Cancelled',
 };
@@ -35,6 +36,8 @@ const STATUS_BADGE_CLASS: Record<JobStatus, string> = {
     'border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-400 shadow-[0_0_12px_-2px_rgba(139,92,246,0.25)]',
   completed:
     'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
+  incomplete:
+    'border-orange-400/60 bg-orange-500/10 text-orange-700 dark:text-orange-400 shadow-[0_0_12px_-2px_rgba(249,115,22,0.25)]',
   declined:
     'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90 shadow-[0_0_8px_-2px_rgba(239,68,68,0.2)]',
   cancelled:

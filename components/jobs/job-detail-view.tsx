@@ -11,6 +11,7 @@ import { JobDetailJobReportCard } from '@/components/jobs/job-detail-job-report-
 import { JobDetailCompletionNotes } from '@/components/jobs/job-detail-completion-notes';
 import { JobDetailPhotosCard } from '@/components/jobs/job-detail-photos-card';
 import { JobDetailCompletionSection } from '@/components/jobs/job-detail-completion-section';
+import { JobDetailEmailCard } from '@/components/jobs/job-detail-email-card';
 import { JobDetailSourceFieldsCard } from '@/components/jobs/job-detail-source-fields-card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -92,18 +93,22 @@ export function JobDetailView({
           </Alert>
         )}
         <JobDetailDetailsCard
+          jobId={job.id}
           address={job.address}
           postcode={job.postcode}
           description={job.job_description}
+          priority={job.priority}
           scheduledDate={job.scheduled_date}
           startTime={job.scheduled_time}
           endTime={job.end_time}
           jobLength={job.job_length}
           createdAt={job.created_at}
           updatedAt={job.updated_at}
+          readOnly={isNetworkOriginView}
         />
         {isCompleted && (
           <JobDetailCompletionSection
+            jobId={job.id}
             completedAt={job.completed_at}
             industryData={industryData}
             completionNotes={completionNotes}
@@ -211,6 +216,11 @@ export function JobDetailView({
             isNetworkOriginView={isNetworkOriginView}
           />
         )}
+        <JobDetailEmailCard
+          jobId={job.id}
+          status={job.status}
+          defaultRecipient={job.customer?.email ?? null}
+        />
       </div>
     </div>
   );

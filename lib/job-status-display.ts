@@ -9,6 +9,7 @@ export type JobStatusUi =
   | 'in_progress'
   | 'paused'
   | 'completed'
+  | 'incomplete'
   | 'declined'
   | 'cancelled';
 
@@ -55,6 +56,13 @@ export const JOB_STATUS_DISPLAY: Record<
       'border-emerald-400/50 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300 border',
     badgeClass:
       'border-emerald-400/60 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
+  },
+  incomplete: {
+    label: 'Not completed',
+    summaryBarClass:
+      'border-orange-400/50 bg-orange-500/10 text-orange-900 dark:text-orange-300 border',
+    badgeClass:
+      'border-orange-400/60 bg-orange-500/10 text-orange-900 dark:text-orange-300 shadow-[0_0_12px_-2px_rgba(249,115,22,0.25)]',
   },
   declined: {
     label: 'Declined',

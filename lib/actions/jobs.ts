@@ -3,9 +3,19 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { getJobsForExport, type ExportJobRow, type JobsFilters } from '@/lib/data/jobs';
+import {
+  getJobsForExport,
+  type ExportJobRow,
+  type JobsFilters,
+  type JobPriority,
+} from '@/lib/data/jobs';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
-import { createJobSchema, updateJobCustomerSchema } from '@/lib/validations/job';
+import {
+  createJobSchema,
+  updateJobCustomerSchema,
+  updateJobDetailsSchema,
+  updateJobCompletionSchema,
+} from '@/lib/validations/job';
 import { haversineDistance } from '@/lib/utils/haversine';
 import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geocoding';
 import { detectSkills } from '@/lib/detect-skills';
@@ -368,6 +378,269 @@ export async function updateJobCustomer(payload: {
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to update customer. Please try again.',
+    };
+  }
+}
+
+export type UpdateJobDetailsResult =
+  | {
+      success: true;
+      job: {
+        address: string;
+        postcode: string;
+        description: string;
+        priority: JobPriority;
+        job_length: 'half_day' | 'full_day' | null;
+        scheduled_date: string | null;
+        scheduled_time: string | null;
+        end_time: string | null;
+      };
+    }
+  | { success: false; error: string };
+
+/**
+ * Edits a job's dispatch details after the fact — fixing an address, time,
+ * description, or priority mistake. Deliberately unrestricted by status:
+ * that was an explicit request (correct a mistake whenever it's found), and
+ * unlike worker assignment there's no in-flight handoff these fields could
+ * disrupt. No audit trail — same as updateJobCustomer, this is a plain
+ * correction, not an event worth logging.
+ */
+export async function updateJobDetails(payload: {
+  jobId: string;
+  address: string;
+  postcode: string;
+  description: string;
+  priority: string;
+  job_length?: string;
+  scheduled_date?: string;
+  scheduled_time?: string;
+  end_time?: string;
+}): Promise<UpdateJobDetailsResult> {
+  try {
+    const parsed = updateJobDetailsSchema.safeParse({
+      jobId: payload.jobId,
+      address: payload.address?.trim(),
+      postcode: payload.postcode?.trim(),
+      description: payload.description?.trim(),
+      priority: payload.priority,
+      job_length: payload.job_length || undefined,
+      scheduled_date: payload.scheduled_date?.trim() || undefined,
+      scheduled_time: payload.scheduled_time?.trim() || undefined,
+      end_time: payload.end_time?.trim() || undefined,
+    });
+    if (!parsed.success) {
+      const first = parsed.error.flatten().fieldErrors;
+      const message =
+        first.address?.[0] ||
+        first.postcode?.[0] ||
+        first.description?.[0] ||
+        first.priority?.[0] ||
+        first.job_length?.[0] ||
+        first.scheduled_time?.[0] ||
+        first.end_time?.[0] ||
+        'Validation failed';
+      return { success: false, error: message };
+    }
+
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const { data: existing, error: fetchError } = await supabase
+      .from('jobs')
+      .select('id, address, postcode, lat, lng')
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError || !existing) {
+      return { success: false, error: 'Job not found or access denied.' };
+    }
+
+    // Re-geocode only when the address actually changed — the whole point
+    // of this edit is correcting mistakes, so a stale pin defeats it, but
+    // there's no reason to re-hit the geocoder on every unrelated field fix.
+    const addressChanged =
+      (existing.address as string | null) !== parsed.data.address ||
+      (existing.postcode as string | null) !== parsed.data.postcode;
+    let lat = (existing.lat as number | null) ?? null;
+    let lng = (existing.lng as number | null) ?? null;
+    if (addressChanged) {
+      const fullAddress = buildFullAddressString([parsed.data.address, parsed.data.postcode]);
+      const geocoded = await resolveJobCoordinates({
+        postcode: parsed.data.postcode,
+        fullAddress,
+      });
+      lat = geocoded?.lat ?? null;
+      lng = geocoded?.lng ?? null;
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        address: parsed.data.address,
+        postcode: parsed.data.postcode,
+        job_description: parsed.data.description,
+        priority: parsed.data.priority,
+        job_length: parsed.data.job_length ?? null,
+        scheduled_date: parsed.data.scheduled_date || null,
+        scheduled_time: parsed.data.scheduled_time || null,
+        end_time: parsed.data.end_time || null,
+        lat,
+        lng,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      console.error('[updateJobDetails] update error:', updateError);
+      return { success: false, error: updateError.message ?? 'Failed to update job details.' };
+    }
+
+    revalidatePath('/jobs');
+    revalidatePath(`/jobs/${parsed.data.jobId}`);
+    return {
+      success: true,
+      job: {
+        address: parsed.data.address,
+        postcode: parsed.data.postcode,
+        description: parsed.data.description,
+        priority: parsed.data.priority,
+        job_length: parsed.data.job_length ?? null,
+        scheduled_date: parsed.data.scheduled_date || null,
+        scheduled_time: parsed.data.scheduled_time || null,
+        end_time: parsed.data.end_time || null,
+      },
+    };
+  } catch (err) {
+    console.error('[updateJobDetails]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to update job. Please try again.',
+    };
+  }
+}
+
+export type UpdateJobCompletionResult =
+  | {
+      success: true;
+      completionNotes: string;
+      industryData: Record<string, unknown>;
+    }
+  | { success: false; error: string };
+
+/**
+ * Edits the completion record a worker submitted (notes + trade-specific
+ * report fields, e.g. lock changed / walked away). Unlike updateJobDetails,
+ * this logs a quiet entry to job_status_history — status doesn't change,
+ * but the record itself is evidence of what happened on site, so an edit
+ * to it is worth a trace of who/when even without requiring a reason.
+ * Photos are intentionally out of scope here.
+ */
+export async function updateJobCompletionRecord(payload: {
+  jobId: string;
+  completion_notes?: string;
+  lock_changed?: string;
+  walked_away?: string;
+  walk_away_reason?: string;
+  walk_away_detail?: string;
+}): Promise<UpdateJobCompletionResult> {
+  try {
+    const parsed = updateJobCompletionSchema.safeParse({
+      jobId: payload.jobId,
+      completion_notes: payload.completion_notes?.trim() || undefined,
+      lock_changed: payload.lock_changed || undefined,
+      walked_away: payload.walked_away || undefined,
+      walk_away_reason: payload.walk_away_reason?.trim() || undefined,
+      walk_away_detail: payload.walk_away_detail?.trim() || undefined,
+    });
+    if (!parsed.success) {
+      return { success: false, error: 'Validation failed' };
+    }
+
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+
+    const supabase = await createClient();
+    const { data: existing, error: fetchError } = await supabase
+      .from('jobs')
+      .select('id, status, industry_data')
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (fetchError || !existing) {
+      return { success: false, error: 'Job not found or access denied.' };
+    }
+
+    const currentIndustryData =
+      (existing.industry_data as Record<string, unknown> | null) ?? {};
+    const toTriBool = (v: 'yes' | 'no' | 'unset' | undefined): boolean | null =>
+      v === 'yes' ? true : v === 'no' ? false : null;
+
+    // Merge into the existing blob rather than replace it — industry_data
+    // can carry fields this form doesn't know about (other trades, future
+    // additions), and an edit here shouldn't silently drop them.
+    const nextIndustryData: Record<string, unknown> = {
+      ...currentIndustryData,
+      lock_changed: toTriBool(parsed.data.lock_changed),
+      walked_away: toTriBool(parsed.data.walked_away),
+      walk_away_reason: parsed.data.walk_away_reason || null,
+      walk_away_detail: parsed.data.walk_away_detail || null,
+    };
+    const completionNotes = parsed.data.completion_notes ?? '';
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        completion_notes: completionNotes || null,
+        industry_data: nextIndustryData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', parsed.data.jobId)
+      .eq('tenant_id', tenantId);
+
+    if (updateError) {
+      console.error('[updateJobCompletionRecord] update error:', updateError);
+      return {
+        success: false,
+        error: updateError.message ?? 'Failed to update completion record.',
+      };
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const currentStatus = (existing.status as string) ?? 'completed';
+    const { error: historyError } = await supabase.from('job_status_history').insert({
+      job_id: parsed.data.jobId,
+      from_status: currentStatus,
+      to_status: currentStatus,
+      created_at: new Date().toISOString(),
+      changed_by_user_id: user?.id ?? null,
+      changed_by_worker_id: null,
+      notes: 'Completion record edited',
+      metadata: {},
+    });
+    if (historyError) {
+      console.error('[updateJobCompletionRecord] history error:', historyError);
+      // Non-fatal — the record was still updated.
+    }
+
+    revalidatePath('/jobs');
+    revalidatePath(`/jobs/${parsed.data.jobId}`);
+    return { success: true, completionNotes, industryData: nextIndustryData };
+  } catch (err) {
+    console.error('[updateJobCompletionRecord]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to update completion record. Please try again.',
     };
   }
 }

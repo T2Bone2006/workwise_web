@@ -1,4 +1,9 @@
 import { createClient } from '@/lib/supabase/server';
+import {
+  mergeFieldsWithHeaders,
+  parseWorkerVisibleFields,
+  type WorkerVisibleField,
+} from '@/lib/jobs/worker-visible-fields';
 
 export type CustomerType = 'individual' | 'bulk_client' | string;
 
@@ -34,6 +39,103 @@ export interface CustomerDetailRow extends CustomerListRow {
   phone: string | null;
   address: string | null;
   notes: string | null;
+}
+
+export interface CustomerWorkerFields {
+  /** Stored config merged with headers actually present in this customer's jobs. */
+  fields: WorkerVisibleField[];
+  /** Keys seen in the jobs but not yet in the stored config. */
+  newKeys: string[];
+  /** True when nothing has ever been configured, i.e. every field is showing. */
+  neverConfigured: boolean;
+}
+
+/** Most recent jobs scanned for spreadsheet headers. Plenty for one sheet. */
+const HEADER_SAMPLE_SIZE = 200;
+
+/**
+ * The field picker for one customer: what is configured, plus every column
+ * their imports have actually produced.
+ *
+ * Headers come from the jobs themselves rather than a stored header list, so a
+ * column added to next month's spreadsheet appears on its own with nothing to
+ * wire up in the import path.
+ */
+export async function getCustomerWorkerFields(
+  tenantId: string,
+  customerId: string
+): Promise<{ data: CustomerWorkerFields; error: Error | null }> {
+  const empty: CustomerWorkerFields = {
+    fields: [],
+    newKeys: [],
+    neverConfigured: true,
+  };
+  try {
+    const supabase = await createClient();
+
+    const [customerResult, jobsResult] = await Promise.all([
+      supabase
+        .from('customers')
+        .select('worker_visible_fields')
+        .eq('id', customerId)
+        .eq('tenant_id', tenantId)
+        .single(),
+      supabase
+        .from('jobs')
+        .select('source_fields')
+        .eq('tenant_id', tenantId)
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: false })
+        .limit(HEADER_SAMPLE_SIZE),
+    ]);
+
+    if (customerResult.error) {
+      console.error('[getCustomerWorkerFields] customer', customerResult.error);
+      return { data: empty, error: new Error(customerResult.error.message) };
+    }
+    if (jobsResult.error) {
+      console.error('[getCustomerWorkerFields] jobs', jobsResult.error);
+      return { data: empty, error: new Error(jobsResult.error.message) };
+    }
+
+    const stored = parseWorkerVisibleFields(
+      (customerResult.data as { worker_visible_fields?: unknown } | null)
+        ?.worker_visible_fields
+    );
+
+    const headers: string[] = [];
+    const seen = new Set<string>();
+    for (const row of jobsResult.data ?? []) {
+      const sourceFields = (row as { source_fields?: unknown }).source_fields;
+      if (!sourceFields || typeof sourceFields !== 'object' || Array.isArray(sourceFields)) {
+        continue;
+      }
+      for (const header of Object.keys(sourceFields as Record<string, unknown>)) {
+        const trimmed = header.trim();
+        if (!trimmed || seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        headers.push(trimmed);
+      }
+    }
+    headers.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+    const { fields, newKeys } = mergeFieldsWithHeaders(stored, headers);
+
+    return {
+      data: {
+        fields,
+        newKeys: [...newKeys],
+        neverConfigured: stored == null,
+      },
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getCustomerWorkerFields]', err);
+    return {
+      data: empty,
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
 }
 
 export interface CustomerJobStats {

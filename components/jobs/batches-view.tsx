@@ -67,8 +67,12 @@ export function BatchesView({ batches }: BatchesViewProps) {
               'hover:bg-muted/30 backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
             )}
             onClick={() => {
+              // Leave `view` as-is: this can be reached from the flat batch
+              // grid (view=batches, no customer) or from a customer's own
+              // batch grid (view=batches, customer_id set) — forcing
+              // view=list here would make the "back" breadcrumb land on the
+              // wrong grid.
               const next = new URLSearchParams(searchParams.toString());
-              next.set('view', 'list');
               next.set('batchId', batch.id);
               next.delete('page');
               router.push(`/jobs?${next.toString()}`, { scroll: false });

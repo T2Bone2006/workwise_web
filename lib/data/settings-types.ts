@@ -70,12 +70,61 @@ export interface NotificationsSettings {
   };
 }
 
+/**
+ * Standard fields the jobs list table can show as columns. Deliberately
+ * separate from source_fields (spreadsheet columns) — see [[field-filter]]
+ * for why those aren't part of this picker.
+ */
+export type JobsListColumnKey =
+  | 'customer'
+  | 'address'
+  | 'postcode'
+  | 'worker'
+  | 'scheduled'
+  | 'priority'
+  | 'status'
+  | 'skills'
+  | 'created_at';
+
+export const JOBS_LIST_COLUMNS: Array<{ key: JobsListColumnKey; label: string }> = [
+  { key: 'customer', label: 'Customer' },
+  { key: 'address', label: 'Address' },
+  { key: 'postcode', label: 'Postcode' },
+  { key: 'worker', label: 'Worker' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'status', label: 'Status' },
+  { key: 'skills', label: 'Skills' },
+  { key: 'created_at', label: 'Created' },
+];
+
+const JOBS_LIST_COLUMN_KEYS = new Set(JOBS_LIST_COLUMNS.map((c) => c.key));
+
+export function isJobsListColumnKey(value: string): value is JobsListColumnKey {
+  return JOBS_LIST_COLUMN_KEYS.has(value as JobsListColumnKey);
+}
+
+const DEFAULT_JOBS_LIST_COLUMNS: JobsListColumnKey[] = [
+  'customer',
+  'address',
+  'worker',
+  'scheduled',
+  'status',
+];
+
+export function getDefaultJobsListColumns(): JobsListColumnKey[] {
+  return [...DEFAULT_JOBS_LIST_COLUMNS];
+}
+
 export interface TenantSettings {
   company?: TenantSettingsCompany;
   pricing_margins?: PricingMargins;
   integrations?: IntegrationsSettings;
   notifications?: NotificationsSettings;
   user_phone?: Record<string, string>;
+  jobs_list?: {
+    columns?: JobsListColumnKey[];
+  };
   features?: {
     pro?: boolean;
     widget?: boolean;

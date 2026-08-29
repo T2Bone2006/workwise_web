@@ -14,6 +14,11 @@ import {
   type SystemFilterFieldKey,
 } from '@/lib/jobs/field-filter';
 import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
+import {
+  isJobsListColumnKey,
+  getDefaultJobsListColumns,
+  type JobsListColumnKey,
+} from '@/lib/data/settings-types';
 
 export type { JobMatchPill };
 
@@ -24,6 +29,7 @@ export type JobStatus =
   | 'in_progress'
   | 'paused'
   | 'completed'
+  | 'incomplete'
   | 'declined'
   | 'cancelled';
 export type JobPriority = 'low' | 'normal' | 'high' | 'emergency';
@@ -95,42 +101,50 @@ export interface JobsStatusSummary {
   /** Assigned but not yet sent to worker app (`pending_send`). */
   readyToSend: number;
   completed: number;
+  /** Report submitted but the work did not get done (`incomplete`). */
+  incomplete: number;
 }
 
 export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatusSummary> {
   const supabase = await createClient();
-  const [notStarted, inProgress, paused, assigned, readyToSend, completed] = await Promise.all([
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'in_progress'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'paused'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'assigned'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending_send'),
-    supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'completed'),
-  ]);
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
+    await Promise.all([
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'in_progress'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'paused'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'assigned'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending_send'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'completed'),
+      supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'incomplete'),
+    ]);
 
   return {
     notStarted: notStarted.count ?? 0,
@@ -139,6 +153,7 @@ export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatus
     assigned: assigned.count ?? 0,
     readyToSend: readyToSend.count ?? 0,
     completed: completed.count ?? 0,
+    incomplete: incomplete.count ?? 0,
   };
 }
 
@@ -635,6 +650,11 @@ export interface ImportBatchRow {
   started_at: string | null;
   rows_imported: number;
   import_source_id: string | null;
+  /** Owning customer, resolved via import_sources.customer_id. Null for the
+   *  synthetic 'ungrouped' (manually-added) batch, or for legacy imports
+   *  that predate customer-scoped import sources. */
+  customer_id: string | null;
+  customer_name: string | null;
   /** Job IDs from this import that still exist with a live status. */
   job_ids: string[];
   pending: number;
@@ -720,6 +740,42 @@ export async function getImportBatchesForTenant(
       }
     }
 
+    // Resolve each batch's owning customer via import_sources.customer_id.
+    // Two small tenant-scoped queries (bounded by customer/source count, not
+    // job count) rather than a nested embed, matching this function's
+    // existing style of explicit maps over PostgREST embeds.
+    const { data: sourceRows, error: sourcesError } = await supabase
+      .from('import_sources')
+      .select('id, customer_id')
+      .eq('tenant_id', tenantId);
+    if (sourcesError) {
+      console.error('[getImportBatchesForTenant] import_sources', sourcesError);
+      return { batches: [], error: new Error(sourcesError.message ?? 'Failed to load import sources') };
+    }
+    const customerIdBySourceId = new Map<string, string | null>();
+    const referencedCustomerIds = new Set<string>();
+    for (const row of sourceRows ?? []) {
+      const r = row as { id: string; customer_id: string | null };
+      customerIdBySourceId.set(r.id, r.customer_id ?? null);
+      if (r.customer_id) referencedCustomerIds.add(r.customer_id);
+    }
+
+    const customerNameById = new Map<string, string>();
+    if (referencedCustomerIds.size > 0) {
+      const { data: customerRows, error: customersError } = await supabase
+        .from('customers')
+        .select('id, name')
+        .in('id', [...referencedCustomerIds]);
+      if (customersError) {
+        console.error('[getImportBatchesForTenant] customers', customersError);
+        return { batches: [], error: new Error(customersError.message ?? 'Failed to load customers') };
+      }
+      for (const row of customerRows ?? []) {
+        const r = row as { id: string; name: string | null };
+        customerNameById.set(r.id, r.name ?? 'Unnamed customer');
+      }
+    }
+
     // One query for every live job on the tenant, filtered by tenant_id + status
     // only — not by an .in('id', [...]) built from allHistoryJobIds. A tenant
     // with a few hundred jobs puts that id list past the 16KB header limit and
@@ -796,12 +852,17 @@ export async function getImportBatchesForTenant(
           job_ids?: string[] | null;
         };
         const { counts, liveJobIds } = summarizeHistoryJobIds(r.job_ids);
+        const customerId = r.import_source_id
+          ? customerIdBySourceId.get(r.import_source_id) ?? null
+          : null;
         return {
           id: r.id,
           file_name: r.file_name ?? null,
           started_at: r.started_at ?? null,
           rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
           import_source_id: r.import_source_id ?? null,
+          customer_id: customerId,
+          customer_name: customerId ? customerNameById.get(customerId) ?? null : null,
           job_ids: liveJobIds,
           pending: counts.pending,
           pending_send: counts.pending_send,
@@ -821,6 +882,8 @@ export async function getImportBatchesForTenant(
         started_at: null,
         rows_imported: ungroupedTotal,
         import_source_id: null,
+        customer_id: null,
+        customer_name: null,
         job_ids: ungroupedJobIds,
         pending: ungroupedCounts.pending,
         pending_send: ungroupedCounts.pending_send,
@@ -958,21 +1021,59 @@ export async function getRecentJobsForCustomer(
   }
 }
 
-const SOURCE_FIELDS_SCAN_LIMIT = 5000;
-
 /**
- * Distinct source_fields keys present on this tenant's jobs (for field filter dropdown).
+ * Which standard fields show as columns on the jobs list. Per-account (there
+ * are no per-user logins yet), stored alongside the rest of tenant settings.
  */
-export async function getSourceFieldKeysForTenant(
+export async function getJobsListColumnsForTenant(
   tenantId: string
-): Promise<{ keys: string[]; error: Error | null }> {
+): Promise<JobsListColumnKey[]> {
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
+      .from('tenants')
+      .select('settings')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (error) {
+      console.error('[getJobsListColumnsForTenant]', error);
+      return getDefaultJobsListColumns();
+    }
+    const stored = (data?.settings as { jobs_list?: { columns?: unknown } } | null)?.jobs_list
+      ?.columns;
+    if (!Array.isArray(stored)) return getDefaultJobsListColumns();
+    const filtered = stored.filter(
+      (key): key is JobsListColumnKey => typeof key === 'string' && isJobsListColumnKey(key)
+    );
+    return filtered.length > 0 ? filtered : getDefaultJobsListColumns();
+  } catch (err) {
+    console.error('[getJobsListColumnsForTenant]', err);
+    return getDefaultJobsListColumns();
+  }
+}
+
+const SOURCE_FIELDS_SCAN_LIMIT = 5000;
+
+/**
+ * Distinct source_fields keys present on this tenant's jobs (for field filter
+ * dropdown). Pass `customerId` to scope to one customer's jobs instead of
+ * scanning the whole tenant — every spreadsheet layout a tenant has ever
+ * imported otherwise piles into one flat, ever-growing list. The main jobs
+ * list intentionally never calls this unscoped; only the Batches → customer
+ * drill-down does.
+ */
+export async function getSourceFieldKeysForTenant(
+  tenantId: string,
+  customerId?: string
+): Promise<{ keys: string[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    let query = supabase
       .from('jobs')
       .select('source_fields')
-      .eq('tenant_id', tenantId)
-      .limit(SOURCE_FIELDS_SCAN_LIMIT);
+      .eq('tenant_id', tenantId);
+    if (customerId) query = query.eq('customer_id', customerId);
+    const { data, error } = await query.limit(SOURCE_FIELDS_SCAN_LIMIT);
 
     if (error) {
       console.error('[getSourceFieldKeysForTenant]', error);
@@ -996,10 +1097,14 @@ export async function getSourceFieldKeysForTenant(
 
 /**
  * Distinct values for a Phase 6 field filter (system or source_fields key).
+ * `customerId` scopes a source_fields lookup to one customer's jobs, same
+ * rationale as {@link getSourceFieldKeysForTenant}. Ignored for system
+ * fields — those aren't customer-scoped.
  */
 export async function getFieldFilterValuesForTenant(
   tenantId: string,
-  field: string
+  field: string,
+  customerId?: string
 ): Promise<{ values: FieldFilterValueOption[]; error: Error | null }> {
   try {
     if (!field.trim()) return { values: [], error: null };
@@ -1008,11 +1113,12 @@ export async function getFieldFilterValuesForTenant(
       const key = decodeSourceFieldFilter(field);
       if (!key) return { values: [], error: null };
       const supabase = await createClient();
-      const { data, error } = await supabase
+      let sourceQuery = supabase
         .from('jobs')
         .select('source_fields')
-        .eq('tenant_id', tenantId)
-        .limit(SOURCE_FIELDS_SCAN_LIMIT);
+        .eq('tenant_id', tenantId);
+      if (customerId) sourceQuery = sourceQuery.eq('customer_id', customerId);
+      const { data, error } = await sourceQuery.limit(SOURCE_FIELDS_SCAN_LIMIT);
       if (error) {
         console.error('[getFieldFilterValuesForTenant] source', error);
         return { values: [], error: toError(error) };
@@ -1040,6 +1146,7 @@ export async function getFieldFilterValuesForTenant(
           'in_progress',
           'paused',
           'completed',
+          'incomplete',
           'declined',
           'cancelled',
         ];

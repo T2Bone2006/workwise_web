@@ -1,11 +1,16 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { getCustomerById, getCustomerJobStats } from '@/lib/data/customers';
+import {
+  getCustomerById,
+  getCustomerJobStats,
+  getCustomerWorkerFields,
+} from '@/lib/data/customers';
 import { getRecentJobsForCustomer } from '@/lib/data/jobs';
 import { getCustomerPortalInviteState } from '@/lib/actions/customers';
 import { CustomerDetailView } from '@/components/customers/customer-detail-view';
 import { CustomerDeleteButton } from '@/components/customers/customer-delete-button';
+import { CustomerWorkerFieldsCard } from '@/components/customers/customer-worker-fields-card';
 import { RevokeCustomerPortalAccessButton } from '@/components/customers/customers-table';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -27,11 +32,13 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     { stats, error: statsError },
     { jobs: recentJobs, error: jobsError },
     portalState,
+    { data: workerFields },
   ] = await Promise.all([
     getCustomerById(tenantId, customerId),
     getCustomerJobStats(tenantId, customerId),
     getRecentJobsForCustomer(tenantId, customerId, 10),
     getCustomerPortalInviteState(customerId),
+    getCustomerWorkerFields(tenantId, customerId),
   ]);
 
   const hasPortalUser = portalState.success && portalState.hasPortalUser;
@@ -74,6 +81,13 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
         recentJobs={recentJobs}
         statsError={statsError}
         jobsError={jobsError}
+      />
+
+      <CustomerWorkerFieldsCard
+        customerId={customerId}
+        initialFields={workerFields.fields}
+        newKeys={workerFields.newKeys}
+        neverConfigured={workerFields.neverConfigured}
       />
     </div>
   );

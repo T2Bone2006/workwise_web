@@ -24,7 +24,7 @@ export function isIndustryDataEmpty(raw: unknown): boolean {
   return Object.keys(o).length === 0;
 }
 
-function triStateYesNo(v: unknown): 'Yes' | 'No' | null {
+export function triStateYesNo(v: unknown): 'Yes' | 'No' | null {
   if (v === true || v === 'true' || v === 'yes' || v === 'Yes' || v === 1) return 'Yes';
   if (v === false || v === 'false' || v === 'no' || v === 'No' || v === 0) return 'No';
   return null;

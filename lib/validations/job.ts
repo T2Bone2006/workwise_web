@@ -47,3 +47,40 @@ export const updateJobCustomerSchema = z.object({
 });
 
 export type UpdateJobCustomerInput = z.infer<typeof updateJobCustomerSchema>;
+
+/**
+ * Editing a job's dispatch details after the fact (fixing a mistake) —
+ * same field rules as creation, minus customer/worker/reference, which have
+ * their own dedicated edit flows.
+ */
+export const updateJobDetailsSchema = createJobSchema
+  .pick({
+    address: true,
+    postcode: true,
+    description: true,
+    priority: true,
+    job_length: true,
+    scheduled_date: true,
+    scheduled_time: true,
+    end_time: true,
+  })
+  .extend({ jobId: z.string().uuid('Invalid job') });
+
+export type UpdateJobDetailsInput = z.infer<typeof updateJobDetailsSchema>;
+
+const triState = z.enum(['yes', 'no', 'unset']);
+
+/**
+ * Editing the completion record a worker submitted (notes + trade-specific
+ * report fields) — a correction, not a new submission, so no photos here.
+ */
+export const updateJobCompletionSchema = z.object({
+  jobId: z.string().uuid('Invalid job'),
+  completion_notes: z.string().max(2000).optional(),
+  lock_changed: triState.optional(),
+  walked_away: triState.optional(),
+  walk_away_reason: z.string().max(200).optional(),
+  walk_away_detail: z.string().max(1000).optional(),
+});
+
+export type UpdateJobCompletionInput = z.infer<typeof updateJobCompletionSchema>;

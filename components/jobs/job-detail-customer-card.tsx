@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2, Mail, Phone, User } from 'lucide-react';
 import { toast } from 'sonner';
@@ -220,7 +221,12 @@ export function JobDetailCustomerCard({
           <>
             <div className="flex items-center gap-2">
               <User className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium text-foreground">{displayed.name || '—'}</span>
+              <Link
+                href={`/customers/${displayed.id}`}
+                className="truncate font-medium text-foreground hover:text-primary hover:underline"
+              >
+                {displayed.name || '—'}
+              </Link>
             </div>
             {typeLabel && (
               <span

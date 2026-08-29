@@ -8,6 +8,7 @@ import {
   getImportBatchesForTenant,
   getSourceFieldKeysForTenant,
   getFieldFilterValuesForTenant,
+  getJobsListColumnsForTenant,
   type JobsFilters,
   type JobStatus,
   type JobPriority,
@@ -156,6 +157,17 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       filters = {};
     }
 
+    // Source-field ("Stored fields") filtering only ever shows up once you're
+    // drilled into one customer under the Batches tab — that's what keeps
+    // this dropdown from becoming a flat, ever-growing list of every header
+    // from every spreadsheet layout the tenant has ever imported. The plain
+    // jobs list (and Batches before a customer is picked) only offers the
+    // fixed system fields.
+    const scopedCustomerId =
+      filters.view === 'batches' && filters.customer_id && filters.customer_id !== 'none'
+        ? filters.customer_id
+        : null;
+
     const [
       { count: unassignedCount },
       statusSummary,
@@ -163,13 +175,17 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       batchesResult,
       tenantSkills,
       sourceKeysResult,
+      visibleColumns,
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
       getPendingSendJobsForTenant(tenantId),
       getImportBatchesForTenant(tenantId),
       getTenantSkills(tenantId),
-      getSourceFieldKeysForTenant(tenantId),
+      scopedCustomerId
+        ? getSourceFieldKeysForTenant(tenantId, scopedCustomerId)
+        : Promise.resolve({ keys: [], error: null }),
+      getJobsListColumnsForTenant(tenantId),
     ]);
 
     const fieldFilterOptions = [
@@ -178,7 +194,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         label: f.label,
         group: 'System',
       })),
-      ...(sourceKeysResult.keys ?? []).map((key) => ({
+      ...(scopedCustomerId ? sourceKeysResult.keys ?? [] : []).map((key) => ({
         value: encodeSourceFieldFilter(key),
         label: key,
         group: 'Stored fields',
@@ -192,7 +208,11 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     if (fieldsNeedingValues.length > 0) {
       const entries = await Promise.all(
         fieldsNeedingValues.map(async (field) => {
-          const valuesResult = await getFieldFilterValuesForTenant(tenantId, field);
+          const valuesResult = await getFieldFilterValuesForTenant(
+            tenantId,
+            field,
+            scopedCustomerId ?? undefined
+          );
           return [field, valuesResult.values] as const;
         })
       );
@@ -238,6 +258,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           activeBatchId={activeBatchId}
           fieldFilterOptions={fieldFilterOptions}
           fieldFilterValuesByField={fieldFilterValuesByField}
+          initialVisibleColumns={visibleColumns}
         />
       </div>
     );

@@ -7,6 +7,11 @@ import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
+import {
+  canonicalFieldKey,
+  fieldLabelFromHeader,
+  type WorkerVisibleField,
+} from '@/lib/jobs/worker-visible-fields';
 
 const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'in_progress'] as const;
 
@@ -938,6 +943,55 @@ export async function reactivateCustomerPortalAccess(customerId: string) {
   }
 
   revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
+  return { success: true };
+}
+
+
+/**
+ * Saves which imported columns this customer's workers see, and what they are
+ * called on the job screen.
+ *
+ * The whole list is replaced each save, disabled entries included, so a label
+ * edit survives a field being switched off and back on.
+ */
+export async function updateCustomerWorkerFields(
+  customerId: string,
+  fields: WorkerVisibleField[]
+): Promise<{ success: boolean; error?: string }> {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) {
+    return { success: false, error: 'Not authenticated' };
+  }
+
+  const cleaned: WorkerVisibleField[] = [];
+  const seen = new Set<string>();
+  for (const field of fields) {
+    const sourceHeader = String(field?.source_header ?? '').trim();
+    const key = String(field?.key ?? '').trim() || canonicalFieldKey(sourceHeader);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const label = String(field?.label ?? '').trim();
+    cleaned.push({
+      key,
+      source_header: sourceHeader || key,
+      label: label || fieldLabelFromHeader(sourceHeader || key),
+      enabled: field?.enabled !== false,
+    });
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('customers')
+    .update({ worker_visible_fields: cleaned, updated_at: new Date().toISOString() })
+    .eq('id', customerId)
+    .eq('tenant_id', tenantId);
+
+  if (error) {
+    console.error('[updateCustomerWorkerFields]', error);
+    return { success: false, error: error.message };
+  }
+
   revalidatePath(`/customers/${customerId}`);
   return { success: true };
 }
