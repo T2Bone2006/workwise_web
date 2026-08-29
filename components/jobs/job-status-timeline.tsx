@@ -11,6 +11,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  declined: 'Declined',
 };
 
 const STATUS_DOT_CLASS: Record<string, string> = {
@@ -20,6 +21,7 @@ const STATUS_DOT_CLASS: Record<string, string> = {
   in_progress: 'bg-violet-400 shadow-[0_0_8px_rgba(139,92,246,0.4)]',
   completed: 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]',
   cancelled: 'bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.3)]',
+  declined: 'bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.3)]',
 };
 
 export interface JobStatusHistoryEntry {
@@ -30,6 +32,12 @@ export interface JobStatusHistoryEntry {
   changed_by_user_id: string | null;
   changed_by_worker_id: string | null;
   notes: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+function declineReason(entry: JobStatusHistoryEntry): string | null {
+  const reason = entry.metadata?.reason;
+  return typeof reason === 'string' && reason.trim() ? reason.trim() : null;
 }
 
 interface JobStatusTimelineProps {
@@ -103,6 +111,11 @@ export function JobStatusTimeline({ entries }: JobStatusTimelineProps) {
                   <p className="mt-0.5 text-xs text-muted-foreground/80">
                     {changedByLabel(entry)}
                   </p>
+                  {declineReason(entry) && (
+                    <p className="mt-1 text-xs text-muted-foreground italic">
+                      &ldquo;{declineReason(entry)}&rdquo;
+                    </p>
+                  )}
                 </div>
               </li>
             ))}

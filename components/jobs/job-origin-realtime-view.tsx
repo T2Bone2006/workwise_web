@@ -93,6 +93,7 @@ export function JobOriginRealtimeView({
                       changed_by_worker_id: (row.changed_by_worker_id as string) ?? null,
                       notes: (row.notes as string) ?? null,
                       created_at: row.created_at as string,
+                      metadata: (row.metadata as Record<string, unknown>) ?? null,
                     }))
                   );
                 });

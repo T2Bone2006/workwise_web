@@ -158,6 +158,7 @@ export function JobDetailView({
             changed_by_user_id: e.changed_by_user_id,
             changed_by_worker_id: e.changed_by_worker_id,
             notes: e.notes,
+            metadata: e.metadata,
           }))}
         />
         <JobDetailSourceFieldsCard sourceFields={job.source_fields ?? {}} />

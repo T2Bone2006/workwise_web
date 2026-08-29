@@ -52,4 +52,5 @@ export interface JobStatusHistoryEntry {
   changed_by_worker_id: string | null;
   notes: string | null;
   created_at: string;
+  metadata: Record<string, unknown> | null;
 }

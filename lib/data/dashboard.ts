@@ -144,6 +144,91 @@ export async function getRecentActivity(tenantId: string, limit = 10): Promise<A
   return list;
 }
 
+export interface DeclinedJobItem {
+  id: string;
+  created_at: string;
+  job_id: string | null;
+  reference_number: string | null;
+  address: string | null;
+  postcode: string | null;
+  worker_name: string | null;
+  reason: string | null;
+}
+
+/**
+ * Jobs declined by a worker in the last `sinceDays` (default 7).
+ *
+ * The job's own `status` bounces straight back to `pending` (see
+ * handle_job_declined()), so this reads the audit trail instead — every
+ * decline leaves a `from_status = 'declined'` row in job_status_history,
+ * whether or not the job later got reassigned. This is a feed of what
+ * happened, not a queue of stuck jobs; nothing here needs manual action.
+ */
+export async function getRecentlyDeclinedJobs(
+  tenantId: string,
+  sinceDays = 7,
+  limit = 20
+): Promise<DeclinedJobItem[]> {
+  const supabase = await createClient();
+  const { data: jobIds } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('tenant_id', tenantId);
+
+  const ids = (jobIds ?? []).map((r: { id: string }) => r.id);
+  if (ids.length === 0) return [];
+
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: rows, error } = await supabase
+    .from('job_status_history')
+    .select(`
+      id,
+      created_at,
+      job_id,
+      metadata,
+      job:jobs!job_id(reference_number, address, postcode),
+      worker:workers!changed_by_worker_id(full_name)
+    `)
+    .eq('from_status', 'declined')
+    .in('job_id', ids)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('[getRecentlyDeclinedJobs]', error);
+    return [];
+  }
+
+  return (rows ?? []).map((row) => {
+    const r = row as {
+      id: string;
+      created_at: string;
+      job_id: string | null;
+      metadata: Record<string, unknown> | null;
+      job?:
+        | { reference_number?: string; address?: string; postcode?: string }
+        | { reference_number?: string; address?: string; postcode?: string }[]
+        | null;
+      worker?: { full_name?: string } | { full_name?: string }[] | null;
+    };
+    const job = Array.isArray(r.job) ? r.job[0] : r.job;
+    const worker = Array.isArray(r.worker) ? r.worker[0] : r.worker;
+    const reason = typeof r.metadata?.reason === 'string' ? r.metadata.reason.trim() : '';
+    return {
+      id: r.id,
+      created_at: r.created_at,
+      job_id: r.job_id,
+      reference_number: job?.reference_number ?? null,
+      address: job?.address ?? null,
+      postcode: job?.postcode ?? null,
+      worker_name: worker?.full_name ?? null,
+      reason: reason || null,
+    };
+  });
+}
+
 export interface TopWorkerItem {
   id: string;
   full_name: string;
