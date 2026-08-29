@@ -85,14 +85,11 @@ export interface ActivityFeedItem {
  */
 export async function getRecentActivity(tenantId: string, limit = 10): Promise<ActivityFeedItem[]> {
   const supabase = await createClient();
-  const { data: jobIds } = await supabase
-    .from('jobs')
-    .select('id')
-    .eq('tenant_id', tenantId);
 
-  const ids = (jobIds ?? []).map((r: { id: string }) => r.id);
-  if (ids.length === 0) return [];
-
+  // Scope by tenant through the embedded join (jobs!inner + a filter on the
+  // embedded column), not by fetching every job id and sending .in(job_id,
+  // [...]) — that puts the whole id list in the URL, and a tenant with a few
+  // hundred jobs blows past the 16KB header limit outright.
   const { data: rows, error } = await supabase
     .from('job_status_history')
     .select(`
@@ -101,11 +98,11 @@ export async function getRecentActivity(tenantId: string, limit = 10): Promise<A
       from_status,
       to_status,
       job_id,
-      job:jobs!job_id(reference_number),
+      job:jobs!inner(reference_number, tenant_id),
       user:users!changed_by_user_id(full_name, email),
       worker:workers!changed_by_worker_id(full_name)
     `)
-    .in('job_id', ids)
+    .eq('job.tenant_id', tenantId)
     .order('created_at', { ascending: false })
     .limit(limit * 2);
 
@@ -170,16 +167,10 @@ export async function getRecentlyDeclinedJobs(
   limit = 20
 ): Promise<DeclinedJobItem[]> {
   const supabase = await createClient();
-  const { data: jobIds } = await supabase
-    .from('jobs')
-    .select('id')
-    .eq('tenant_id', tenantId);
-
-  const ids = (jobIds ?? []).map((r: { id: string }) => r.id);
-  if (ids.length === 0) return [];
-
   const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
 
+  // Scope by tenant through the embedded join, not an .in(job_id, [...id list])
+  // built from every job id — see getRecentActivity above for why.
   const { data: rows, error } = await supabase
     .from('job_status_history')
     .select(`
@@ -187,11 +178,11 @@ export async function getRecentlyDeclinedJobs(
       created_at,
       job_id,
       metadata,
-      job:jobs!job_id(reference_number, address, postcode),
+      job:jobs!inner(reference_number, address, postcode, tenant_id),
       worker:workers!changed_by_worker_id(full_name)
     `)
+    .eq('job.tenant_id', tenantId)
     .eq('from_status', 'declined')
-    .in('job_id', ids)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(limit);

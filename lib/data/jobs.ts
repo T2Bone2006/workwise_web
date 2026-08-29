@@ -720,29 +720,29 @@ export async function getImportBatchesForTenant(
       }
     }
 
+    // One query for every live job on the tenant, filtered by tenant_id + status
+    // only — not by an .in('id', [...]) built from allHistoryJobIds. A tenant
+    // with a few hundred jobs puts that id list past the 16KB header limit and
+    // the request fails outright (Supabase sends .in() as URL params). Fetching
+    // by the cheap predicates and intersecting with allHistoryJobIds in JS below
+    // is smaller, one round trip, and immune to tenant size.
     const statusByJobId = new Map<string, JobStatus>();
     if (allHistoryJobIds.size > 0) {
-      const idList = [...allHistoryJobIds];
-      const CHUNK = 500;
-      for (let i = 0; i < idList.length; i += CHUNK) {
-        const chunk = idList.slice(i, i + CHUNK);
-        const { data: jobRows, error: jobsError } = await supabase
-          .from('jobs')
-          .select('id, status')
-          .eq('tenant_id', tenantId)
-          .in('id', chunk)
-          .in('status', LIVE_BATCH_STATUSES);
+      const { data: jobRows, error: jobsError } = await supabase
+        .from('jobs')
+        .select('id, status')
+        .eq('tenant_id', tenantId)
+        .in('status', LIVE_BATCH_STATUSES);
 
-        if (jobsError) {
-          console.error('[getImportBatchesForTenant] jobs', jobsError);
-          return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
-        }
+      if (jobsError) {
+        console.error('[getImportBatchesForTenant] jobs', jobsError);
+        return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
+      }
 
-        for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
-          const id = (jobRow as { id?: string }).id;
-          const status = (jobRow as { status?: JobStatus | null }).status;
-          if (id && status) statusByJobId.set(id, status);
-        }
+      for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
+        const id = (jobRow as { id?: string }).id;
+        const status = (jobRow as { status?: JobStatus | null }).status;
+        if (id && status && allHistoryJobIds.has(id)) statusByJobId.set(id, status);
       }
     }
 
