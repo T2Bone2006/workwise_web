@@ -602,6 +602,8 @@ export async function assignJob(
       .update({
         assigned_worker_id: workerId,
         status: newStatus,
+        // A past decline reason shouldn't linger once someone new is assigned.
+        decline_reason: null,
         updated_at: new Date().toISOString(),
         auto_assign_failure_reason: null,
       })

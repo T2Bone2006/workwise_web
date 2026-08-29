@@ -22,7 +22,7 @@ export default async function DashboardPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <PageGradientHeader title="Dashboard" subtitle={tenantName ?? undefined} />
-      <DeclinedJobsBanner />
+      <DeclinedJobsBanner variant="red" />
 
       <section className="shrink-0">
         <DashboardStatCards stats={jobStats} />

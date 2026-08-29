@@ -7,11 +7,15 @@ const PRESERVED_STATUSES = new Set([
   'en_route',
   'arrived',
   'accepted',
-  'declined',
 ]);
 
-/** Statuses that move to `pending_send` when a worker is assigned or reassigned. */
-const PROMOTE_TO_PENDING_SEND = new Set(['pending', 'assigned', 'pending_send']);
+/**
+ * Statuses that move to `pending_send` when a worker is assigned or reassigned.
+ * Includes `declined`: a declined job now stays declined until a dispatcher
+ * assigns someone (see handle_job_declined() — it no longer auto-bounces to
+ * pending), so assigning must actively promote it, not leave it frozen.
+ */
+const PROMOTE_TO_PENDING_SEND = new Set(['pending', 'assigned', 'pending_send', 'declined']);
 
 /**
  * Job status after setting `assigned_worker_id` (create, assign, or reassign).

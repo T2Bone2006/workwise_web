@@ -22,6 +22,7 @@ import { JobsTable } from '@/components/jobs/jobs-table';
 import { JobsForReviewBanner } from '@/components/jobs/jobs-for-review-banner';
 import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banner';
 import { JobsPageErrorToast } from '@/components/jobs/jobs-page-error-toast';
+import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
 interface JobsPageProps {
@@ -223,6 +224,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           title="Jobs"
           subtitle="Manage and track all your jobs"
         />
+        <DeclinedJobsBanner variant="red" />
         <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
         <JobsForReviewBanner count={unassignedCount} />
 
