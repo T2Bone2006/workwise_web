@@ -43,6 +43,10 @@ const BUILT_IN_REPORT_LABELS: Record<string, string> = {
 /** Keys that are surfaced elsewhere in the email, so would only read as noise. */
 const SKIPPED_REPORT_KEYS = new Set(['pause_reason']);
 
+/** The app's own follow-up to its built-in "Job completed?" question. */
+const BUILT_IN_BLOCKED_BY = 'job_completed';
+const BUILT_IN_REASON_KEY = 'incomplete_reason';
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -132,6 +136,41 @@ function buildReportAnswers(
 }
 
 /**
+ * Why the job stopped, without guessing at field names.
+ *
+ * The trigger records which question blocked completion, so the explanation is
+ * whatever that question's follow-ups were answered with — the fields whose
+ * `show_when` points back at it. RS calls theirs `walk_away_detail` and Eden
+ * calls theirs `walk_away_reason`; neither name appears here, so a new client
+ * naming theirs something else needs no change.
+ */
+function resolveIncompleteReason(
+  industryData: Record<string, unknown>,
+  reportFields: unknown,
+  blockedBy: string | null
+): string | null {
+  if (blockedBy === BUILT_IN_BLOCKED_BY || !blockedBy) {
+    const builtIn = formatAnswer(industryData[BUILT_IN_REASON_KEY]);
+    if (builtIn) return builtIn;
+  }
+  if (!blockedBy || !Array.isArray(reportFields)) return null;
+
+  const parts: string[] = [];
+  for (const field of reportFields) {
+    const candidate = asRecord(field);
+    const id = typeof candidate.id === 'string' ? candidate.id : null;
+    if (!id) continue;
+    const showWhen = asRecord(candidate.show_when);
+    if (showWhen.field !== blockedBy) continue;
+    const answer = formatAnswer(industryData[id]);
+    if (answer) parts.push(answer);
+  }
+
+  if (parts.length > 0) return parts.join(' — ');
+  return formatAnswer(industryData[BUILT_IN_REASON_KEY]) || null;
+}
+
+/**
  * Everything needed to describe how a job ended, in one shape used by both the
  * automatic outcome email and the manual send from the dashboard.
  *
@@ -174,19 +213,22 @@ export async function getJobOutcomeSummary(
       .order('created_at', { ascending: true }),
   ]);
 
-  // Declining clears assigned_worker_id, so for that outcome the only record of
-  // who it was is the status history row the decline trigger wrote.
+  // The status history row carries two things nothing else does: who declined
+  // (declining clears assigned_worker_id) and which question blocked
+  // completion, which is what makes the reason lookup below name-agnostic.
   let workerId = job.assigned_worker_id as string | null;
-  if (!workerId && outcome === 'declined') {
+  let blockedBy: string | null = null;
+  if (outcome !== 'completed') {
     const { data: historyRow } = await admin
       .from('job_status_history')
-      .select('changed_by_worker_id')
+      .select('changed_by_worker_id, metadata')
       .eq('job_id', jobId)
-      .eq('to_status', 'declined')
+      .eq('to_status', outcome)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    workerId = (historyRow?.changed_by_worker_id as string | null) ?? null;
+    workerId = workerId ?? ((historyRow?.changed_by_worker_id as string | null) ?? null);
+    blockedBy = (asRecord(historyRow?.metadata).blocked_by as string | null) ?? null;
   }
 
   let workerName: string | null = null;
@@ -206,9 +248,11 @@ export async function getJobOutcomeSummary(
     outcome === 'declined'
       ? (job.decline_reason as string | null)?.trim() || null
       : outcome === 'incomplete'
-        ? formatAnswer(industryData.incomplete_reason) ||
-          formatAnswer(industryData.walk_away_reason) ||
-          null
+        ? resolveIncompleteReason(
+            industryData,
+            tenantSettings.job_report_fields,
+            blockedBy
+          )
         : null;
 
   const jobSheetFields = resolveJobSheetFields(
