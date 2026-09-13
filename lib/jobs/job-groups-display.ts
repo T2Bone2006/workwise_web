@@ -14,7 +14,12 @@ export interface GroupableJob {
 }
 
 export type JobsDisplayRow<J extends GroupableJob> =
-  | { kind: 'job'; job: J }
+  | {
+      kind: 'job';
+      job: J;
+      /** Set on group members so the list can draw the group as one block. */
+      lastInGroup?: boolean;
+    }
   | { kind: 'group'; group: { id: string; label: string }; jobs: J[] };
 
 /**
@@ -48,7 +53,9 @@ export function clusterJobsByGroup<J extends GroupableJob>(jobs: J[]): JobsDispl
       group: { id: groupId, label: job.job_group_label?.trim() || 'Group' },
       jobs: members,
     });
-    for (const member of members) rows.push({ kind: 'job', job: member });
+    members.forEach((member, i) =>
+      rows.push({ kind: 'job', job: member, lastInGroup: i === members.length - 1 })
+    );
   }
   return rows;
 }

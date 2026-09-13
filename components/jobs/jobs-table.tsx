@@ -1600,7 +1600,7 @@ export function JobsTable({
                           return (
                             <TableRow
                               key={`group-${group.id}`}
-                              className="border-border/60 bg-primary/[0.06] hover:bg-primary/[0.09] dark:bg-primary/10"
+                              className="border-l-2 border-l-primary/60 border-border/60 bg-primary/[0.09] hover:bg-primary/[0.12] dark:bg-primary/[0.16]"
                             >
                               <TableCell className="w-10 align-middle">
                                 <button
@@ -1680,15 +1680,28 @@ export function JobsTable({
                           );
                         }
                         const { job } = item;
+                        const inGroup = !!job.job_group_id;
                         return (
                         <TableRow
                           key={job.id}
                           className={cn(
-                            'cursor-pointer border-border/60 transition-all duration-200',
-                            'hover:bg-primary/5 hover:shadow-[0_0_20px_-8px_var(--glow-primary)]',
-                            'dark:hover:bg-primary/10',
-                            i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10',
-                            job.job_group_id && 'border-l-2 border-l-primary/50'
+                            'cursor-pointer transition-all duration-200',
+                            'hover:shadow-[0_0_20px_-8px_var(--glow-primary)]',
+                            // Members share the header's tint so the group reads as one
+                            // block; the last member closes it with a firmer edge so the
+                            // plain rows below are clearly outside it.
+                            inGroup
+                              ? cn(
+                                  'border-l-2 border-l-primary/60 bg-primary/[0.035] dark:bg-primary/[0.07]',
+                                  'hover:bg-primary/[0.08] dark:hover:bg-primary/[0.14]',
+                                  item.lastInGroup
+                                    ? 'border-b-2 border-b-primary/30'
+                                    : 'border-b border-border/40'
+                                )
+                              : cn(
+                                  'border-border/60 hover:bg-primary/5 dark:hover:bg-primary/10',
+                                  i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
+                                )
                           )}
                           onClick={() => {
                             const committed = committedFiltersFromRows(filterRows);
