@@ -12,6 +12,38 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 /** Rows shown to the model. Enough to see repetition; small enough to be cheap. */
 const SAMPLE_ROW_LIMIT = 40;
+/** Same transient failures the row extraction retries (rate limit, grammar compile timeout). */
+const MAX_ATTEMPTS = 3;
+
+function isRetryable(e: unknown): boolean {
+  if (
+    e instanceof Anthropic.RateLimitError ||
+    e instanceof Anthropic.APIConnectionError ||
+    e instanceof Anthropic.InternalServerError
+  ) {
+    return true;
+  }
+  return (
+    e instanceof Anthropic.APIError &&
+    /grammar compilation/i.test(String((e as { message?: unknown }).message ?? ''))
+  );
+}
+
+async function callWithRetry<T>(call: () => Promise<T>): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await call();
+    } catch (e) {
+      if (!isRetryable(e)) throw e;
+      lastError = e;
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+    }
+  }
+  throw lastError;
+}
 
 const SYSTEM_PROMPT = `You look at a UK field-service job spreadsheet and decide which columns, if any, identify a set of rows that one worker should be sent to together as a single run.
 
@@ -119,16 +151,18 @@ export async function suggestGroupingColumns(params: {
   const startedAt = Date.now();
 
   try {
-    const response = await anthropic.messages.parse({
-      model: GROUPING_AI_MODEL,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userPrompt }],
-      output_config: {
-        ...(supportsEffort(GROUPING_AI_MODEL) ? { effort: 'low' as const } : {}),
-        format: zodOutputFormat(SuggestionSchema),
-      },
-    });
+    const response = await callWithRetry(() =>
+      anthropic.messages.parse({
+        model: GROUPING_AI_MODEL,
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+        output_config: {
+          ...(supportsEffort(GROUPING_AI_MODEL) ? { effort: 'low' as const } : {}),
+          format: zodOutputFormat(SuggestionSchema),
+        },
+      })
+    );
 
     const parsed = response.parsed_output;
     // The model proposes; the rows dispose. Keep only real headers, and only

@@ -55,6 +55,7 @@ import {
   type GroupingSuggestion,
 } from '@/lib/import/suggest-grouping-columns';
 import { ImportGroupingPanel } from '@/components/import/import-grouping-panel';
+import { computeRowGroups } from '@/lib/import/job-grouping';
 import type { CustomerImportOption } from '@/lib/data/customers';
 import { SourceFieldsPeek, SourceFieldsPeekProvider } from '@/components/import/source-fields-peek';
 
@@ -179,6 +180,12 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
   const importableRowIndexes = useMemo(
     () => preparedRows.filter((r) => r.ok).map((r) => r.rowIndex),
     [preparedRows]
+  );
+
+  /** Groups the import will create, from the same helper importJobs uses. */
+  const previewGroupCount = useMemo(
+    () => computeRowGroups(csvData, groupingColumns, importableRowIndexes).length,
+    [csvData, groupingColumns, importableRowIndexes]
   );
 
   const rowStats = useMemo(() => {
@@ -388,7 +395,13 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         fileName: csvFile?.name ?? 'import.csv',
         autoAllocate,
         allowPartialImport,
-        groupingColumns,
+        // Remember the choice only when there was one to make: columns
+        // picked, or a suggestion the user cleared. An empty result with
+        // nothing suggested stays undecided so the next sheet is looked at.
+        groupingColumns:
+          groupingColumns.length > 0 || (groupingSuggestion?.columns.length ?? 0) > 0
+            ? groupingColumns
+            : undefined,
       });
 
       setImportResult(
@@ -864,6 +877,9 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
                   : autoAllocate
                     ? `Import & allocate ${rowStats.readyCount}`
                     : `Import ${rowStats.readyCount}`}
+                {!(rowStats.hasInvalidRows && !allowPartialImport) && previewGroupCount > 0
+                  ? ` · ${previewGroupCount} group${previewGroupCount === 1 ? '' : 's'}`
+                  : ''}
               </Button>
             </div>
           </CardFooter>
