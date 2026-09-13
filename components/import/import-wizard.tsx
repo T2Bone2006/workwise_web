@@ -50,6 +50,11 @@ import {
   type RowEdits,
 } from '@/lib/import/extracted-job-row';
 import { extractJobRowsBatch } from '@/lib/import/extract-job-rows';
+import {
+  suggestGroupingColumns,
+  type GroupingSuggestion,
+} from '@/lib/import/suggest-grouping-columns';
+import { ImportGroupingPanel } from '@/components/import/import-grouping-panel';
 import type { CustomerImportOption } from '@/lib/data/customers';
 import { SourceFieldsPeek, SourceFieldsPeekProvider } from '@/components/import/source-fields-peek';
 
@@ -89,6 +94,7 @@ type ImportResultState = {
   errors: string[];
   autoAllocate: boolean;
   allocationFailures: ImportAllocationFailure[];
+  groupCount?: number;
   /** Hard failure message when ok is false. */
   errorMessage?: string;
 };
@@ -146,6 +152,10 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
   /** When false (default), any invalid row blocks the whole import. */
   const [allowPartialImport, setAllowPartialImport] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultState | null>(null);
+  /** Sheet columns that define a job group; [] = grouping off for this import. */
+  const [groupingColumns, setGroupingColumns] = useState<string[]>([]);
+  const [groupingSuggestion, setGroupingSuggestion] = useState<GroupingSuggestion | null>(null);
+  const [isSuggestingGrouping, setIsSuggestingGrouping] = useState(false);
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
@@ -163,6 +173,12 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         )
       ),
     [extractedRows, csvData, rowEdits]
+  );
+
+  const sheetHeaders = useMemo(() => Object.keys(csvData[0] ?? {}), [csvData]);
+  const importableRowIndexes = useMemo(
+    () => preparedRows.filter((r) => r.ok).map((r) => r.rowIndex),
+    [preparedRows]
   );
 
   const rowStats = useMemo(() => {
@@ -248,6 +264,34 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
     }
   }, []);
 
+  /**
+   * Ask for grouping columns alongside extraction — saved choice for a
+   * returning customer, otherwise one AI suggestion — and pre-tick them.
+   */
+  const runGroupingSuggestion = useCallback(
+    async (rows: Record<string, string>[], forCustomerId: string) => {
+      setIsSuggestingGrouping(true);
+      setGroupingSuggestion(null);
+      setGroupingColumns([]);
+      try {
+        const result = await suggestGroupingColumns({
+          customerId: forCustomerId,
+          headers: Object.keys(rows[0] ?? {}),
+          rows,
+        });
+        if (result.success) {
+          setGroupingSuggestion(result.suggestion);
+          setGroupingColumns(result.suggestion.columns);
+        }
+      } catch (e) {
+        console.error('[ImportWizard] grouping suggestion failed', e);
+      } finally {
+        setIsSuggestingGrouping(false);
+      }
+    },
+    []
+  );
+
   const handleFile = useCallback(
     (file: File) => {
       if (!isSpreadsheetImportFile(file.name)) {
@@ -271,6 +315,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         setCsvData(normalizedRows);
         setAllowPartialImport(false);
         void runExtraction(normalizedRows);
+        if (customerId) void runGroupingSuggestion(normalizedRows, customerId);
       };
 
       const lower = file.name.toLowerCase();
@@ -296,7 +341,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         error: () => toast.error('Invalid CSV format.', { duration: 8000 }),
       });
     },
-    [runExtraction]
+    [runExtraction, runGroupingSuggestion, customerId]
   );
 
   const handleCreateCustomer = async () => {
@@ -343,6 +388,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         fileName: csvFile?.name ?? 'import.csv',
         autoAllocate,
         allowPartialImport,
+        groupingColumns,
       });
 
       setImportResult(
@@ -355,6 +401,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
               errors: result.errors ?? [],
               autoAllocate,
               allocationFailures: result.allocationFailures ?? [],
+              groupCount: result.groupCount ?? 0,
             }
           : {
               ok: false,
@@ -395,6 +442,8 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
     setIsExtracting(false);
     setImportResult(null);
     setAllowPartialImport(false);
+    setGroupingColumns([]);
+    setGroupingSuggestion(null);
   };
 
   const dismissImportResult = () => {
@@ -703,6 +752,19 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
               </SourceFieldsPeekProvider>
             </div>
 
+            {sheetHeaders.length > 0 && (
+              <ImportGroupingPanel
+                headers={sheetHeaders}
+                rows={csvData}
+                importableRowIndexes={importableRowIndexes}
+                selectedColumns={groupingColumns}
+                onChange={setGroupingColumns}
+                suggestion={groupingSuggestion}
+                isSuggesting={isSuggestingGrouping}
+                disabled={isImporting || isExtracting}
+              />
+            )}
+
             <fieldset className="space-y-3 rounded-lg border p-4">
               <legend className="px-1 text-sm font-medium">After import</legend>
               <label className="flex cursor-pointer items-start gap-3">
@@ -832,6 +894,9 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
               {importResult.autoAllocate
                 ? ` · ${importResult.assignedCount} assigned · ${importResult.unassignedCount} need manual assignment`
                 : ' · assign them from the Jobs list'}
+              {importResult.groupCount
+                ? ` · ${importResult.groupCount} group${importResult.groupCount === 1 ? '' : 's'} created`
+                : ''}
               .
             </p>
             {importResult.allocationFailures.length > 0 && (

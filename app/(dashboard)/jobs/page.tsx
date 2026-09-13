@@ -1,5 +1,6 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
+import { getWorkersForTenant } from '@/lib/data/workers';
 import {
   getJobsForTenant,
   getUnassignedJobsCountForTenant,
@@ -39,6 +40,7 @@ interface JobsPageProps {
     sort_dir?: string;
     view?: string;
     batchId?: string;
+    group?: string;
     field?: string;
     value?: string;
     f0?: string;
@@ -99,6 +101,7 @@ function parseSearchParams(
     status,
     priority,
     customer_id: raw.customer_id?.trim() || undefined,
+    job_group_id: raw.group?.trim() || undefined,
     date_from: raw.date_from?.trim() || undefined,
     date_to: raw.date_to?.trim() || undefined,
     field_filters: field_filters.length > 0 ? field_filters : undefined,
@@ -176,6 +179,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       tenantSkills,
       sourceKeysResult,
       visibleColumns,
+      { workers },
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
@@ -186,6 +190,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         ? getSourceFieldKeysForTenant(tenantId, scopedCustomerId)
         : Promise.resolve({ keys: [], error: null }),
       getJobsListColumnsForTenant(tenantId),
+      getWorkersForTenant(tenantId),
     ]);
 
     const fieldFilterOptions = [
@@ -259,6 +264,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           fieldFilterOptions={fieldFilterOptions}
           fieldFilterValuesByField={fieldFilterValuesByField}
           initialVisibleColumns={visibleColumns}
+          workers={workers.map((w) => ({ id: w.id, full_name: w.full_name }))}
         />
       </div>
     );

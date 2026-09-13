@@ -205,6 +205,7 @@ export function JobDetailView({
               worker={job.worker}
               workers={workers}
               readOnly={isNetworkOriginView}
+              jobGroup={job.job_group ?? null}
             />
           )}
         </div>

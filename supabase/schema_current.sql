@@ -115,6 +115,7 @@ CREATE TABLE public.import_sources (
   updated_at timestamp with time zone DEFAULT now(),
   customer_id uuid,
   value_transforms jsonb NOT NULL DEFAULT '{}'::jsonb,
+  grouping_columns jsonb,
   CONSTRAINT import_sources_pkey PRIMARY KEY (id),
   CONSTRAINT import_sources_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT import_sources_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id)
@@ -153,12 +154,25 @@ CREATE TABLE public.jobs (
   job_length text CHECK (job_length = ANY (ARRAY['half_day'::text, 'full_day'::text])),
   source_fields jsonb NOT NULL DEFAULT '{}'::jsonb,
   source_fields_text text DEFAULT (source_fields)::text,
+  job_group_id uuid,
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
   CONSTRAINT jobs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT jobs_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
   CONSTRAINT jobs_assigned_worker_id_fkey FOREIGN KEY (assigned_worker_id) REFERENCES public.workers(id),
   CONSTRAINT jobs_import_source_id_fkey FOREIGN KEY (import_source_id) REFERENCES public.import_sources(id),
-  CONSTRAINT jobs_network_dispatch_id_fkey FOREIGN KEY (network_dispatch_id) REFERENCES public.network_job_dispatches(id)
+  CONSTRAINT jobs_network_dispatch_id_fkey FOREIGN KEY (network_dispatch_id) REFERENCES public.network_job_dispatches(id),
+  CONSTRAINT jobs_job_group_id_fkey FOREIGN KEY (job_group_id) REFERENCES public.job_groups(id)
+);
+CREATE TABLE public.job_groups (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  label text NOT NULL,
+  import_history_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT job_groups_pkey PRIMARY KEY (id),
+  CONSTRAINT job_groups_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT job_groups_import_history_id_fkey FOREIGN KEY (import_history_id) REFERENCES public.import_history(id)
 );
 CREATE TABLE public.job_attachments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

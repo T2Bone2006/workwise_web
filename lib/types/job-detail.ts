@@ -41,6 +41,8 @@ export interface JobDetailJob {
   required_skills?: string[];
   /** Extra spreadsheet columns from import. */
   source_fields?: Record<string, string>;
+  /** Group this job travels with (job_groups), if any. */
+  job_group?: { id: string; label: string } | null;
 }
 
 export interface JobStatusHistoryEntry {

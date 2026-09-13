@@ -47,6 +47,45 @@ Commits so far: `e3040d1`, `77e4434`, `d4bebe4` (run `git log --oneline -5` to c
   edge. Doesn't change the verdict; the end-to-end behavior is correct
   either way.
 
+## Job groups + bulk/inline assign (2026-09-13, uncommitted — needs migrations applied first)
+
+Built from Debbie's (RS Locksmiths) three asks: see grouped jobs, assign a group
+to one locksmith in one go, and assign workers straight from the jobs list.
+
+- **Two migrations to paste into the SQL editor, in order, before deploying:**
+  `20260913100000_job_groups.sql` (table `job_groups`, `jobs.job_group_id`,
+  RLS) then `20260913100100_import_sources_grouping_columns.sql`. The jobs
+  list query now joins `job_groups`, so the page 500s until the first one runs.
+- **Model**: `job_groups(id, tenant_id, label, import_history_id)` +
+  `jobs.job_group_id`. Trade-agnostic on purpose — nothing says "warrant
+  officer". No schedule on the group (date/time stay on the jobs). A group is
+  an affordance, not a lock: assigning a group cascades to every member via
+  `assignJobGroup`, but a member can still be reassigned on its own (the job
+  detail Assignment card shows a "Part of group X" hint + link).
+- **Jobs list** (`components/jobs/jobs-table.tsx`): members are clustered
+  under a header row (label · count · worker picker that assigns the whole
+  group · Ungroup). Clicking the label filters to `?group=<id>` (new
+  `JobsFilters.job_group_id`). Bulk bar gained **Assign worker**, **Group
+  selected** (≥2 rows) and **Ungroup**. The Worker column is now an inline
+  type-ahead (`SearchableSelect`) for pending/pending_send/assigned/declined
+  jobs (`canAssignWorkerInline`); other statuses keep the plain link.
+- **Import**: `import_sources.grouping_columns` (NULL = never decided, [] =
+  off). Review step shows `ImportGroupingPanel`: for a new customer the wizard
+  asks the model once (`lib/import/suggest-grouping-columns.ts`, Opus 5, ~5k
+  tokens; on Debbie's sheet it picked W/O First/Last Name + Mobile + Date
+  Required) and the user confirms; a returning customer gets their saved
+  choice with no AI call. Grouping itself is deterministic
+  (`lib/import/job-grouping.ts`, sets of ≥2 rows only). `importJobs` creates
+  the groups after insert and auto-allocates a group as one unit
+  (`autoAllocateJobGroup`), falling back to the postcode cluster for
+  ungrouped jobs.
+- Shared assignment core moved to `lib/jobs/assign-worker-to-jobs.ts` (not a
+  `'use server'` module — it takes `tenantId`, so it must not be an endpoint).
+- **Not visually verified** — the Browser pane needed a login. tsc + eslint
+  clean; helper verified against the real sheet via a scratch script.
+- **Later**: worker app gets N `pending_send` jobs individually when a group
+  is sent; a "3 jobs · <group>" card in the app is a follow-up, not built.
+
 ## Verified how (in case it matters)
 
 Real job data was exported from Supabase (`jobs_rows.json`, not in repo) and

@@ -14,6 +14,7 @@ import {
   type ExtractedJobRow,
   type RowEdits,
 } from '@/lib/import/extracted-job-row';
+import { computeRowGroups, resolveGroupingColumns } from '@/lib/import/job-grouping';
 
 /** Insert batch size (total import is unlimited; we chunk inserts for DB safety). */
 const BATCH_SIZE = 100;
@@ -42,6 +43,8 @@ export type ImportJobsResult =
       errors?: string[];
       /** Populated when auto-allocate ran and some jobs could not be assigned. */
       allocationFailures?: ImportAllocationFailure[];
+      /** Job groups created from grouping_columns (0 when grouping was off). */
+      groupCount?: number;
     }
   | { success: false; error: string; errors?: string[] };
 
@@ -94,6 +97,13 @@ export async function importJobs(params: {
    * When true, valid rows import and invalid ones are skipped.
    */
   allowPartialImport?: boolean;
+  /**
+   * Sheet columns whose matching values put rows in one job group (see
+   * lib/import/job-grouping.ts). [] imports without grouping. Whatever is
+   * passed is remembered on the import source for next time; undefined
+   * leaves the saved setting alone.
+   */
+  groupingColumns?: string[];
 }): Promise<ImportJobsResult> {
   try {
     const supabase = await createClient();
@@ -250,6 +260,7 @@ export async function importJobs(params: {
         _address: row.address,
         _priority: row.priority,
         _fullAddress: buildFullAddressString([row.address, row.postcode]),
+        _rowIndex: row.rowIndex,
       });
     }
 
@@ -317,6 +328,16 @@ export async function importJobs(params: {
     let imported = 0;
     const jobIds: string[] = [];
     const insertedPostcodes = new Map<string, string | null>();
+    // reference_number is unique per tenant, so it maps an inserted id back to
+    // its sheet row without trusting the order RETURNING happens to use.
+    const rowIndexByReference = new Map<string, number>();
+    for (const job of jobs) {
+      rowIndexByReference.set(
+        String(job.reference_number).trim().toLowerCase(),
+        job._rowIndex as number
+      );
+    }
+    const jobIdByRowIndex = new Map<number, string>();
     const startedAt = new Date().toISOString();
 
     // Always strip ephemeral `_` keys — leftover `_fullAddress` makes PostgREST
@@ -328,7 +349,7 @@ export async function importJobs(params: {
       const { data: inserted, error } = await supabase
         .from('jobs')
         .insert(batch)
-        .select('id, postcode');
+        .select('id, postcode, reference_number');
       if (error) {
         console.error('[importJobs] batch insert', error);
         errors.push(`Batch at row ${i + 1}: ${error.message}`);
@@ -336,10 +357,60 @@ export async function importJobs(params: {
       }
       if (inserted) {
         imported += inserted.length;
-        inserted.forEach((r: { id: string; postcode: string | null }) => {
-          jobIds.push(r.id);
-          insertedPostcodes.set(r.id, r.postcode);
-        });
+        inserted.forEach(
+          (r: { id: string; postcode: string | null; reference_number: string | null }) => {
+            jobIds.push(r.id);
+            insertedPostcodes.set(r.id, r.postcode);
+            const rowIndex = rowIndexByReference.get(
+              String(r.reference_number ?? '').trim().toLowerCase()
+            );
+            if (rowIndex != null) jobIdByRowIndex.set(rowIndex, r.id);
+          }
+        );
+      }
+    }
+
+    // Job groups: rows agreeing on the grouping columns become one job_groups
+    // row, so the whole set is assigned to one worker (here, and later from the
+    // jobs list). Same helper the wizard previewed with.
+    const headers = Object.keys(params.csvData[0] ?? {});
+    const groupingColumns = params.groupingColumns
+      ? resolveGroupingColumns(params.groupingColumns, headers)
+      : [];
+    const jobGroupIdByJobId = new Map<string, string>();
+    let groupCount = 0;
+    if (groupingColumns.length > 0 && jobIdByRowIndex.size > 0) {
+      const rowGroups = computeRowGroups(params.csvData, groupingColumns, [
+        ...jobIdByRowIndex.keys(),
+      ]);
+      for (const rowGroup of rowGroups) {
+        const memberIds = rowGroup.rowIndexes
+          .map((i) => jobIdByRowIndex.get(i))
+          .filter((id): id is string => !!id);
+        if (memberIds.length < 2) continue;
+        const { data: group, error: groupError } = await supabase
+          .from('job_groups')
+          .insert({ tenant_id: tenantId, label: rowGroup.label })
+          .select('id')
+          .single();
+        if (groupError || !group) {
+          console.error('[importJobs] job_groups insert', groupError);
+          errors.push(`Could not create group "${rowGroup.label}": ${groupError?.message ?? 'unknown error'}`);
+          continue;
+        }
+        const { error: linkError } = await supabase
+          .from('jobs')
+          .update({ job_group_id: group.id })
+          .eq('tenant_id', tenantId)
+          .in('id', memberIds);
+        if (linkError) {
+          console.error('[importJobs] jobs.job_group_id update', linkError);
+          errors.push(`Could not group "${rowGroup.label}": ${linkError.message}`);
+          await supabase.from('job_groups').delete().eq('id', group.id);
+          continue;
+        }
+        groupCount += 1;
+        for (const id of memberIds) jobGroupIdByJobId.set(id, group.id as string);
       }
     }
 
@@ -348,13 +419,18 @@ export async function importJobs(params: {
     const failedAllocationIds: string[] = [];
 
     if (shouldAutoAllocate && jobIds.length > 0) {
-      // Group jobs by site before allocating so several jobs in one building go
-      // to the same worker as a single visit. Jobs within a group are allocated
-      // sequentially (autoAllocateJobGroup); only separate sites run in parallel,
-      // which avoids two concurrent allocations racing for the same building.
+      // Allocate a job group as one unit — that is the whole point of a group.
+      // Ungrouped jobs are still clustered by site so several jobs in one
+      // building go to the same worker as a single visit. Jobs within a unit
+      // are allocated sequentially (autoAllocateJobGroup); only separate units
+      // run in parallel, which avoids two concurrent allocations racing for
+      // the same building.
       const groups = new Map<string, string[]>();
       for (const id of jobIds) {
-        const key = clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`;
+        const jobGroupId = jobGroupIdByJobId.get(id);
+        const key = jobGroupId
+          ? `__group__${jobGroupId}`
+          : (clusterKeyForPostcode(insertedPostcodes.get(id)) ?? `__solo__${id}`);
         const existing = groups.get(key);
         if (existing) existing.push(id);
         else groups.set(key, [id]);
@@ -415,12 +491,20 @@ export async function importJobs(params: {
 
     // Authenticated INSERT on import_history is blocked by RLS (no INSERT policy).
     // Write via service role after tenant checks.
-    const { error: historyError } = await createAdminClient()
+    const { data: historyRow, error: historyError } = await createAdminClient()
       .from('import_history')
-      .insert(historyPayload);
+      .insert(historyPayload)
+      .select('id')
+      .single();
     if (historyError) {
       console.error('[importJobs] import_history insert', historyError);
       errors.push(`Import history could not be saved: ${historyError.message}`);
+    } else if (historyRow?.id && jobGroupIdByJobId.size > 0) {
+      await supabase
+        .from('job_groups')
+        .update({ import_history_id: historyRow.id })
+        .eq('tenant_id', tenantId)
+        .in('id', [...new Set(jobGroupIdByJobId.values())]);
     }
 
     revalidatePath('/jobs');
@@ -445,6 +529,8 @@ export async function importJobs(params: {
           source_name: customerRow.name,
           last_used_at: new Date().toISOString(),
           times_used: priorTimesUsed + 1,
+          // Remember the confirmed grouping choice (including "off" = []).
+          ...(params.groupingColumns ? { grouping_columns: params.groupingColumns } : {}),
         })
         .eq('id', resolvedSourceId);
     }
@@ -456,6 +542,7 @@ export async function importJobs(params: {
       unassignedCount,
       errors: errors.length ? errors : undefined,
       allocationFailures: allocationFailures.length ? allocationFailures : undefined,
+      groupCount,
     };
   } catch (e) {
     console.error('[importJobs]', e);

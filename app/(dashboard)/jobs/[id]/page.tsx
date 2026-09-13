@@ -61,7 +61,8 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       completion_notes,
       source_fields,
       customer:customers!customer_id(id, name, type, email, phone),
-      worker:workers!assigned_worker_id(id, full_name, phone, skills, home_postcode, home_lat, home_lng)
+      worker:workers!assigned_worker_id(id, full_name, phone, skills, home_postcode, home_lat, home_lng),
+      job_group:job_groups!job_group_id(id, label)
     `
     )
     .eq('id', jobId)
@@ -133,6 +134,9 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     home_lat?: number | null;
     home_lng?: number | null;
   };
+  type JobGroupRow = { id: string; label: string };
+  const rawJobGroup = jobRow.job_group as JobGroupRow | JobGroupRow[] | null;
+  const jobGroup = Array.isArray(rawJobGroup) ? rawJobGroup[0] ?? null : rawJobGroup;
   const rawCustomer = jobRow.customer as CustomerRow | CustomerRow[] | null;
   const rawWorker = jobRow.worker as WorkerRow | WorkerRow[] | null;
   const customer = Array.isArray(rawCustomer) ? rawCustomer[0] ?? null : rawCustomer;
@@ -226,6 +230,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
       : null,
     required_skills: Array.isArray(jobRow.required_skills) ? (jobRow.required_skills as string[]) : [],
     source_fields: parseSourceFields(jobRow.source_fields),
+    job_group: jobGroup ? { id: jobGroup.id, label: jobGroup.label } : null,
   };
 
   const statusHistory: JobStatusHistoryEntry[] = (statusHistoryRows ?? []).map(

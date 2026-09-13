@@ -11,7 +11,7 @@ import { estimateAiCostUsd } from '@/lib/ai/model';
 
 export type StructuredAiLogParams = {
   tenantId: string;
-  interactionType: 'row_extraction' | 'skill_detection';
+  interactionType: 'row_extraction' | 'skill_detection' | 'column_mapping';
   prompt: string;
   inputData: Record<string, unknown>;
   parsedOutput: unknown;

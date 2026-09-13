@@ -40,6 +40,8 @@ export interface JobsFilters {
   priority?: JobPriority;
   customer_id?: string;
   import_source_id?: string;
+  /** Only members of this job group (URL `group`). */
+  job_group_id?: string;
   /** Jobs from a specific import run (`import_history.job_ids`), not the whole import source. */
   job_ids?: string[];
   date_from?: string;
@@ -80,6 +82,9 @@ export interface JobRow {
   source_fields?: Record<string, string>;
   /** Why this row matched the active search (Phase 5). */
   match_pills?: JobMatchPill[];
+  /** Group this job travels with (see job_groups); null/undefined = ungrouped. */
+  job_group_id?: string | null;
+  job_group_label?: string | null;
 }
 
 /** JobRow plus lifecycle timestamps/notes needed for export — not fetched by the paginated list query. */
@@ -252,6 +257,9 @@ function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
       q = q.eq('customer_id', filters.customer_id);
     }
   }
+  if (filters.job_group_id) {
+    q = q.eq('job_group_id', filters.job_group_id);
+  }
   if (filters.job_ids && filters.job_ids.length > 0) {
     q = q.in('id', filters.job_ids);
   } else if (filters.import_source_id) {
@@ -318,6 +326,7 @@ function applyJobsListSort(query: JobsQuery, filters: JobsFilters): JobsQuery {
 function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow {
   const customer = row.customer as { id?: string; name?: string } | null;
   const worker = row.worker as { id?: string; full_name?: string } | null;
+  const jobGroup = row.job_group as { id?: string; label?: string } | null;
   const requiredSkills = row.required_skills;
   const sourceFields = parseSourceFields(row.source_fields);
   const reference_number = row.reference_number as string | null;
@@ -349,6 +358,8 @@ function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow 
     worker_name,
     required_skills: Array.isArray(requiredSkills) ? (requiredSkills as string[]) : [],
     source_fields: sourceFields,
+    job_group_id: (row.job_group_id as string | null) ?? null,
+    job_group_label: jobGroup?.label ?? null,
   };
 
   if (filters?.search?.trim()) {
@@ -443,7 +454,8 @@ export async function getJobsForTenant(
         `
       *,
       customer:customers!customer_id(id, name),
-      worker:workers!assigned_worker_id(id, full_name)
+      worker:workers!assigned_worker_id(id, full_name),
+      job_group:job_groups!job_group_id(id, label)
     `,
         { count: 'exact' }
       )
@@ -504,7 +516,8 @@ export async function getJobsForExport(
         `
       *,
       customer:customers!customer_id(id, name),
-      worker:workers!assigned_worker_id(id, full_name)
+      worker:workers!assigned_worker_id(id, full_name),
+      job_group:job_groups!job_group_id(id, label)
     `
       )
       .eq('tenant_id', tenantId)

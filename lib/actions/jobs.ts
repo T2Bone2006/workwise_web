@@ -33,6 +33,10 @@ import {
 } from '@/lib/jobs/worker-skill-match';
 import { statusAfterWorkerAssignment } from '@/lib/jobs/worker-assignment-status';
 import {
+  assignWorkerToJobIds,
+  type BulkAssignJobsResult,
+} from '@/lib/jobs/assign-worker-to-jobs';
+import {
   clusterKeyForPostcode,
   compareByDistanceThenLoad,
   skillSignature,
@@ -914,6 +918,29 @@ export async function assignJob(
     return { success: true };
   } catch (err) {
     console.error('[assignJob]', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unable to assign worker. Please try again.',
+    };
+  }
+}
+
+export type { BulkAssignJobsResult } from '@/lib/jobs/assign-worker-to-jobs';
+
+/** Assign one worker to many jobs at once (jobs-list bulk bar). */
+export async function bulkAssignJobs(
+  jobIds: string[],
+  workerId: string
+): Promise<BulkAssignJobsResult> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) {
+      return { success: false, error: 'No tenant assigned.' };
+    }
+    const supabase = await createClient();
+    return await assignWorkerToJobIds(supabase, tenantId, jobIds, workerId);
+  } catch (err) {
+    console.error('[bulkAssignJobs]', err);
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Unable to assign worker. Please try again.',

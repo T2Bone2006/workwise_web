@@ -26,6 +26,9 @@ import {
   CheckCircle2,
   CircleAlert,
   UserCheck,
+  UserPlus,
+  Group,
+  Ungroup,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -74,7 +77,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { bulkDeleteJobs, sendPendingJobsToWorkers } from '@/lib/actions/jobs';
+import {
+  assignJob,
+  bulkAssignJobs,
+  bulkDeleteJobs,
+  sendPendingJobsToWorkers,
+} from '@/lib/actions/jobs';
+import { canAssignWorkerInline } from '@/lib/jobs/worker-assignment-status';
+import {
+  assignJobGroup,
+  createJobGroup,
+  deleteJobGroup,
+  ungroupJobs,
+} from '@/lib/actions/job-groups';
+import { clusterJobsByGroup, suggestGroupLabel } from '@/lib/jobs/job-groups-display';
 import { format, parseISO, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { BatchesView } from '@/components/jobs/batches-view';
@@ -277,6 +293,8 @@ interface JobsTableProps {
   fieldFilterOptions: SearchableSelectOption[];
   fieldFilterValuesByField: Record<string, FieldFilterValueOption[]>;
   initialVisibleColumns: JobsListColumnKey[];
+  /** Assignable workers (invite accepted) for the inline worker column + bulk assign. */
+  workers: { id: string; full_name: string }[];
 }
 
 export function JobsTable({
@@ -290,6 +308,7 @@ export function JobsTable({
   fieldFilterOptions,
   fieldFilterValuesByField,
   initialVisibleColumns,
+  workers,
 }: JobsTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -311,6 +330,16 @@ export function JobsTable({
   const armedSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendSelectedOpen, setSendSelectedOpen] = useState(false);
   const [isSendingSelected, setIsSendingSelected] = useState(false);
+  const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
+  const [bulkAssignWorkerId, setBulkAssignWorkerId] = useState('');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [inlineAssigningId, setInlineAssigningId] = useState<string | null>(null);
+  const [groupSelectedOpen, setGroupSelectedOpen] = useState(false);
+  const [groupLabel, setGroupLabel] = useState('');
+  const [isGrouping, setIsGrouping] = useState(false);
+  const [isUngrouping, setIsUngrouping] = useState(false);
+  const [groupAssigningId, setGroupAssigningId] = useState<string | null>(null);
+  const [groupDeletingId, setGroupDeletingId] = useState<string | null>(null);
   const [filterRows, setFilterRows] = useState<FilterRowState[]>(() => {
     const fromUrl = initialFilters.field_filters ?? [];
     if (fromUrl.length === 0) return [newFilterRow()];
@@ -441,6 +470,145 @@ export function JobsTable({
       ),
     [selectedIds, initialJobs]
   );
+
+  const workerOptions = useMemo<SearchableSelectOption[]>(
+    () => workers.map((w) => ({ value: w.id, label: w.full_name })),
+    [workers]
+  );
+
+  const handleInlineAssign = async (jobId: string, workerId: string) => {
+    setInlineAssigningId(jobId);
+    try {
+      const result = await assignJob(jobId, workerId);
+      if (result.success) {
+        router.refresh();
+      } else {
+        toast.error(result.error ?? 'Failed to assign worker');
+      }
+    } catch {
+      toast.error('Failed to assign worker');
+    } finally {
+      setInlineAssigningId(null);
+    }
+  };
+
+  const selectedJobs = useMemo(
+    () => initialJobs.filter((j) => selectedIds.has(j.id)),
+    [initialJobs, selectedIds]
+  );
+  const selectedGroupedCount = useMemo(
+    () => selectedJobs.filter((j) => !!j.job_group_id).length,
+    [selectedJobs]
+  );
+
+  // Members of a group are shown together under one header row, whatever the
+  // sort — the header carries the group-level actions.
+  const displayRows = useMemo(() => clusterJobsByGroup(initialJobs), [initialJobs]);
+
+  const openGroupDialog = () => {
+    setGroupLabel(suggestGroupLabel(selectedJobs));
+    setGroupSelectedOpen(true);
+  };
+
+  const handleGroupSelected = async () => {
+    if (selectedIds.size < 2) return;
+    setIsGrouping(true);
+    try {
+      const result = await createJobGroup(Array.from(selectedIds), groupLabel);
+      if (result.success) {
+        toast.success(`Grouped ${result.count} jobs as “${groupLabel.trim()}”`);
+        setGroupSelectedOpen(false);
+        setSelectedIds(new Set());
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to group jobs');
+    } finally {
+      setIsGrouping(false);
+    }
+  };
+
+  const handleUngroupSelected = async () => {
+    if (!selectedGroupedCount) return;
+    setIsUngrouping(true);
+    try {
+      const result = await ungroupJobs(Array.from(selectedIds));
+      if (result.success) {
+        toast.success(`Removed ${result.count} job${result.count === 1 ? '' : 's'} from their group`);
+        setSelectedIds(new Set());
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to ungroup jobs');
+    } finally {
+      setIsUngrouping(false);
+    }
+  };
+
+  const handleAssignGroup = async (groupId: string, workerId: string) => {
+    setGroupAssigningId(groupId);
+    try {
+      const result = await assignJobGroup(groupId, workerId);
+      if (result.success) {
+        const name = workers.find((w) => w.id === workerId)?.full_name ?? 'worker';
+        toast.success(
+          `${result.assigned} job${result.assigned === 1 ? '' : 's'} assigned to ${name}. Send from Jobs when ready.`
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to assign group');
+    } finally {
+      setGroupAssigningId(null);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    setGroupDeletingId(groupId);
+    try {
+      const result = await deleteJobGroup(groupId);
+      if (result.success) {
+        toast.success('Group removed — jobs kept');
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to remove group');
+    } finally {
+      setGroupDeletingId(null);
+    }
+  };
+
+  const handleAssignSelected = async () => {
+    if (!selectedIds.size || !bulkAssignWorkerId) return;
+    setIsBulkAssigning(true);
+    try {
+      const result = await bulkAssignJobs(Array.from(selectedIds), bulkAssignWorkerId);
+      if (result.success) {
+        const name = workers.find((w) => w.id === bulkAssignWorkerId)?.full_name ?? 'worker';
+        toast.success(
+          `${result.assigned} job${result.assigned === 1 ? '' : 's'} assigned to ${name}. Send from Jobs when ready.`
+        );
+        setAssignSelectedOpen(false);
+        setBulkAssignWorkerId('');
+        setSelectedIds(new Set());
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to assign worker');
+    } finally {
+      setIsBulkAssigning(false);
+    }
+  };
 
   const handleSendSelected = async () => {
     if (sendableSelectedIds.length === 0) return;
@@ -662,8 +830,14 @@ export function JobsTable({
     initialFilters.customer_id ||
     initialFilters.priority ||
     (initialFilters.field_filters && initialFilters.field_filters.length > 0) ||
+    initialFilters.job_group_id ||
     activeBatchId
   );
+  // Label for the active group filter — every row on the page belongs to it.
+  const activeGroupLabel = initialFilters.job_group_id
+    ? initialJobs.find((j) => j.job_group_id === initialFilters.job_group_id)?.job_group_label ??
+      'Group'
+    : null;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
   const currentPage = Math.min(Math.max(1, initialFilters.page ?? 1), totalPages);
   const isEmpty = initialJobs.length === 0 && !fetchError;
@@ -1020,6 +1194,84 @@ export function JobsTable({
           </DialogContent>
         </Dialog>
 
+        <Dialog open={groupSelectedOpen} onOpenChange={setGroupSelectedOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Group {selectedIds.size} jobs</DialogTitle>
+              <DialogDescription>
+                Grouped jobs sit together in the list and can be assigned to one worker in
+                a single step.
+                {selectedGroupedCount > 0 &&
+                  ` ${selectedGroupedCount} of these will move out of their current group.`}
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={groupLabel}
+              onChange={(e) => setGroupLabel(e.target.value)}
+              placeholder="Group name"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && groupLabel.trim() && !isGrouping) {
+                  e.preventDefault();
+                  void handleGroupSelected();
+                }
+              }}
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setGroupSelectedOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleGroupSelected()}
+                disabled={isGrouping || !groupLabel.trim()}
+              >
+                {isGrouping ? <Loader2 className="size-4 animate-spin" /> : null}
+                Create group
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={assignSelectedOpen}
+          onOpenChange={(open) => {
+            setAssignSelectedOpen(open);
+            if (!open) setBulkAssignWorkerId('');
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                Assign {selectedIds.size} job{selectedIds.size === 1 ? '' : 's'} to a worker
+              </DialogTitle>
+              <DialogDescription>
+                Jobs not yet started move to “Ready to send”; jobs already underway keep
+                their status and just switch worker.
+              </DialogDescription>
+            </DialogHeader>
+            <SearchableSelect
+              options={workerOptions}
+              value={bulkAssignWorkerId}
+              onValueChange={setBulkAssignWorkerId}
+              placeholder="Choose a worker"
+              searchPlaceholder="Type a name…"
+              emptyText="No workers match."
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setAssignSelectedOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleAssignSelected()}
+                disabled={isBulkAssigning || !bulkAssignWorkerId}
+              >
+                {isBulkAssigning ? <Loader2 className="size-4 animate-spin" /> : null}
+                Assign {selectedIds.size} job{selectedIds.size === 1 ? '' : 's'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={sendSelectedOpen} onOpenChange={setSendSelectedOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -1152,9 +1404,56 @@ export function JobsTable({
                 </div>
               ) : null}
               <div className="flex max-h-[calc(100vh-14rem)] min-h-[320px] flex-col">
+                {activeGroupLabel && (
+                  <div className="flex shrink-0 items-center gap-2 border-b border-border/80 bg-muted/30 px-4 py-2 text-sm">
+                    <Group className="size-4 text-primary" />
+                    <span>
+                      Showing group <span className="font-medium">{activeGroupLabel}</span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={() => updateParams({ group: undefined })}
+                    >
+                      <X className="size-3.5" />
+                      Show all jobs
+                    </Button>
+                  </div>
+                )}
                 {selectedIds.size > 0 && (
                   <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border/80 bg-primary/5 px-4 py-2">
                     <span className="text-sm font-medium">{selectedIds.size} selected</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setAssignSelectedOpen(true)}
+                      disabled={workers.length === 0}
+                    >
+                      <UserPlus className="size-4" />
+                      Assign worker
+                    </Button>
+                    {selectedIds.size >= 2 && (
+                      <Button variant="ghost" size="sm" onClick={openGroupDialog}>
+                        <Group className="size-4" />
+                        Group selected
+                      </Button>
+                    )}
+                    {selectedGroupedCount > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleUngroupSelected()}
+                        disabled={isUngrouping}
+                      >
+                        {isUngrouping ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Ungroup className="size-4" />
+                        )}
+                        Ungroup ({selectedGroupedCount})
+                      </Button>
+                    )}
                     {sendableSelectedIds.length > 0 && (
                       <Button
                         variant="ghost"
@@ -1288,14 +1587,108 @@ export function JobsTable({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {initialJobs.map((job, i) => (
+                      {displayRows.map((item, i) => {
+                        if (item.kind === 'group') {
+                          const { group, jobs: members } = item;
+                          const memberIds = members.map((m) => m.id);
+                          const allMembersSelected = memberIds.every((id) => selectedIds.has(id));
+                          const sharedWorkerId =
+                            members.every((m) => m.assigned_worker_id === members[0].assigned_worker_id)
+                              ? (members[0].assigned_worker_id ?? '')
+                              : '';
+                          const busy = groupAssigningId === group.id || groupDeletingId === group.id;
+                          return (
+                            <TableRow
+                              key={`group-${group.id}`}
+                              className="border-border/60 bg-primary/[0.06] hover:bg-primary/[0.09] dark:bg-primary/10"
+                            >
+                              <TableCell className="w-10 align-middle">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (allMembersSelected) memberIds.forEach((id) => next.delete(id));
+                                      else memberIds.forEach((id) => next.add(id));
+                                      return next;
+                                    });
+                                  }}
+                                  className="rounded border border-input p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  aria-label={
+                                    allMembersSelected ? 'Deselect group' : 'Select all jobs in group'
+                                  }
+                                >
+                                  {allMembersSelected ? (
+                                    <Check className="size-4 text-primary" />
+                                  ) : (
+                                    <span className="block size-4" />
+                                  )}
+                                </button>
+                              </TableCell>
+                              <TableCell colSpan={1 + visibleColumns.size} className="py-1.5">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1.5 font-medium hover:text-primary hover:underline"
+                                    title="Show only this group"
+                                    onClick={() => updateParams({ group: group.id })}
+                                  >
+                                    <Group className="size-4 text-primary" />
+                                    {group.label}
+                                  </button>
+                                  <span className="text-xs text-muted-foreground">
+                                    {members.length} job{members.length === 1 ? '' : 's'}
+                                  </span>
+                                  {workers.length > 0 && (
+                                    <SearchableSelect
+                                      options={workerOptions}
+                                      value={sharedWorkerId}
+                                      onValueChange={(workerId) => {
+                                        if (workerId && workerId !== sharedWorkerId) {
+                                          void handleAssignGroup(group.id, workerId);
+                                        }
+                                      }}
+                                      placeholder={
+                                        sharedWorkerId ? 'Reassign group' : 'Assign group to…'
+                                      }
+                                      searchPlaceholder="Type a name…"
+                                      emptyText="No workers match."
+                                      disabled={busy}
+                                      className={cn(
+                                        'h-7 w-auto min-w-[11rem] bg-background/60 px-2',
+                                        groupAssigningId === group.id && 'animate-pulse'
+                                      )}
+                                    />
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-muted-foreground"
+                                    disabled={busy}
+                                    onClick={() => void handleDeleteGroup(group.id)}
+                                  >
+                                    {groupDeletingId === group.id ? (
+                                      <Loader2 className="size-3.5 animate-spin" />
+                                    ) : (
+                                      <Ungroup className="size-3.5" />
+                                    )}
+                                    Ungroup
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }
+                        const { job } = item;
+                        return (
                         <TableRow
                           key={job.id}
                           className={cn(
                             'cursor-pointer border-border/60 transition-all duration-200',
                             'hover:bg-primary/5 hover:shadow-[0_0_20px_-8px_var(--glow-primary)]',
                             'dark:hover:bg-primary/10',
-                            i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
+                            i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10',
+                            job.job_group_id && 'border-l-2 border-l-primary/50'
                           )}
                           onClick={() => {
                             const committed = committedFiltersFromRows(filterRows);
@@ -1384,8 +1777,31 @@ export function JobsTable({
                             </TableCell>
                           )}
                           {visibleColumns.has('worker') && (
-                            <TableCell>
-                              {job.worker_name && job.assigned_worker_id ? (
+                            <TableCell
+                              onClick={(e) => {
+                                // Stop the row's navigate-to-detail click when using the picker.
+                                if (canAssignWorkerInline(job.status)) e.stopPropagation();
+                              }}
+                            >
+                              {canAssignWorkerInline(job.status) && workers.length > 0 ? (
+                                <SearchableSelect
+                                  options={workerOptions}
+                                  value={job.assigned_worker_id ?? ''}
+                                  onValueChange={(workerId) => {
+                                    if (workerId && workerId !== job.assigned_worker_id) {
+                                      void handleInlineAssign(job.id, workerId);
+                                    }
+                                  }}
+                                  placeholder="Unassigned"
+                                  searchPlaceholder="Type a name…"
+                                  emptyText="No workers match."
+                                  disabled={inlineAssigningId === job.id}
+                                  className={cn(
+                                    'h-7 min-w-[9rem] border-transparent bg-transparent px-2 shadow-none hover:border-input',
+                                    inlineAssigningId === job.id && 'animate-pulse'
+                                  )}
+                                />
+                              ) : job.worker_name && job.assigned_worker_id ? (
                                 <Link
                                   href={`/workers/${job.assigned_worker_id}`}
                                   onClick={(e) => e.stopPropagation()}
@@ -1451,7 +1867,8 @@ export function JobsTable({
                             </TableCell>
                           )}
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </table>
                 </div>

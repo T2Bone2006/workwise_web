@@ -20,6 +20,16 @@ export const EXTRACTION_AI_MODEL =
   process.env.ANTHROPIC_EXTRACTION_MODEL?.trim() || 'claude-haiku-4-5';
 
 /**
+ * Import grouping suggestion: one call per new import source, reading the
+ * headers plus a sample of rows and naming the columns that identify a set of
+ * jobs one worker should do together. It is a semantic judgement about what
+ * the columns *mean* (an officer's name, a site, a visit date), so it gets the
+ * strongest model — the call is tiny and runs once per customer, not per row.
+ */
+export const GROUPING_AI_MODEL =
+  process.env.ANTHROPIC_GROUPING_MODEL?.trim() || 'claude-opus-5';
+
+/**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
  * among them), so it can only be sent when the configured model supports it.
  */

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, Phone, Loader2, Sparkles } from 'lucide-react';
+import { User, Phone, Loader2, Sparkles, Group } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,8 @@ interface JobDetailWorkerCardProps {
   worker: { id: string; full_name: string; phone: string | null } | null;
   workers: WorkerOption[];
   readOnly?: boolean;
+  /** Set when the job belongs to a group — a hint, not a lock on reassignment. */
+  jobGroup?: { id: string; label: string } | null;
 }
 
 const EDITABLE_STATUSES: readonly JobStatus[] = [
@@ -42,6 +44,7 @@ export function JobDetailWorkerCard({
   worker,
   workers,
   readOnly = false,
+  jobGroup = null,
 }: JobDetailWorkerCardProps) {
   const router = useRouter();
   const [isAssigning, setIsAssigning] = useState(false);
@@ -99,6 +102,18 @@ export function JobDetailWorkerCard({
         <h2 className="text-base font-semibold text-foreground">Assignment</h2>
       </CardHeader>
       <CardContent className="space-y-3">
+        {jobGroup && (
+          <Link
+            href={`/jobs?group=${encodeURIComponent(jobGroup.id)}`}
+            className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-primary/10"
+          >
+            <Group className="size-3.5 shrink-0 text-primary" />
+            <span>
+              Part of group <span className="font-medium text-foreground">{jobGroup.label}</span>
+              {editable && ' — reassigning here changes only this job'}
+            </span>
+          </Link>
+        )}
         {editable ? (
           <>
             {worker && (

@@ -30,3 +30,12 @@ export function statusAfterWorkerAssignment(currentStatus: string): string {
   }
   return currentStatus;
 }
+
+/**
+ * Whether the jobs list should offer the inline worker picker for this status.
+ * Only statuses that promote to pending_send — once a worker is on site or the
+ * job is closed, reassignment goes through the job detail page deliberately.
+ */
+export function canAssignWorkerInline(currentStatus: string | null | undefined): boolean {
+  return PROMOTE_TO_PENDING_SEND.has(currentStatus ?? 'pending');
+}
