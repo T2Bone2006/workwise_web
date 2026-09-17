@@ -6,26 +6,31 @@ import {
   Building2,
   User,
   AlertTriangle,
+  CreditCard,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
+import type { BillingSummary } from '@/lib/data/billing';
 import { SettingsCompanyTab } from './settings-company-tab';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
+import { SettingsBillingTab } from './settings-billing-tab';
 
 interface SettingsViewProps {
   initialData: SettingsPageData;
   initialTenantSkills: TenantSkillRow[];
+  billing: BillingSummary;
 }
 
 const tabs = [
   { value: 'company', label: 'Company Settings', icon: Building2 },
+  { value: 'billing', label: 'Billing', icon: CreditCard },
   { value: 'profile', label: 'User Profile', icon: User },
   { value: 'danger', label: 'Danger Zone', icon: AlertTriangle },
 ] as const;
 
-export function SettingsView({ initialData, initialTenantSkills }: SettingsViewProps) {
+export function SettingsView({ initialData, initialTenantSkills, billing }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
 
@@ -72,6 +77,9 @@ export function SettingsView({ initialData, initialTenantSkills }: SettingsViewP
             initialTenantSkills={initialTenantSkills}
             onSaved={onSaved}
           />
+        </TabsContent>
+        <TabsContent value="billing" className="mt-0 outline-none">
+          <SettingsBillingTab billing={billing} />
         </TabsContent>
         <TabsContent value="profile" className="mt-0 outline-none">
           <SettingsUserTab data={initialData} onSaved={onSaved} />

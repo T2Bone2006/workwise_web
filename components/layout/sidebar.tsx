@@ -15,6 +15,13 @@ import {
   ChevronLeft,
   Brain,
   Eye,
+  Route,
+  CalendarDays,
+  Wallet,
+  MessageSquare,
+  Landmark,
+  Receipt,
+  Bot,
 } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { useEffect, useState } from 'react';
@@ -35,7 +42,57 @@ type NavItem = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
+  show: boolean;
 };
+
+type NavSection = {
+  /** Section heading; omitted when the tenant has a single product. */
+  title?: string;
+  items: NavItem[];
+};
+
+/**
+ * Builds the sidebar sections for the tenant's products. Every product's
+ * links live under its own heading when the tenant has more than one; a
+ * single-product tenant just sees a flat list.
+ */
+function buildNavSections(features: TenantFeatures): NavSection[] {
+  const pro: NavItem[] = [
+    { href: '/jobs', label: 'Jobs', icon: Briefcase, show: true },
+    { href: '/workers', label: 'Workers', icon: Users, show: true },
+    { href: '/network', label: 'Network', icon: Share2, show: true },
+    { href: '/monitor', label: 'Monitor', icon: Activity, show: true },
+    { href: '/customers', label: 'Customers', icon: Building2, show: true },
+    { href: '/import', label: 'Import', icon: Upload, show: true },
+  ];
+  const rounds: NavItem[] = [
+    { href: '/rounds/customers', label: 'Customers', icon: Route, show: true },
+    { href: '/rounds/calendar', label: 'Calendar', icon: CalendarDays, show: true },
+    { href: '/rounds/payments', label: 'Payments', icon: Wallet, show: true },
+    { href: '/rounds/bank', label: 'Bank', icon: Landmark, show: true },
+    { href: '/rounds/messages', label: 'Messages', icon: MessageSquare, show: true },
+    { href: '/rounds/expenses', label: 'Expenses', icon: Receipt, show: true },
+  ];
+  const lite: NavItem[] = [
+    { href: '/lite', label: 'Leads', icon: Bot, show: true },
+    { href: '/lite/conversations', label: 'Conversations', icon: MessageSquare, show: true },
+    { href: '/lite/widget', label: 'Widget', icon: Settings, show: true },
+  ];
+
+  const productSections: NavSection[] = [];
+  if (features.pro) productSections.push({ title: 'Pro', items: pro });
+  if (features.rounds) productSections.push({ title: 'Rounds', items: rounds });
+  if (features.lite) productSections.push({ title: 'Lite', items: lite });
+
+  const single = productSections.length <= 1;
+  return [
+    {
+      items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true }],
+    },
+    ...productSections.map((section) => (single ? { items: section.items } : section)),
+    { items: [{ href: '/settings', label: 'Settings', icon: Settings, show: true }] },
+  ];
+}
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -51,16 +108,10 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const navItems: NavItem[] = [
-    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
-    { href: '/jobs', label: 'Jobs', icon: Briefcase, show: features.pro },
-    { href: '/workers', label: 'Workers', icon: Users, show: features.pro },
-    { href: '/network', label: 'Network', icon: Share2, show: features.pro },
-    { href: '/monitor', label: 'Monitor', icon: Activity, show: features.pro },
-    { href: '/customers', label: 'Customers', icon: Building2, show: features.pro },
-    { href: '/import', label: 'Import', icon: Upload, show: features.pro },
-    { href: '/settings', label: 'Settings', icon: Settings, show: true },
-  ].filter((item) => item.show);
+  const navSections = buildNavSections(features).map((section) => ({
+    ...section,
+    items: section.items.filter((item) => item.show),
+  }));
 
   useEffect(() => {
     setMounted(true);
@@ -95,7 +146,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
           'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
           'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-          pathname === item.href
+          pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
             ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
             : 'text-sidebar-foreground/90'
         )}
@@ -151,8 +202,17 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
         </span>
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main navigation">
-        {navItems.map((item) => (
-          <div key={item.href}>{linkContent(item, isMobile)}</div>
+        {navSections.map((section, index) => (
+          <div key={section.title ?? `section-${index}`} className={cn(section.title && 'mt-2')}>
+            {section.title && (!collapsed || isMobile) && (
+              <h2 className="mb-1 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                {section.title}
+              </h2>
+            )}
+            {section.items.map((item) => (
+              <div key={item.href}>{linkContent(item, isMobile)}</div>
+            ))}
+          </div>
         ))}
         {isAdmin && (
           <>

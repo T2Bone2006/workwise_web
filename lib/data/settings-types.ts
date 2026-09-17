@@ -3,6 +3,8 @@
  * Server-only data fetching is in settings.ts.
  */
 
+import type { RoundsSettings } from '@/lib/rounds/settings';
+
 export type IndustryOption =
   | 'Locksmith'
   | 'Plumbing'
@@ -132,6 +134,7 @@ export interface TenantSettings {
     voice?: boolean;
     payments?: boolean;
   };
+  rounds?: Partial<RoundsSettings>;
 }
 
 export interface TenantForSettings {

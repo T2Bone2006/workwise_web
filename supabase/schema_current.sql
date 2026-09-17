@@ -11,6 +11,10 @@ CREATE TABLE public.tenants (
   subscription_tier text DEFAULT 'standard'::text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  stripe_customer_id text,
+  stripe_connect_account_id text,
+  stripe_connect_onboarded_at timestamp with time zone,
+  signup_product text,
   CONSTRAINT tenants_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.users (
@@ -95,6 +99,7 @@ CREATE TABLE public.customers (
   import_value_transforms jsonb NOT NULL DEFAULT '{}'::jsonb,
   import_expected_headers ARRAY NOT NULL DEFAULT '{}'::text[],
   import_mapping_updated_at timestamp with time zone,
+  worker_visible_fields jsonb,
   CONSTRAINT customers_pkey PRIMARY KEY (id),
   CONSTRAINT customers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
@@ -154,6 +159,8 @@ CREATE TABLE public.jobs (
   job_length text CHECK (job_length = ANY (ARRAY['half_day'::text, 'full_day'::text])),
   source_fields jsonb NOT NULL DEFAULT '{}'::jsonb,
   source_fields_text text DEFAULT (source_fields)::text,
+  end_time time without time zone,
+  decline_reason text,
   job_group_id uuid,
   CONSTRAINT jobs_pkey PRIMARY KEY (id),
   CONSTRAINT jobs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
@@ -162,17 +169,6 @@ CREATE TABLE public.jobs (
   CONSTRAINT jobs_import_source_id_fkey FOREIGN KEY (import_source_id) REFERENCES public.import_sources(id),
   CONSTRAINT jobs_network_dispatch_id_fkey FOREIGN KEY (network_dispatch_id) REFERENCES public.network_job_dispatches(id),
   CONSTRAINT jobs_job_group_id_fkey FOREIGN KEY (job_group_id) REFERENCES public.job_groups(id)
-);
-CREATE TABLE public.job_groups (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL,
-  label text NOT NULL,
-  import_history_id uuid,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT job_groups_pkey PRIMARY KEY (id),
-  CONSTRAINT job_groups_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
-  CONSTRAINT job_groups_import_history_id_fkey FOREIGN KEY (import_history_id) REFERENCES public.import_history(id)
 );
 CREATE TABLE public.job_attachments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -252,7 +248,7 @@ CREATE TABLE public.notifications (
 CREATE TABLE public.ai_interactions (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   tenant_id uuid NOT NULL,
-  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text, 'date_parsing'::text, 'description_summary'::text])),
+  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text, 'date_parsing'::text, 'description_summary'::text, 'row_extraction'::text])),
   input_prompt text NOT NULL,
   input_data jsonb NOT NULL,
   ai_response text NOT NULL,
@@ -508,4 +504,65 @@ CREATE TABLE public.automation_metrics (
   occurred_at timestamp with time zone DEFAULT now(),
   CONSTRAINT automation_metrics_pkey PRIMARY KEY (id),
   CONSTRAINT automation_metrics_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.job_groups (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  label text NOT NULL,
+  import_history_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT job_groups_pkey PRIMARY KEY (id),
+  CONSTRAINT job_groups_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT job_groups_import_history_id_fkey FOREIGN KEY (import_history_id) REFERENCES public.import_history(id)
+);
+CREATE TABLE public.subscriptions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  product text NOT NULL CHECK (product = ANY (ARRAY['lite'::text, 'rounds'::text, 'starter'::text, 'growth'::text, 'pro'::text])),
+  status text NOT NULL CHECK (status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'unpaid'::text, 'incomplete'::text, 'incomplete_expired'::text, 'paused'::text, 'manual'::text])),
+  source text NOT NULL DEFAULT 'stripe'::text CHECK (source = ANY (ARRAY['stripe'::text, 'manual'::text])),
+  stripe_customer_id text,
+  stripe_subscription_id text UNIQUE,
+  stripe_price_id text,
+  trial_ends_at timestamp with time zone,
+  current_period_end timestamp with time zone,
+  cancel_at_period_end boolean NOT NULL DEFAULT false,
+  canceled_at timestamp with time zone,
+  seats integer NOT NULL DEFAULT 1 CHECK (seats >= 1),
+  granted_by_user_id uuid,
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT subscriptions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT subscriptions_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.signup_intents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  auth_user_id uuid NOT NULL UNIQUE,
+  email text NOT NULL,
+  product text NOT NULL CHECK (product = ANY (ARRAY['lite'::text, 'rounds'::text])),
+  business_name text NOT NULL,
+  full_name text NOT NULL,
+  phone text,
+  postcode text,
+  trade text,
+  stripe_customer_id text,
+  stripe_checkout_session_id text UNIQUE,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'provisioned'::text, 'abandoned'::text])),
+  tenant_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  provisioned_at timestamp with time zone,
+  CONSTRAINT signup_intents_pkey PRIMARY KEY (id),
+  CONSTRAINT signup_intents_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
+  CONSTRAINT signup_intents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.stripe_events (
+  id text NOT NULL,
+  type text NOT NULL,
+  received_at timestamp with time zone NOT NULL DEFAULT now(),
+  processed_at timestamp with time zone,
+  error text,
+  CONSTRAINT stripe_events_pkey PRIMARY KEY (id)
 );
