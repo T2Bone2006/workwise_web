@@ -22,6 +22,9 @@ export const customerSchema = z.object({
     .transform((val) => (val ? val.replace(/\s/g, '') : '')),
   address: z.string().max(500).optional().or(z.literal('')),
   notes: z.string().max(500).optional().or(z.literal('')),
+  payment_terms: z.enum(['on_the_day', 'monthly_invoice']).optional(),
+  access_notes: z.string().max(500).optional().or(z.literal('')),
+  preferred_channel: z.enum(['whatsapp', 'sms', 'email', 'none']).optional(),
 });
 
 export type CustomerFormInput = z.input<typeof customerSchema>;

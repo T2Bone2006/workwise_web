@@ -7,6 +7,7 @@ import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
+import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import {
   canonicalFieldKey,
   fieldLabelFromHeader,
@@ -16,6 +17,11 @@ import {
 const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'in_progress'] as const;
 
 function getRawFormData(formData: FormData) {
+  const optional = (key: string) => {
+    const value = formData.get(key);
+    return typeof value === 'string' ? value : undefined;
+  };
+
   return {
     name: formData.get('name'),
     type: formData.get('type'),
@@ -23,7 +29,32 @@ function getRawFormData(formData: FormData) {
     phone: formData.get('phone') ?? '',
     address: formData.get('address') ?? '',
     notes: formData.get('notes') ?? '',
+    payment_terms: optional('payment_terms') || undefined,
+    access_notes: formData.has('access_notes') ? (optional('access_notes') ?? '') : undefined,
+    preferred_channel: optional('preferred_channel') || undefined,
   };
+}
+
+function extraCustomerFields(validated: {
+  phone?: string;
+  payment_terms?: 'on_the_day' | 'monthly_invoice';
+  access_notes?: string;
+  preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
+}) {
+  const extra: {
+    phone_e164: string | null;
+    payment_terms?: 'on_the_day' | 'monthly_invoice';
+    access_notes?: string | null;
+    preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
+  } = {
+    phone_e164: normalizeUkPhoneE164(validated.phone || null),
+  };
+  if (validated.payment_terms) extra.payment_terms = validated.payment_terms;
+  if (validated.access_notes !== undefined) {
+    extra.access_notes = validated.access_notes.trim() || null;
+  }
+  if (validated.preferred_channel) extra.preferred_channel = validated.preferred_channel;
+  return extra;
 }
 
 export async function createCustomer(formData: FormData) {
@@ -70,6 +101,7 @@ export async function createCustomer(formData: FormData) {
       notes: validated.notes || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      ...extraCustomerFields(validated),
     })
     .select('id')
     .single();
@@ -82,6 +114,16 @@ export async function createCustomer(formData: FormData) {
   revalidatePath('/customers');
   revalidatePath('/import');
   return { success: true, id: inserted?.id as string };
+}
+
+/** Rounds dashboard create: always an individual, then on to the first agreement. */
+export async function createRoundsCustomer(formData: FormData) {
+  formData.set('type', 'individual');
+  const result = await createCustomer(formData);
+  if (result.success) {
+    revalidatePath('/rounds/customers');
+  }
+  return result;
 }
 
 /** Minimal create for the import wizard (name + bulk_client). Returns new customer id. */
@@ -166,6 +208,7 @@ export async function updateCustomer(customerId: string, formData: FormData) {
       phone: validated.phone || null,
       notes: validated.notes || null,
       updated_at: new Date().toISOString(),
+      ...extraCustomerFields(validated),
     })
     .eq('id', customerId)
     .eq('tenant_id', userData.tenant_id);
@@ -178,6 +221,8 @@ export async function updateCustomer(customerId: string, formData: FormData) {
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
   revalidatePath(`/customers/${customerId}/edit`);
+  revalidatePath('/rounds/customers');
+  revalidatePath(`/rounds/customers/${customerId}`);
   return { success: true };
 }
 

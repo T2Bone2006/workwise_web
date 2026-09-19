@@ -75,6 +75,15 @@ function parseShiftOffNonWorkingDays(raw: unknown): boolean {
   return DEFAULT_ROUNDS_SETTINGS.shift_off_non_working_days;
 }
 
+/** Write `settings.rounds` without touching any other tenant settings keys. */
+export function withRoundsSettings(
+  tenantSettings: unknown,
+  rounds: RoundsSettings,
+): Record<string, unknown> {
+  const current = isPlainObject(tenantSettings) ? { ...tenantSettings } : {};
+  return { ...current, rounds };
+}
+
 /** Tolerant: any missing/invalid field falls back to its default. */
 export function parseRoundsSettings(raw: unknown): RoundsSettings {
   const source = isPlainObject(raw) ? raw : {};

@@ -7,32 +7,48 @@ import {
   User,
   AlertTriangle,
   CreditCard,
+  Route,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import type { BillingSummary } from '@/lib/data/billing';
+import type { RoundsSettings } from '@/lib/rounds/settings';
 import { SettingsCompanyTab } from './settings-company-tab';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 import { SettingsBillingTab } from './settings-billing-tab';
+import { SettingsRoundsTab } from './settings-rounds-tab';
 
 interface SettingsViewProps {
   initialData: SettingsPageData;
   initialTenantSkills: TenantSkillRow[];
   billing: BillingSummary;
+  rounds?: { settings: RoundsSettings } | null;
 }
 
-const tabs = [
+const baseTabs = [
   { value: 'company', label: 'Company Settings', icon: Building2 },
   { value: 'billing', label: 'Billing', icon: CreditCard },
   { value: 'profile', label: 'User Profile', icon: User },
   { value: 'danger', label: 'Danger Zone', icon: AlertTriangle },
 ] as const;
 
-export function SettingsView({ initialData, initialTenantSkills, billing }: SettingsViewProps) {
+export function SettingsView({
+  initialData,
+  initialTenantSkills,
+  billing,
+  rounds = null,
+}: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
+  const tabs = rounds
+    ? [
+        baseTabs[0],
+        { value: 'rounds', label: 'Rounds', icon: Route },
+        ...baseTabs.slice(1),
+      ]
+    : [...baseTabs];
 
   return (
     <Tabs
@@ -78,6 +94,11 @@ export function SettingsView({ initialData, initialTenantSkills, billing }: Sett
             onSaved={onSaved}
           />
         </TabsContent>
+        {rounds && (
+          <TabsContent value="rounds" className="mt-0 outline-none">
+            <SettingsRoundsTab settings={rounds.settings} onSaved={onSaved} />
+          </TabsContent>
+        )}
         <TabsContent value="billing" className="mt-0 outline-none">
           <SettingsBillingTab billing={billing} />
         </TabsContent>

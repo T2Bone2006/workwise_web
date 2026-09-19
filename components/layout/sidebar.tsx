@@ -22,6 +22,7 @@ import {
   Landmark,
   Receipt,
   Bot,
+  Wrench,
 } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { useEffect, useState } from 'react';
@@ -68,6 +69,8 @@ function buildNavSections(features: TenantFeatures): NavSection[] {
   const rounds: NavItem[] = [
     { href: '/rounds/customers', label: 'Customers', icon: Route, show: true },
     { href: '/rounds/calendar', label: 'Calendar', icon: CalendarDays, show: true },
+    { href: '/rounds/services', label: 'Services', icon: Wrench, show: true },
+    { href: '/rounds/import', label: 'Import', icon: Upload, show: true },
     { href: '/rounds/payments', label: 'Payments', icon: Wallet, show: true },
     { href: '/rounds/bank', label: 'Bank', icon: Landmark, show: true },
     { href: '/rounds/messages', label: 'Messages', icon: MessageSquare, show: true },

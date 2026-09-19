@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ROUNDS_SETTINGS, parseRoundsSettings } from '@/lib/rounds/settings';
+import { DEFAULT_ROUNDS_SETTINGS, parseRoundsSettings, withRoundsSettings } from '@/lib/rounds/settings';
 
 describe('parseRoundsSettings', () => {
   it('returns defaults for missing or junk input', () => {
@@ -92,5 +92,21 @@ describe('parseRoundsSettings', () => {
     parsed.blackouts.push('2026-01-01');
     expect(DEFAULT_ROUNDS_SETTINGS.working_days).toEqual([1, 2, 3, 4, 5]);
     expect(DEFAULT_ROUNDS_SETTINGS.blackouts).toEqual([]);
+  });
+});
+
+describe('withRoundsSettings', () => {
+  it('writes rounds without dropping other tenant settings keys', () => {
+    const next = withRoundsSettings(
+      {
+        company: { phone: '07700900123' },
+        features: { pro: true },
+        rounds: { horizon_weeks: 4 },
+      },
+      DEFAULT_ROUNDS_SETTINGS,
+    );
+    expect(next.company).toEqual({ phone: '07700900123' });
+    expect(next.features).toEqual({ pro: true });
+    expect(next.rounds).toEqual(DEFAULT_ROUNDS_SETTINGS);
   });
 });

@@ -56,16 +56,24 @@ So, as you work:
    (and `../docs/PRODUCT.md` when it changes what the product *is*), then fix any
    code already built to the old rule. Do not leave the decision only in chat.
 4. Order of truth when they disagree: `../docs/PRODUCT.md` → phase spec → this file.
+5. **After every step, explain it in the chat — not here.** This file stays a
+   short "where we are" tick. The owner is not reading the spec for fun. In the
+   reply that closes the step, say in plain language: which step number it was
+   and the spec's one-line title; what you actually built (files, in English);
+   what that is *for* (who uses it later — dashboard form, phone day-run, cron,
+   etc.); anything they should know (defaults, things you did not do, next step
+   number). Do not paste that recap into this file.
 
 New chat should start: read this file, then `../docs/PRODUCT.md`, then
 `../docs/specs/phase-1.md` §9, then do the next unticked step.
 
 ---
 
-## Phase 1 — Rounds core (branch `rounds-foundations`) — IN PROGRESS, at step 5 of 32
+## Phase 1 — Rounds core (branch `rounds-foundations`) — IN PROGRESS, at step 18 of 32
 
 Spec: `../docs/specs/phase-1.md` (§9 is the step list). Product picture:
-`../docs/PRODUCT.md`. Steps 1–4 are done; **step 5 (route optimiser) is next**.
+`../docs/PRODUCT.md`. Steps 1–17 are done; **step 18 (`/rounds/services`)
+is next**.
 
 **Done so far**
 - **Step 1** — `vitest` added (`npm test`, `vitest.config.ts` with the `@/` alias,
@@ -83,7 +91,56 @@ Spec: `../docs/specs/phase-1.md` (§9 is the step list). Product picture:
   cursor helpers, `R-<agr6>-<yyyymmdd>` references, `buildVisitInsert` (writes
   `status 'assigned'`, `industry_data {}`, `payment_status 'unpaid'` so the
   existing DB-only `jobs` triggers stay harmless).
-- 45 unit tests pass; `tsc --noEmit` clean.
+- **Step 5** — `lib/rounds/route-optimiser.ts`: nearest-neighbour from the route
+  start (or the first stop), then 2-opt on haversine (cap 200 passes). Stops
+  without coordinates stay at the end in input order and do not count in
+  `distanceKm`. Pure; the `/api/rounds/optimise-day` wrapper is step 15.
+- **Step 6** — spreadsheet/form helpers, still pure: `parseFrequencyDays`
+  ("4 weekly" / "6w" / 28 → days), `normalizeUkPhoneE164` / display,
+  `USER_SKIP_REASONS` + labels, `SERVICE_PRESETS` (window cleaning, gardening,
+  cleaning, exterior, general). Tests for frequency + phone.
+- **Step 7** — visit generator (not a server action; takes a supabase client so
+  cron and dashboard can share it). `generateVisitsForAgreement` upserts on
+  `(service_agreement_id, agreement_occurrence_date)` so a re-run inserts 0.
+  `generateVisitsForTenant` resumes pauses whose date has arrived, fills the
+  `fixed` horizon, and backfills a missing `after_completion` next visit
+  (offline-Done recovery). Also: `getSoloWorkerForTenant`, `getRoundsSettings`.
+- **Step 8** — Done / Skip / Reschedule / **Move remaining** / reorder /
+  Optimise as shared server functions (dashboard and phone will call these).
+  Completing or skipping a “next visit from when I last did it” agreement
+  creates the next stop; a **fixed** agreement does not. Pause/end/price-change
+  helpers: delete or reprice only assigned future visits.
+- **Step 9** — zod 4 schemas in `lib/validations/rounds/` (agreement, doorstep
+  customer, visits incl. move remaining, service catalog, settings).
+  `schedule_mode` defaults **`fixed`**; `shift_off_non_working_days` defaults
+  **false**; skip reasons are the user-picked set only. Postcode uses the same
+  UK transform as `createJobSchema`.
+- **Step 10** — dashboard read layer in `lib/data/rounds/` (customers list +
+  detail, agreements, day/month visits, catalog, home stats). RLS via
+  `createClient()`; explicit column lists.
+- **Step 11** — save actions for the catalog (create/update/deactivate, add
+  trade presets without overwriting edited prices) and Rounds settings
+  (read-modify-write of `tenants.settings.rounds` only).
+- **Step 12** — agreement actions: create (geocode + generate visits), edit
+  (rebuild future visits if the cycle/address changed; optional reprice),
+  pause / resume / end, and a manual Generate now.
+- **Step 13** — visit actions the dashboard (and later the phone APIs) call:
+  Done, Skip, Reschedule, **Move remaining**, reorder, Optimise, one-off job.
+- **Step 14** — nightly generate-visits cron route + `vercel.json` schedule
+  (`0 2 * * *`). Starts on the next web deploy; needs `CRON_SECRET` set.
+- **Step 15** — bearer auth (`lib/auth/bearer.ts`: anon key + the caller's JWT
+  so RLS applies) and phone APIs: Optimise, Done, Skip, **Move remaining**,
+  doorstep Add customer, second-property agreement. Same cores as the
+  dashboard actions. Online only.
+- **Step 16** — existing customer form gained a `variant="rounds"`: no bulk/individual
+  toggle, no address (that lives on the agreement), plus payment terms, access
+  notes, and preferred contact. Pro form unchanged. Pages that use this land
+  in step 19.
+- **Step 17** — Rounds sidebar now has Customers, Calendar, Services, Import,
+  then Payments / Bank / Messages / Expenses. Settings gains a **Rounds** tab
+  (only if the tenant has Rounds): usual work days, days off, “move visits off
+  days I don’t work” off by default, horizon, reminder days, route start.
+- 146 unit tests pass; `tsc --noEmit` clean.
 
 **Decision changed mid-phase (2026-09-15 evening, after talking to window cleaners)**
 - **Do not auto-move visits off weekends / days off.** `RoundsSettings` gained
@@ -114,9 +171,9 @@ Spec: `../docs/specs/phase-1.md` (§9 is the step list). Product picture:
   before any mobile work — that is step 26, not now.
 - `EXPO_PUBLIC_API_URL` into EAS env before the OTA (Phase 1 close).
 
-**Not verified yet**: nothing Phase 1 has been exercised against a real Rounds
-tenant — there are no Rounds screens or server actions yet, so there is nothing to
-click. Verification plan is spec §7.
+**Not verified yet**: no logged-in Rounds session in the browser this step, so
+the Settings tab and sidebar were not clicked. Pro tenants still omit the
+Rounds tab. Verification plan is spec §7.
 
 **No web env vars added by Phase 1.** No deploy needed yet. Do not OTA.
 

@@ -39,6 +39,10 @@ export interface CustomerDetailRow extends CustomerListRow {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  phone_e164?: string | null;
+  preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none' | null;
+  payment_terms?: 'on_the_day' | 'monthly_invoice' | null;
+  access_notes?: string | null;
 }
 
 export interface CustomerWorkerFields {
@@ -424,7 +428,9 @@ export async function getCustomerById(
     const supabase = await createClient();
     const { data, error } = await supabase
       .from('customers')
-      .select('id, tenant_id, name, type, email, phone, notes, created_at, updated_at, jobs(count)')
+      .select(
+        'id, tenant_id, name, type, email, phone, phone_e164, notes, created_at, updated_at, preferred_channel, payment_terms, access_notes, jobs(count)',
+      )
       .eq('id', customerId)
       .eq('tenant_id', tenantId)
       .single();
@@ -462,6 +468,19 @@ export async function getCustomerById(
       phone: (row.phone as string | null) ?? null,
       address: null,
       notes: (row.notes as string | null) ?? null,
+      phone_e164: (row.phone_e164 as string | null) ?? null,
+      preferred_channel:
+        row.preferred_channel === 'whatsapp' ||
+        row.preferred_channel === 'sms' ||
+        row.preferred_channel === 'email' ||
+        row.preferred_channel === 'none'
+          ? row.preferred_channel
+          : null,
+      payment_terms:
+        row.payment_terms === 'monthly_invoice' || row.payment_terms === 'on_the_day'
+          ? row.payment_terms
+          : null,
+      access_notes: (row.access_notes as string | null) ?? null,
       created_at: row.created_at as string | undefined,
       updated_at: row.updated_at as string | null | undefined,
       job_count: typeof jobCount === 'number' ? jobCount : 0,

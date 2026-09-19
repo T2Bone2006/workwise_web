@@ -8,7 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, Building2, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { customerSchema, type CustomerFormInput } from '@/lib/validations/customer';
-import { createCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
+import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,33 +29,64 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { CustomerDetailRow } from '@/lib/data/customers';
 
 const NOTES_MAX = 500;
+
+const PAYMENT_TERM_OPTIONS = [
+  { value: 'on_the_day', label: 'On the day' },
+  { value: 'monthly_invoice', label: 'Monthly invoice' },
+] as const;
+
+const CHANNEL_OPTIONS = [
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'sms', label: 'SMS' },
+  { value: 'email', label: 'Email' },
+  { value: 'none', label: 'None' },
+] as const;
 
 interface CustomerFormProps {
   mode: 'create' | 'edit';
   tenantId: string;
   customer?: CustomerDetailRow | null;
   jobCount?: number;
+  variant?: 'pro' | 'rounds';
 }
 
-export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: CustomerFormProps) {
+export function CustomerForm({
+  mode,
+  tenantId,
+  customer,
+  jobCount = 0,
+  variant = 'pro',
+}: CustomerFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const isRounds = variant === 'rounds';
+  const cancelHref = isRounds ? '/rounds/customers' : '/customers';
 
   const form = useForm<CustomerFormInput>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
       name: customer?.name ?? '',
-      type: (customer?.type as 'bulk_client' | 'individual') ?? 'individual',
+      type: isRounds ? 'individual' : ((customer?.type as 'bulk_client' | 'individual') ?? 'individual'),
       email: customer?.email ?? '',
       phone: customer?.phone ?? '',
       address: customer?.address ?? '',
       notes: customer?.notes ?? '',
+      payment_terms: customer?.payment_terms ?? 'on_the_day',
+      access_notes: customer?.access_notes ?? '',
+      preferred_channel: customer?.preferred_channel ?? undefined,
     },
   });
 
@@ -68,15 +99,24 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
     try {
       const formData = new FormData();
       formData.set('name', values.name);
-      formData.set('type', values.type);
+      formData.set('type', isRounds ? 'individual' : values.type);
       formData.set('email', values.email ?? '');
       formData.set('phone', values.phone ?? '');
-      formData.set('address', values.address ?? '');
+      formData.set('address', isRounds ? '' : (values.address ?? ''));
       formData.set('notes', values.notes ?? '');
+      if (isRounds) {
+        formData.set('payment_terms', values.payment_terms ?? 'on_the_day');
+        formData.set('access_notes', values.access_notes ?? '');
+        if (values.preferred_channel) {
+          formData.set('preferred_channel', values.preferred_channel);
+        }
+      }
 
       const result =
         mode === 'create'
-          ? await createCustomer(formData)
+          ? isRounds
+            ? await createRoundsCustomer(formData)
+            : await createCustomer(formData)
           : await updateCustomer(customer!.id, formData);
 
       if (!result.success) {
@@ -84,7 +124,17 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
         return;
       }
       toast.success(mode === 'create' ? 'Customer created' : 'Customer updated');
-      router.push('/customers');
+      if (isRounds) {
+        if (mode === 'create' && 'id' in result && typeof result.id === 'string') {
+          router.push(`/rounds/customers/${result.id}/agreements/new?first=1`);
+        } else if (customer?.id) {
+          router.push(`/rounds/customers/${customer.id}`);
+        } else {
+          router.push('/rounds/customers');
+        }
+      } else {
+        router.push('/customers');
+      }
       router.refresh();
     } finally {
       setIsSubmitting(false);
@@ -141,6 +191,7 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
                 )}
               />
 
+              {!isRounds && (
               <FormField
                 control={form.control}
                 name="type"
@@ -207,6 +258,7 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
                   </FormItem>
                 )}
               />
+              )}
 
               <FormField
                 control={form.control}
@@ -247,6 +299,92 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
                 )}
               />
 
+              {isRounds && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="payment_terms"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Payment terms</FormLabel>
+                        <FormControl>
+                          <div className="grid grid-cols-2 gap-2">
+                            {PAYMENT_TERM_OPTIONS.map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                disabled={isSubmitting}
+                                onClick={() => field.onChange(opt.value)}
+                                className={cn(
+                                  'rounded-xl border-2 px-3 py-2.5 text-sm font-medium transition-all',
+                                  field.value === opt.value
+                                    ? 'border-emerald-400/50 bg-emerald-500/10'
+                                    : 'border-border/80 hover:border-border hover:bg-muted/30',
+                                )}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="access_notes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Access notes</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Gate code, dog, park on the left…"
+                            {...field}
+                            value={field.value ?? ''}
+                            disabled={isSubmitting}
+                            rows={3}
+                            maxLength={NOTES_MAX + 50}
+                            className="resize-none focus-visible:ring-brand-primary/30"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="preferred_channel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Preferred contact</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          disabled={isSubmitting}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Not set" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {CHANNEL_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
               <FormField
                 control={form.control}
                 name="notes"
@@ -273,7 +411,7 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <Button type="button" variant="ghost" asChild disabled={isSubmitting}>
-                  <Link href="/customers" className="gap-2">
+                  <Link href={cancelHref} className="gap-2">
                     <ArrowLeft className="size-4" />
                     Cancel
                   </Link>
@@ -296,7 +434,7 @@ export function CustomerForm({ mode, tenantId, customer, jobCount = 0 }: Custome
                 </Button>
               </div>
 
-              {mode === 'edit' && (
+              {mode === 'edit' && !isRounds && (
                 <div className="border-t border-border/80 pt-4 mt-6">
                   <Button
                     type="button"
