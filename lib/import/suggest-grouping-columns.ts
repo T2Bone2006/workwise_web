@@ -128,8 +128,9 @@ function isJobSpecHeader(header: string): boolean {
  * Keep only real headers that could be a visit key on this sheet:
  * drop junk / job-spec names, all-blank, constant-across-all-rows, and
  * unique-per-row ids. Address is allowed when it actually repeats.
+ * Not exported — this file is `'use server'` and sync exports are invalid.
  */
-export function sanitizeGroupingColumns(
+function sanitizeGroupingColumns(
   proposed: readonly string[],
   headers: readonly string[],
   rows: readonly Record<string, string>[]
