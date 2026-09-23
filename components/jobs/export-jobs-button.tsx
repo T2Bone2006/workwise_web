@@ -159,7 +159,11 @@ function sourceFieldKeysForGroup(rows: ExportableRow[]): string[] {
   return [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
-async function buildAndDownloadWorkbook(rows: ExportableRow[], columnKeys: string[]) {
+async function buildAndDownloadWorkbook(
+  rows: ExportableRow[],
+  columnKeys: string[],
+  opts: { fileName: string; sheetName?: string }
+) {
   const systemColumns = EXPORT_COLUMNS.filter((c) => columnKeys.includes(c.key));
   const systemLabels = new Set(systemColumns.map((c) => c.label));
   const XLSX = await import('xlsx');
@@ -167,6 +171,7 @@ async function buildAndDownloadWorkbook(rows: ExportableRow[], columnKeys: strin
   const usedNames = new Set<string>();
 
   const groups = groupRowsByCustomer(rows);
+  const singleSheet = groups.length === 1;
   for (const group of groups) {
     const sourceKeys = sourceFieldKeysForGroup(group.rows);
     // Avoid colliding with a system column header of the same name.
@@ -188,11 +193,25 @@ async function buildAndDownloadWorkbook(rows: ExportableRow[], columnKeys: strin
     });
 
     const worksheet = XLSX.utils.json_to_sheet(sheetRows, { header: headers });
-    const sheetName = sanitizeSheetName(group.sheetLabel, usedNames);
+    const label =
+      singleSheet && opts.sheetName?.trim()
+        ? opts.sheetName.trim()
+        : group.sheetLabel;
+    const sheetName = sanitizeSheetName(label, usedNames);
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   }
 
-  XLSX.writeFile(workbook, `workwise-jobs-${formatTodayForFilename()}.xlsx`);
+  const safeFile = opts.fileName
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.xlsx$/i, '');
+  const fileBase = safeFile || `workwise-jobs-${formatTodayForFilename()}`;
+  XLSX.writeFile(workbook, `${fileBase}.xlsx`);
+}
+
+function defaultExportName(): string {
+  return `workwise-jobs-${formatTodayForFilename()}`;
 }
 
 export function ExportJobsButton({
@@ -206,6 +225,7 @@ export function ExportJobsButton({
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<Scope>(totalCount > jobs.length ? 'all' : 'page');
   const [customCount, setCustomCount] = useState(String(Math.min(totalCount, 100)));
+  const [exportName, setExportName] = useState(defaultExportName);
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(
     () => new Set(EXPORT_COLUMNS.map((c) => c.key))
   );
@@ -220,6 +240,7 @@ export function ExportJobsButton({
   const openDialog = () => {
     if (selectedCount > 0) setScope('selected');
     else setScope(totalCount > jobs.length ? 'all' : 'page');
+    setExportName(defaultExportName());
     setOpen(true);
   };
 
@@ -286,7 +307,10 @@ export function ExportJobsButton({
         return;
       }
 
-      await buildAndDownloadWorkbook(rows, [...selectedColumns]);
+      await buildAndDownloadWorkbook(rows, [...selectedColumns], {
+        fileName: exportName,
+        sheetName: exportName,
+      });
       setOpen(false);
     } catch (err) {
       console.error('[ExportJobsButton] export failed', err);
@@ -392,6 +416,22 @@ export function ExportJobsButton({
                   />
                 )}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="export-name">Sheet name</Label>
+              <Input
+                id="export-name"
+                value={exportName}
+                onChange={(e) => setExportName(e.target.value)}
+                placeholder={defaultExportName()}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for the download filename. If the export is a single customer, this
+                is also the Excel tab name; with multiple customers, each tab stays named
+                after that customer.
+              </p>
             </div>
 
             <div className="space-y-2">
