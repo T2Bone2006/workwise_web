@@ -9,40 +9,8 @@ import { cn } from '@/lib/utils';
 import type { JobStatus, JobPriority } from '@/lib/data/jobs';
 import type { JobLength } from '@/lib/jobs/normalize-job-length';
 import { getRememberedJobsListHref } from '@/lib/jobs/jobs-list-query';
+import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
 import { JobDetailDeleteButton } from '@/components/jobs/job-detail-delete-button';
-
-const STATUS_LABELS: Record<JobStatus, string> = {
-  pending: 'Pending',
-  pending_send: 'Ready to send',
-  assigned: 'Assigned',
-  in_progress: 'In progress',
-  paused: 'Paused',
-  completed: 'Completed',
-  incomplete: 'Not completed',
-  declined: 'Declined',
-  cancelled: 'Cancelled',
-};
-
-const STATUS_BADGE_CLASS: Record<JobStatus, string> = {
-  pending:
-    'border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-400 shadow-[0_0_12px_-2px_rgba(245,158,11,0.25)]',
-  pending_send:
-    'border-cyan-400/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 shadow-[0_0_12px_-2px_rgba(6,182,212,0.25)]',
-  assigned:
-    'border-blue-400/60 bg-blue-500/10 text-blue-700 dark:text-blue-400 shadow-[0_0_12px_-2px_rgba(59,130,246,0.25)]',
-  paused:
-    'border-amber-200/80 bg-[#FEF3C7] text-[#B45309]',
-  in_progress:
-    'border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-400 shadow-[0_0_12px_-2px_rgba(139,92,246,0.25)]',
-  completed:
-    'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-[0_0_12px_-2px_rgba(16,185,129,0.25)]',
-  incomplete:
-    'border-orange-400/60 bg-orange-500/10 text-orange-700 dark:text-orange-400 shadow-[0_0_12px_-2px_rgba(249,115,22,0.25)]',
-  declined:
-    'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90 shadow-[0_0_8px_-2px_rgba(239,68,68,0.2)]',
-  cancelled:
-    'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90 shadow-[0_0_8px_-2px_rgba(239,68,68,0.2)]',
-};
 
 const PRIORITY_LABELS: Record<JobPriority, string> = {
   low: 'Low',
@@ -52,11 +20,12 @@ const PRIORITY_LABELS: Record<JobPriority, string> = {
 };
 
 const PRIORITY_BADGE_CLASS: Record<JobPriority, string> = {
-  low: 'border-slate-400/40 bg-slate-500/10 text-slate-600 dark:text-slate-400',
-  normal: 'border-sky-400/40 bg-sky-500/10 text-sky-700 dark:text-sky-400',
-  high: 'border-orange-400/50 bg-orange-500/10 text-orange-700 dark:text-orange-400',
+  low: 'border-slate-300/65 bg-gradient-to-br from-slate-100/90 to-slate-50/70 text-slate-700 backdrop-blur-sm dark:border-slate-600/40 dark:from-slate-800/45 dark:to-slate-900/30 dark:text-slate-300',
+  normal:
+    'border-sky-300/65 bg-gradient-to-br from-sky-100/90 to-blue-50/70 text-sky-900 backdrop-blur-sm dark:border-sky-700/40 dark:from-sky-950/40 dark:to-blue-950/25 dark:text-sky-200',
+  high: 'border-amber-300/65 bg-gradient-to-br from-amber-100/90 to-orange-50/70 text-amber-950 backdrop-blur-sm dark:border-amber-700/40 dark:from-amber-950/40 dark:to-orange-950/20 dark:text-amber-200',
   emergency:
-    'border-rose-400/60 bg-rose-500/10 text-rose-700 dark:text-rose-400 shadow-[0_0_10px_-2px_rgba(244,63,94,0.2)]',
+    'border-rose-300/65 bg-gradient-to-br from-rose-100/90 to-red-50/70 text-rose-950 backdrop-blur-sm dark:border-rose-700/40 dark:from-rose-950/40 dark:to-red-950/20 dark:text-rose-200',
 };
 
 const JOB_LENGTH_LABELS: Record<JobLength, string> = {
@@ -65,8 +34,10 @@ const JOB_LENGTH_LABELS: Record<JobLength, string> = {
 };
 
 const JOB_LENGTH_BADGE_CLASS: Record<JobLength, string> = {
-  half_day: 'border-teal-400/40 bg-teal-500/10 text-teal-700 dark:text-teal-400',
-  full_day: 'border-indigo-400/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+  half_day:
+    'border-teal-300/65 bg-gradient-to-br from-teal-100/90 to-cyan-50/70 text-teal-900 backdrop-blur-sm dark:border-teal-700/40 dark:from-teal-950/40 dark:to-cyan-950/20 dark:text-teal-200',
+  full_day:
+    'border-indigo-300/65 bg-gradient-to-br from-indigo-100/90 to-violet-50/70 text-indigo-900 backdrop-blur-sm dark:border-indigo-700/40 dark:from-indigo-950/40 dark:to-violet-950/20 dark:text-indigo-200',
 };
 
 interface JobDetailHeaderProps {
@@ -125,11 +96,11 @@ export function JobDetailHeader({
           </h1>
           <span
             className={cn(
-              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium backdrop-blur-sm transition-shadow',
-              STATUS_BADGE_CLASS[status]
+              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-shadow',
+              JOB_STATUS_DISPLAY[status]?.badgeClass
             )}
           >
-            {STATUS_LABELS[status]}
+            {JOB_STATUS_DISPLAY[status]?.label ?? status}
           </span>
           <span
             className={cn(

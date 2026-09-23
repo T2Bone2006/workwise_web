@@ -7,36 +7,13 @@ import {
 
 export const JOBS_LIST_QUERY_KEY = 'workwise.jobsListQuery';
 export const JOBS_LIST_FILTERS_KEY = 'workwise.jobsListFieldFilters';
+export const PORTAL_JOBS_LIST_QUERY_KEY = 'workwise.portalJobsListQuery';
+export const PORTAL_JOBS_LIST_FILTERS_KEY = 'workwise.portalJobsListFieldFilters';
 
-export function rememberJobsListQuery(queryString: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(JOBS_LIST_QUERY_KEY, queryString);
-  } catch {
-    // ignore quota / private mode
-  }
-}
-
-/** Persist query string + committed field filters (filters JSON is source of truth). */
-export function rememberJobsListState(
-  queryString: string,
-  fieldFilters: FieldFilterPair[]
-): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const params = new URLSearchParams(queryString);
-    writeFieldFiltersToSearchParams(params, fieldFilters);
-    sessionStorage.setItem(JOBS_LIST_QUERY_KEY, params.toString());
-    sessionStorage.setItem(JOBS_LIST_FILTERS_KEY, JSON.stringify(fieldFilters));
-  } catch {
-    // ignore quota / private mode
-  }
-}
-
-export function getRememberedFieldFilters(): FieldFilterPair[] {
+function parseRememberedFieldFilters(storageKey: string): FieldFilterPair[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = sessionStorage.getItem(JOBS_LIST_FILTERS_KEY);
+    const raw = sessionStorage.getItem(storageKey);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -54,20 +31,86 @@ export function getRememberedFieldFilters(): FieldFilterPair[] {
   }
 }
 
-export function getRememberedJobsListHref(): string {
-  if (typeof window === 'undefined') return '/jobs';
+function rememberListState(
+  queryKey: string,
+  filtersKey: string,
+  queryString: string,
+  fieldFilters: FieldFilterPair[]
+): void {
+  if (typeof window === 'undefined') return;
   try {
-    const q = sessionStorage.getItem(JOBS_LIST_QUERY_KEY)?.trim() ?? '';
+    const params = new URLSearchParams(queryString);
+    writeFieldFiltersToSearchParams(params, fieldFilters);
+    sessionStorage.setItem(queryKey, params.toString());
+    sessionStorage.setItem(filtersKey, JSON.stringify(fieldFilters));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function rememberedListHref(
+  queryKey: string,
+  filtersKey: string,
+  basePath: string
+): string {
+  if (typeof window === 'undefined') return basePath;
+  try {
+    const q = sessionStorage.getItem(queryKey)?.trim() ?? '';
     const params = new URLSearchParams(q);
-    const filters = getRememberedFieldFilters();
+    const filters = parseRememberedFieldFilters(filtersKey);
     if (filters.length > 0) {
       writeFieldFiltersToSearchParams(params, filters);
     }
     const qs = params.toString();
-    return qs ? `/jobs?${qs}` : '/jobs';
+    return qs ? `${basePath}?${qs}` : basePath;
   } catch {
-    return '/jobs';
+    return basePath;
   }
+}
+
+export function rememberJobsListQuery(queryString: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(JOBS_LIST_QUERY_KEY, queryString);
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+/** Persist query string + committed field filters (filters JSON is source of truth). */
+export function rememberJobsListState(
+  queryString: string,
+  fieldFilters: FieldFilterPair[]
+): void {
+  rememberListState(JOBS_LIST_QUERY_KEY, JOBS_LIST_FILTERS_KEY, queryString, fieldFilters);
+}
+
+export function rememberPortalJobsListState(
+  queryString: string,
+  fieldFilters: FieldFilterPair[]
+): void {
+  rememberListState(
+    PORTAL_JOBS_LIST_QUERY_KEY,
+    PORTAL_JOBS_LIST_FILTERS_KEY,
+    queryString,
+    fieldFilters
+  );
+}
+
+export function getRememberedFieldFilters(): FieldFilterPair[] {
+  return parseRememberedFieldFilters(JOBS_LIST_FILTERS_KEY);
+}
+
+export function getRememberedJobsListHref(): string {
+  return rememberedListHref(JOBS_LIST_QUERY_KEY, JOBS_LIST_FILTERS_KEY, '/jobs');
+}
+
+export function getRememberedPortalJobsListHref(): string {
+  return rememberedListHref(
+    PORTAL_JOBS_LIST_QUERY_KEY,
+    PORTAL_JOBS_LIST_FILTERS_KEY,
+    '/portal'
+  );
 }
 
 /** Job detail URL; snapshots the current list query before leaving. */
@@ -84,4 +127,18 @@ export function jobDetailHref(
     }
   }
   return `/jobs/${jobId}`;
+}
+
+/** Portal job detail URL; snapshots portal list filters for back navigation. */
+export function portalJobDetailHref(
+  jobId: string,
+  listQueryString?: string,
+  fieldFilters?: FieldFilterPair[]
+): string {
+  if (listQueryString !== undefined && fieldFilters) {
+    rememberPortalJobsListState(listQueryString, fieldFilters);
+  } else if (listQueryString !== undefined) {
+    rememberPortalJobsListState(listQueryString, []);
+  }
+  return `/portal/jobs/${jobId}`;
 }

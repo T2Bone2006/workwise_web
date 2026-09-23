@@ -10,6 +10,8 @@ import { JOBS_LIST_COLUMNS, type JobsListColumnKey } from '@/lib/data/settings-t
 interface JobsColumnsPickerProps {
   visibleColumns: Set<JobsListColumnKey>;
   onToggle: (key: JobsListColumnKey) => void;
+  /** When set, only these columns appear in the picker (portal hides office-only fields). */
+  allowedColumns?: JobsListColumnKey[];
 }
 
 /**
@@ -18,7 +20,15 @@ interface JobsColumnsPickerProps {
  * client-side; jobs-table persists the choice per account in the
  * background, it doesn't change what's fetched.
  */
-export function JobsColumnsPicker({ visibleColumns, onToggle }: JobsColumnsPickerProps) {
+export function JobsColumnsPicker({
+  visibleColumns,
+  onToggle,
+  allowedColumns,
+}: JobsColumnsPickerProps) {
+  const columns = allowedColumns
+    ? JOBS_LIST_COLUMNS.filter((c) => allowedColumns.includes(c.key))
+    : JOBS_LIST_COLUMNS;
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -30,7 +40,7 @@ export function JobsColumnsPicker({ visibleColumns, onToggle }: JobsColumnsPicke
       <PopoverContent align="end" className="w-56 p-2">
         <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">Show columns</p>
         <div className="flex flex-col">
-          {JOBS_LIST_COLUMNS.map((column) => (
+          {columns.map((column) => (
             <label
               key={column.key}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1.5 text-sm hover:bg-accent"

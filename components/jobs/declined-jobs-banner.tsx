@@ -13,29 +13,29 @@ interface DeclinedJobsBannerProps {
 
 const VARIANT_CLASSES = {
   amber: {
-    container: 'border-amber-400/40 bg-amber-500/10 dark:border-amber-400/30 dark:bg-amber-500/5',
-    glow: 'shadow-[0_0_20px_-6px_rgba(245,158,11,0.25)]',
-    iconWrap: 'bg-amber-500/20 dark:bg-amber-500/10',
-    icon: 'text-amber-700 dark:text-amber-400',
-    title: 'text-amber-900 dark:text-amber-100',
-    body: 'text-amber-800/90 dark:text-amber-200/80',
-    divider: 'border-amber-500/20',
+    container:
+      'border-amber-300/75 bg-gradient-to-br from-amber-100/95 via-amber-50/85 to-yellow-100/80 shadow-[0_1px_0_rgba(245,158,11,0.18),0_10px_28px_-14px_rgba(245,158,11,0.35)] dark:border-amber-800/45 dark:from-amber-950/50 dark:via-background dark:to-yellow-950/25 dark:shadow-none',
+    iconWrap: 'border border-amber-300/50 bg-amber-500/15 backdrop-blur-sm dark:border-amber-700/40 dark:bg-amber-500/10',
+    icon: 'text-amber-800 dark:text-amber-300',
+    title: 'text-amber-950 dark:text-amber-100',
+    body: 'text-amber-900/80 dark:text-amber-200/75',
+    divider: 'border-amber-400/25 dark:border-amber-700/30',
     ref: 'text-amber-950 dark:text-amber-50',
     meta: 'text-amber-900/70 dark:text-amber-100/70',
-    reason: 'text-amber-900/90 dark:text-amber-100/80',
+    reason: 'text-amber-900/85 dark:text-amber-100/80',
     time: 'text-amber-800/70 dark:text-amber-200/60',
   },
   red: {
-    container: 'border-red-400/40 bg-red-500/10 dark:border-red-400/30 dark:bg-red-500/5',
-    glow: 'shadow-[0_0_20px_-6px_rgba(239,68,68,0.25)]',
-    iconWrap: 'bg-red-500/20 dark:bg-red-500/10',
-    icon: 'text-red-700 dark:text-red-400',
-    title: 'text-red-900 dark:text-red-100',
-    body: 'text-red-800/90 dark:text-red-200/80',
-    divider: 'border-red-500/20',
+    container:
+      'border-red-300/75 bg-gradient-to-br from-red-100/95 via-rose-50/85 to-red-100/80 shadow-[0_1px_0_rgba(239,68,68,0.16),0_10px_28px_-14px_rgba(239,68,68,0.32)] dark:border-red-800/45 dark:from-red-950/50 dark:via-background dark:to-rose-950/25 dark:shadow-none',
+    iconWrap: 'border border-red-300/50 bg-red-500/15 backdrop-blur-sm dark:border-red-700/40 dark:bg-red-500/10',
+    icon: 'text-red-800 dark:text-red-300',
+    title: 'text-red-950 dark:text-red-100',
+    body: 'text-red-900/80 dark:text-red-200/75',
+    divider: 'border-red-400/25 dark:border-red-700/30',
     ref: 'text-red-950 dark:text-red-50',
     meta: 'text-red-900/70 dark:text-red-100/70',
-    reason: 'text-red-900/90 dark:text-red-100/80',
+    reason: 'text-red-900/85 dark:text-red-100/80',
     time: 'text-red-800/70 dark:text-red-200/60',
   },
 } as const;
@@ -55,9 +55,15 @@ export async function DeclinedJobsBanner({ className, variant = 'amber' }: Decli
   const v = VARIANT_CLASSES[variant];
 
   return (
-    <div className={cn('rounded-xl border px-4 py-3', v.container, v.glow, className)}>
+    <div
+      className={cn(
+        'rounded-2xl border px-4 py-3 backdrop-blur-sm',
+        v.container,
+        className
+      )}
+    >
       <div className="flex items-center gap-3">
-        <div className={cn('flex size-10 shrink-0 items-center justify-center rounded-lg', v.iconWrap)}>
+        <div className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl', v.iconWrap)}>
           <AlertTriangle className={cn('size-5', v.icon)} />
         </div>
         <div>

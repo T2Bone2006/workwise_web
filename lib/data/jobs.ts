@@ -110,45 +110,33 @@ export interface JobsStatusSummary {
   incomplete: number;
 }
 
-export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatusSummary> {
+export async function getJobsStatusSummary(
+  tenantId: string,
+  /** When set, counts only jobs whose `scheduled_date` falls in this range (inclusive). */
+  dateRange?: { date_from?: string; date_to?: string }
+): Promise<JobsStatusSummary> {
   const supabase = await createClient();
+
+  const countStatus = async (status: JobStatus) => {
+    let q = supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', status);
+    if (dateRange?.date_from) q = q.gte('scheduled_date', dateRange.date_from);
+    if (dateRange?.date_to) q = q.lte('scheduled_date', dateRange.date_to);
+    return q;
+  };
+
   const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
     await Promise.all([
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'in_progress'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'paused'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'assigned'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending_send'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'completed'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'incomplete'),
+      countStatus('pending'),
+      countStatus('in_progress'),
+      countStatus('paused'),
+      countStatus('assigned'),
+      countStatus('pending_send'),
+      countStatus('completed'),
+      countStatus('incomplete'),
     ]);
 
   return {
@@ -1255,6 +1243,251 @@ export async function getFieldFilterValuesForTenant(
     }
   } catch (err) {
     console.error('[getFieldFilterValuesForTenant]', err);
+    return { values: [], error: toError(err) };
+  }
+}
+
+/**
+ * Portal: status summary for one linked customer (RLS scopes readable rows).
+ */
+export async function getJobsStatusSummaryForCustomer(
+  customerId: string
+): Promise<JobsStatusSummary> {
+  const supabase = await createClient();
+
+  const countStatus = async (status: JobStatus) =>
+    supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', customerId)
+      .eq('status', status);
+
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
+    await Promise.all([
+      countStatus('pending'),
+      countStatus('in_progress'),
+      countStatus('paused'),
+      countStatus('assigned'),
+      countStatus('pending_send'),
+      countStatus('completed'),
+      countStatus('incomplete'),
+    ]);
+
+  return {
+    notStarted: notStarted.count ?? 0,
+    inProgress: inProgress.count ?? 0,
+    paused: paused.count ?? 0,
+    assigned: assigned.count ?? 0,
+    readyToSend: readyToSend.count ?? 0,
+    completed: completed.count ?? 0,
+    incomplete: incomplete.count ?? 0,
+  };
+}
+
+/**
+ * Portal: paginated jobs for one customer — same filters/sort as the office list.
+ * Does not filter by tenant_id; RLS + customer_id enforce access.
+ */
+export async function getJobsForCustomer(
+  customerId: string,
+  filters: JobsFilters & { page?: number }
+): Promise<{ jobs: JobRow[]; totalCount: number; error: Error | null }> {
+  try {
+    if (filters.job_ids && filters.job_ids.length === 0) {
+      return { jobs: [], totalCount: 0, error: null };
+    }
+
+    const supabase = await createClient();
+    const page = Math.max(1, filters.page ?? 1);
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    const scoped: JobsFilters & { page?: number } = {
+      ...filters,
+      customer_id: customerId,
+    };
+
+    let query = supabase
+      .from('jobs')
+      .select(
+        `
+      *,
+      customer:customers!customer_id(id, name),
+      worker:workers!assigned_worker_id(id, full_name),
+      job_group:job_groups!job_group_id(id, label)
+    `,
+        { count: 'exact' }
+      )
+      .eq('customer_id', customerId)
+      .range(from, to);
+
+    query = applyJobsFilters(query, scoped);
+    query = applyJobsListSort(query, scoped);
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      console.error('[getJobsForCustomer] Supabase query error:', error);
+      return {
+        jobs: [],
+        totalCount: 0,
+        error: new Error(error.message ?? 'Failed to load jobs'),
+      };
+    }
+
+    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map((row) =>
+      mapJobRow(row as Record<string, unknown>, scoped)
+    );
+
+    return {
+      jobs,
+      totalCount: typeof count === 'number' ? count : 0,
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getJobsForCustomer] Unexpected error:', err);
+    return {
+      jobs: [],
+      totalCount: 0,
+      error: toError(err),
+    };
+  }
+}
+
+/**
+ * Portal: distinct source_fields keys on this customer's jobs.
+ */
+export async function getSourceFieldKeysForCustomer(
+  customerId: string
+): Promise<{ keys: string[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('source_fields')
+      .eq('customer_id', customerId)
+      .limit(SOURCE_FIELDS_SCAN_LIMIT);
+
+    if (error) {
+      console.error('[getSourceFieldKeysForCustomer]', error);
+      return { keys: [], error: toError(error) };
+    }
+
+    const keys = new Set<string>();
+    for (const row of data ?? []) {
+      const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+      for (const key of Object.keys(fields)) keys.add(key);
+    }
+    return {
+      keys: [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getSourceFieldKeysForCustomer]', err);
+    return { keys: [], error: toError(err) };
+  }
+}
+
+/**
+ * Portal: distinct values for a field filter, scoped to one customer.
+ */
+export async function getFieldFilterValuesForCustomer(
+  customerId: string,
+  field: string
+): Promise<{ values: FieldFilterValueOption[]; error: Error | null }> {
+  try {
+    if (!field.trim()) return { values: [], error: null };
+
+    if (isSourceFieldFilter(field)) {
+      const key = decodeSourceFieldFilter(field);
+      if (!key) return { values: [], error: null };
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('source_fields')
+        .eq('customer_id', customerId)
+        .limit(SOURCE_FIELDS_SCAN_LIMIT);
+      if (error) {
+        console.error('[getFieldFilterValuesForCustomer] source', error);
+        return { values: [], error: toError(error) };
+      }
+      const values = new Set<string>();
+      for (const row of data ?? []) {
+        const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+        const v = fields[key]?.trim();
+        if (v) values.add(v);
+      }
+      return {
+        values: [...values]
+          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          .map((v) => ({ value: v, label: v })),
+        error: null,
+      };
+    }
+
+    switch (field as SystemFilterFieldKey) {
+      case 'status': {
+        const statuses: JobStatus[] = [
+          'pending',
+          'pending_send',
+          'assigned',
+          'in_progress',
+          'paused',
+          'completed',
+          'incomplete',
+          'declined',
+          'cancelled',
+        ];
+        return {
+          values: statuses.map((s) => ({
+            value: s,
+            label: JOB_STATUS_DISPLAY[s]?.label ?? s,
+          })),
+          error: null,
+        };
+      }
+      case 'priority': {
+        const priorities: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+        return {
+          values: priorities.map((p) => ({
+            value: p,
+            label: p.charAt(0).toUpperCase() + p.slice(1),
+          })),
+          error: null,
+        };
+      }
+      case 'postcode': {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('postcode')
+          .eq('customer_id', customerId)
+          .not('postcode', 'is', null)
+          .limit(SOURCE_FIELDS_SCAN_LIMIT);
+        if (error) {
+          console.error('[getFieldFilterValuesForCustomer] postcode', error);
+          return { values: [], error: toError(error) };
+        }
+        const values = new Set<string>();
+        for (const row of data ?? []) {
+          const pc = String((row as { postcode?: string | null }).postcode ?? '').trim();
+          if (pc) values.add(pc);
+        }
+        return {
+          values: [...values]
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+            .map((v) => ({ value: v, label: v })),
+          error: null,
+        };
+      }
+      case 'customer_id':
+      case 'assigned_worker_id':
+        return { values: [], error: null };
+      default:
+        return { values: [], error: null };
+    }
+  } catch (err) {
+    console.error('[getFieldFilterValuesForCustomer]', err);
     return { values: [], error: toError(err) };
   }
 }
