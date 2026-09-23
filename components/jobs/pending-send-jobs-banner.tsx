@@ -93,14 +93,14 @@ export function PendingSendJobsBanner({
       <div
         className={cn(
           'flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 backdrop-blur-sm',
-          'border-cyan-300/75 bg-gradient-to-br from-cyan-100/95 via-sky-50/85 to-cyan-100/80',
-          'shadow-[0_1px_0_rgba(6,182,212,0.16),0_10px_28px_-14px_rgba(6,182,212,0.35)]',
-          'dark:border-cyan-800/45 dark:from-cyan-950/50 dark:via-background dark:to-sky-950/25 dark:shadow-none',
+          'border-border/70 bg-gradient-to-br from-cyan-100/95 via-sky-50/85 to-cyan-100/80',
+          'shadow-[0_1px_0_rgba(6,182,212,0.12),0_10px_28px_-14px_rgba(6,182,212,0.28)]',
+          'dark:border-white/[0.08] dark:from-cyan-950/50 dark:via-background dark:to-sky-950/25 dark:shadow-none',
           className
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-xl border border-cyan-300/50 bg-cyan-500/15 backdrop-blur-sm dark:border-cyan-700/40 dark:bg-cyan-500/10">
+          <div className="flex size-10 items-center justify-center rounded-xl border border-border/60 bg-cyan-500/15 backdrop-blur-sm dark:border-white/10 dark:bg-cyan-500/10">
             <RadioTower className="size-5 text-cyan-800 dark:text-cyan-300" />
           </div>
           <div>

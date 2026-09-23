@@ -26,10 +26,10 @@ export function PageGradientHeader({
       className={cn(
         'flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-5',
         // Light: stronger sky wash so it doesn’t disappear on white.
-        'border-sky-300/80 bg-gradient-to-br from-sky-200/90 via-sky-100 to-cyan-100',
-        'shadow-[0_1px_0_rgba(14,165,233,0.18),0_10px_28px_-12px_rgba(14,165,233,0.4)]',
+        'border-border/70 bg-gradient-to-br from-sky-200/90 via-sky-100 to-cyan-100',
+        'shadow-[0_1px_0_rgba(14,165,233,0.14),0_10px_28px_-12px_rgba(14,165,233,0.32)]',
         // Dark: same direction, deeper tones (already worked well).
-        'dark:border-sky-800/45 dark:from-sky-950/55 dark:via-background dark:to-cyan-950/25',
+        'dark:border-white/[0.08] dark:from-sky-950/55 dark:via-background dark:to-cyan-950/25',
         'dark:shadow-none',
         className
       )}
