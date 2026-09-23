@@ -9,6 +9,7 @@ import {
   getJobsStatusSummaryForCustomer,
   getSourceFieldKeysForCustomer,
   getFieldFilterValuesForCustomer,
+  getImportBatchesForCustomer,
   type JobsFilters,
   type JobStatus,
   type JobPriority,
@@ -66,6 +67,7 @@ interface PortalPageProps {
     sort?: string;
     sort_dir?: string;
     group?: string;
+    batchId?: string;
     field?: string;
     value?: string;
     f0?: string;
@@ -223,16 +225,32 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
     filters = {};
   }
 
+  const activeBatchId = raw.batchId?.trim() || null;
+
+  const [statusSummary, sourceKeysResult, batchesResult] = await Promise.all([
+    getJobsStatusSummaryForCustomer(selectedCustomerId),
+    getSourceFieldKeysForCustomer(selectedCustomerId),
+    getImportBatchesForCustomer(selectedCustomerId),
+  ]);
+
+  const batches = batchesResult.error ? [] : batchesResult.batches;
+  const activeBatch = activeBatchId
+    ? batches.find((batch) => batch.id === activeBatchId) ?? null
+    : null;
+
   const jobsFilters: JobsFilters & { page?: number } = {
     ...filters,
     customer_id: selectedCustomerId,
+    job_ids:
+      activeBatchId && activeBatchId !== 'ungrouped'
+        ? (activeBatch?.job_ids ?? [])
+        : undefined,
   };
 
-  const [statusSummary, sourceKeysResult, { jobs, totalCount, error }] = await Promise.all([
-    getJobsStatusSummaryForCustomer(selectedCustomerId),
-    getSourceFieldKeysForCustomer(selectedCustomerId),
-    getJobsForCustomer(selectedCustomerId, jobsFilters),
-  ]);
+  const { jobs, totalCount, error } = await getJobsForCustomer(
+    selectedCustomerId,
+    jobsFilters
+  );
 
   const fieldFilterOptions = [
     ...PORTAL_SYSTEM_FILTERS.map((f) => ({
@@ -296,8 +314,8 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
           initialFilters={jobsFilters}
           fetchError={error}
           statusSummary={statusSummary}
-          batches={[]}
-          activeBatchId={null}
+          batches={batches}
+          activeBatchId={activeBatchId}
           fieldFilterOptions={fieldFilterOptions}
           fieldFilterValuesByField={fieldFilterValuesByField}
           initialVisibleColumns={PORTAL_COLUMNS}

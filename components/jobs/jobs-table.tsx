@@ -334,6 +334,7 @@ export function JobsTable({
   const isPortalView = variant === 'portal';
   const showOfficeTools = variant === 'full';
   const showDateAndFieldFilters = variant === 'full' || variant === 'portal';
+  const showBatchFilter = showOfficeTools || isPortalView;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -742,7 +743,6 @@ export function JobsTable({
       }
       if (isPortalView) {
         next.delete('view');
-        next.delete('batchId');
       }
       pushListQuery(next);
     },
@@ -785,7 +785,6 @@ export function JobsTable({
       }
       if (isPortalView) {
         next.delete('view');
-        next.delete('batchId');
       }
       const qs = next.toString();
       if (qs === searchParams.toString()) return;
@@ -901,7 +900,7 @@ export function JobsTable({
     initialFilters.priority ||
     (initialFilters.field_filters && initialFilters.field_filters.length > 0) ||
     initialFilters.job_group_id ||
-    (showOfficeTools && activeBatchId)
+    (showBatchFilter && activeBatchId)
   );
   // Label for the active group filter — every row on the page belongs to it.
   const activeGroupLabel = initialFilters.job_group_id
@@ -1038,8 +1037,7 @@ export function JobsTable({
                         onChange={({ date_from, date_to }) => updateParams({ date_from, date_to })}
                       />
                     </div>
-                    {showOfficeTools && (
-                      <>
+                    {showBatchFilter && batches.length > 0 && (
                     <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Import batch</label>
                       <SearchableSelect
@@ -1069,6 +1067,8 @@ export function JobsTable({
                         ]}
                       />
                     </div>
+                    )}
+                    {showOfficeTools && (
                     <div className="flex items-center gap-1 rounded-md border border-border/80 p-0.5">
                       <Button
                         variant={
@@ -1099,7 +1099,6 @@ export function JobsTable({
                         Batches
                       </Button>
                     </div>
-                      </>
                     )}
                   </>
                 )}

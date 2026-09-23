@@ -906,6 +906,142 @@ export async function getImportBatchesForTenant(
 }
 
 /**
+ * Portal: import batches for one linked customer (no synthetic "ungrouped" row).
+ * Relies on portal RLS for import_sources / import_history + jobs.
+ */
+export async function getImportBatchesForCustomer(
+  customerId: string
+): Promise<{ batches: ImportBatchRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+
+    const { data: sourceRows, error: sourcesError } = await supabase
+      .from('import_sources')
+      .select('id')
+      .eq('customer_id', customerId);
+
+    if (sourcesError) {
+      console.error('[getImportBatchesForCustomer] import_sources', sourcesError);
+      return {
+        batches: [],
+        error: new Error(sourcesError.message ?? 'Failed to load import sources'),
+      };
+    }
+
+    const sourceIds = (sourceRows ?? [])
+      .map((row) => (row as { id?: string }).id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    if (sourceIds.length === 0) {
+      return { batches: [], error: null };
+    }
+
+    const { data: historyRows, error: historyError } = await supabase
+      .from('import_history')
+      .select('id, file_name, started_at, rows_imported, import_source_id, job_ids')
+      .in('import_source_id', sourceIds)
+      .order('started_at', { ascending: false });
+
+    if (historyError) {
+      console.error('[getImportBatchesForCustomer] import_history', historyError);
+      return {
+        batches: [],
+        error: new Error(historyError.message ?? 'Failed to load import batches'),
+      };
+    }
+
+    const rows = Array.isArray(historyRows) ? historyRows : [];
+    const allHistoryJobIds = new Set<string>();
+    for (const row of rows) {
+      const ids = (row as { job_ids?: string[] | null }).job_ids;
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        if (typeof id === 'string' && id.length > 0) allHistoryJobIds.add(id);
+      }
+    }
+
+    const { data: customerRow } = await supabase
+      .from('customers')
+      .select('name')
+      .eq('id', customerId)
+      .maybeSingle();
+    const customerName =
+      ((customerRow as { name?: string | null } | null)?.name ?? null)?.trim() ||
+      'Customer';
+
+    const statusByJobId = new Map<string, JobStatus>();
+    if (allHistoryJobIds.size > 0) {
+      const { data: jobRows, error: jobsError } = await supabase
+        .from('jobs')
+        .select('id, status')
+        .eq('customer_id', customerId)
+        .in('status', LIVE_BATCH_STATUSES);
+
+      if (jobsError) {
+        console.error('[getImportBatchesForCustomer] jobs', jobsError);
+        return {
+          batches: [],
+          error: new Error(jobsError.message ?? 'Failed to load import batch counts'),
+        };
+      }
+
+      for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
+        const id = (jobRow as { id?: string }).id;
+        const status = (jobRow as { status?: JobStatus | null }).status;
+        if (id && status && allHistoryJobIds.has(id)) statusByJobId.set(id, status);
+      }
+    }
+
+    const batches: ImportBatchRow[] = [];
+    for (const row of rows) {
+      const r = row as {
+        id: string;
+        file_name?: string | null;
+        started_at?: string | null;
+        rows_imported?: number | null;
+        import_source_id?: string | null;
+        job_ids?: string[] | null;
+      };
+      const counts = emptyBatchStatusCounts();
+      const liveJobIds: string[] = [];
+      if (Array.isArray(r.job_ids)) {
+        for (const id of r.job_ids) {
+          const status = statusByJobId.get(id);
+          if (!status) continue;
+          liveJobIds.push(id);
+          incrementBatchStatusCount(counts, status);
+        }
+      }
+      if (liveJobTotal(counts) === 0) continue;
+      batches.push({
+        id: r.id,
+        file_name: r.file_name ?? null,
+        started_at: r.started_at ?? null,
+        rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
+        import_source_id: r.import_source_id ?? null,
+        customer_id: customerId,
+        customer_name: customerName,
+        job_ids: liveJobIds,
+        pending: counts.pending,
+        pending_send: counts.pending_send,
+        assigned: counts.assigned,
+        in_progress: counts.in_progress,
+        paused: counts.paused,
+        completed: counts.completed,
+      });
+    }
+
+    return { batches, error: null };
+  } catch (err) {
+    console.error('[getImportBatchesForCustomer]', err);
+    return {
+      batches: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+/**
  * Returns distinct customers that have jobs for this tenant, with job counts.
  * Used for the customer filter dropdown ("ABC Property Management (234 jobs)").
  */
