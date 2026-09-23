@@ -1,0 +1,145 @@
+'use client';
+
+import { useState } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { requestPasswordReset } from '@/lib/actions/auth';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+
+type Phase = 'form' | 'sent';
+
+export default function PortalForgotPasswordPage() {
+  const [phase, setPhase] = useState<Phase>('form');
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await requestPasswordReset(email);
+      if (!result.success) {
+        setError(result.error ?? 'Failed to send reset link');
+        return;
+      }
+      setPhase('sent');
+    } catch {
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (phase === 'sent') {
+    return (
+      <div className="mx-auto w-full max-w-[400px]">
+        <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
+          <CardHeader className="space-y-1 text-center">
+            <div className="mb-6 flex justify-center">
+              <Image
+                src="/workwise_logo.png"
+                alt="WorkWise"
+                width={120}
+                height={120}
+                className="h-auto w-[120px] object-contain"
+                priority
+              />
+            </div>
+            <CardTitle className="text-2xl font-semibold tracking-tight">
+              Check your email
+            </CardTitle>
+            <CardDescription className="space-y-2">
+              <span className="block">
+                If a portal account exists for {email}, we&apos;ve sent a reset link.
+              </span>
+              <span className="block">
+                Click the link in the email to set a new password.
+              </span>
+              <span className="block">
+                Didn&apos;t get it? Check your spam folder.
+              </span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center text-sm text-muted-foreground">
+              <Link href="/portal/login" className="text-primary hover:underline">
+                Back to sign in
+              </Link>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-[400px]">
+      <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
+        <CardHeader className="space-y-1 text-center">
+          <div className="mb-6 flex justify-center">
+            <Image
+              src="/workwise_logo.png"
+              alt="WorkWise"
+              width={120}
+              height={120}
+              className="h-auto w-[120px] object-contain"
+              priority
+            />
+          </div>
+          <CardTitle className="text-2xl font-semibold tracking-tight">
+            Reset your password
+          </CardTitle>
+          <CardDescription>
+            Enter your portal email and we&apos;ll send you a reset link
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="portal-reset-email">Email</Label>
+              <Input
+                id="portal-reset-email"
+                type="email"
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+                disabled={isSubmitting}
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError(null);
+                }}
+              />
+            </div>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <Button
+              type="submit"
+              variant="gradient"
+              className="w-full"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Sending…' : 'Send Reset Link'}
+            </Button>
+          </form>
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            <Link href="/portal/login" className="text-primary hover:underline">
+              Back to sign in
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

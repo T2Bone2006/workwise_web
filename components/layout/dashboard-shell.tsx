@@ -1,8 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { usePathname } from 'next/navigation';
-import { cn } from '@/lib/utils';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { ViewAsBanner } from '@/components/admin/view-as-banner';
@@ -33,8 +31,6 @@ export function DashboardShell({
   viewAsTenantName = null,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const pathname = usePathname();
-  const dashboardHome = pathname === '/dashboard';
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -53,12 +49,7 @@ export function DashboardShell({
           onMenuClick={() => setMobileOpen(true)}
           viewAsActive={Boolean(viewAsTenantName)}
         />
-        <main
-          className={cn(
-            'min-h-0 min-w-0 flex-1 overflow-x-hidden p-6',
-            dashboardHome ? 'overflow-y-hidden' : 'overflow-y-auto'
-          )}
-        >
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6">
           {children}
         </main>
       </div>

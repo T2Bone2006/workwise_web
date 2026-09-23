@@ -3,19 +3,30 @@ const LOGO_URL = SUPABASE_URL
   ? `${SUPABASE_URL}/storage/v1/object/public/assets/workwise_logo.png`
   : 'https://app.joinworkwise.com/workwise_logo.png';
 
+export type PasswordResetAudience = 'admin' | 'worker' | 'portal';
+
 export function buildPasswordResetEmail({
   recipientName,
   resetUrl,
+  audience,
+  /** @deprecated Prefer `audience`. Kept for call-site compatibility. */
   isWorker,
 }: {
   recipientName: string;
   resetUrl: string;
-  isWorker: boolean;
+  audience?: PasswordResetAudience;
+  isWorker?: boolean;
 }): { subject: string; html: string } {
+  const resolvedAudience: PasswordResetAudience =
+    audience ?? (isWorker ? 'worker' : 'admin');
+
   const subject = 'Reset your WorkWise password';
-  const description = isWorker
-    ? "Click below to reset your password. You'll then be able to sign in on the WorkWise mobile app."
-    : 'Click below to reset your password for your WorkWise dashboard.';
+  const description =
+    resolvedAudience === 'worker'
+      ? "Click below to reset your password. You'll then be able to sign in on the WorkWise mobile app."
+      : resolvedAudience === 'portal'
+        ? 'Click below to reset your password for the WorkWise customer portal.'
+        : 'Click below to reset your password for your WorkWise dashboard.';
 
   const html = `<!DOCTYPE html>
 <html lang="en">

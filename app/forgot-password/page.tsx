@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { requestAdminPasswordReset } from '@/lib/actions/auth';
+import { requestPasswordReset } from '@/lib/actions/auth';
 import {
   Card,
   CardContent,
@@ -28,7 +28,7 @@ export default function ForgotPasswordPage() {
     setIsSubmitting(true);
 
     try {
-      const result = await requestAdminPasswordReset(email);
+      const result = await requestPasswordReset(email);
       if (!result.success) {
         setError(result.error ?? 'Failed to send reset link');
         return;

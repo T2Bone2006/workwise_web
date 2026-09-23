@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import type { CustomerType } from '@/lib/data/customers';
 
 export interface CustomerInviteRow {
@@ -27,7 +28,15 @@ export async function getCustomerInvitesForTenant(
   tenantId: string
 ): Promise<{ invites: CustomerInviteRow[]; error: Error | null }> {
   try {
-    const supabase = await createClient();
+    // Admin client so invites remain visible even if tenant RLS is missing.
+    // Still scoped strictly to this tenantId.
+    let supabase;
+    try {
+      supabase = createAdminClient();
+    } catch {
+      supabase = await createClient();
+    }
+
     const { data, error } = await supabase
       .from('customer_invites')
       .select(

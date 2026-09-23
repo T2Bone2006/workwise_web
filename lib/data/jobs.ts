@@ -93,6 +93,11 @@ export interface ExportJobRow extends JobRow {
   arrived_at: string | null;
   completed_at: string | null;
   completion_notes: string | null;
+  /**
+   * When the job entered its *current* status — from `job_status_history`,
+   * with fallbacks to `completed_at` / `started_at` when history is missing.
+   */
+  status_set_at: string | null;
 }
 
 /** Dashboard-style counts for the jobs list summary bar (excludes cancelled). */
@@ -110,45 +115,33 @@ export interface JobsStatusSummary {
   incomplete: number;
 }
 
-export async function getJobsStatusSummary(tenantId: string): Promise<JobsStatusSummary> {
+export async function getJobsStatusSummary(
+  tenantId: string,
+  /** When set, counts only jobs whose `scheduled_date` falls in this range (inclusive). */
+  dateRange?: { date_from?: string; date_to?: string }
+): Promise<JobsStatusSummary> {
   const supabase = await createClient();
+
+  const countStatus = async (status: JobStatus) => {
+    let q = supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('status', status);
+    if (dateRange?.date_from) q = q.gte('scheduled_date', dateRange.date_from);
+    if (dateRange?.date_to) q = q.lte('scheduled_date', dateRange.date_to);
+    return q;
+  };
+
   const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
     await Promise.all([
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'in_progress'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'paused'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'assigned'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending_send'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'completed'),
-      supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .eq('status', 'incomplete'),
+      countStatus('pending'),
+      countStatus('in_progress'),
+      countStatus('paused'),
+      countStatus('assigned'),
+      countStatus('pending_send'),
+      countStatus('completed'),
+      countStatus('incomplete'),
     ]);
 
   return {
@@ -507,6 +500,10 @@ export async function getJobsForExport(
   limit?: number
 ): Promise<{ jobs: ExportJobRow[]; error: Error | null }> {
   try {
+    if (filters.job_ids && filters.job_ids.length === 0) {
+      return { jobs: [], error: null };
+    }
+
     const supabase = await createClient();
     const cappedLimit = Math.min(limit && limit > 0 ? limit : EXPORT_MAX_ROWS, EXPORT_MAX_ROWS);
 
@@ -533,21 +530,88 @@ export async function getJobsForExport(
       return { jobs: [], error: new Error(error.message ?? 'Failed to load jobs for export') };
     }
 
-    const jobs: ExportJobRow[] = (Array.isArray(data) ? data : []).map(
+    const baseJobs: ExportJobRow[] = (Array.isArray(data) ? data : []).map(
       (row: Record<string, unknown>) => ({
         ...mapJobRow(row),
         started_at: (row.started_at as string | null) ?? null,
         arrived_at: (row.arrived_at as string | null) ?? null,
         completed_at: (row.completed_at as string | null) ?? null,
         completion_notes: (row.completion_notes as string | null) ?? null,
+        status_set_at: null,
       })
     );
+
+    const statusSetAtByJobId = await loadStatusSetAtTimes(
+      supabase,
+      baseJobs.map((j) => ({ id: j.id, status: j.status }))
+    );
+
+    const jobs: ExportJobRow[] = baseJobs.map((job) => {
+      const fromHistory = statusSetAtByJobId.get(job.id) ?? null;
+      const fallback =
+        job.status === 'completed'
+          ? job.completed_at
+          : job.status === 'in_progress' || job.status === 'paused'
+            ? job.started_at ?? job.arrived_at
+            : null;
+      return {
+        ...job,
+        status_set_at: fromHistory ?? fallback ?? null,
+      };
+    });
 
     return { jobs, error: null };
   } catch (err) {
     console.error('[getJobsForExport] Unexpected error:', err);
     return { jobs: [], error: toError(err) };
   }
+}
+
+const EXPORT_HISTORY_CHUNK = 150;
+
+/**
+ * Latest `job_status_history.created_at` where `to_status` matches each job's
+ * current status — one timestamp that works for completed, cancelled, declined,
+ * paused, in progress, etc.
+ */
+async function loadStatusSetAtTimes(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  jobs: Array<{ id: string; status: JobStatus | null }>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const jobIds = jobs.map((j) => j.id).filter(Boolean);
+  if (jobIds.length === 0) return out;
+
+  const statusById = new Map(
+    jobs.filter((j) => j.status).map((j) => [j.id, j.status as JobStatus])
+  );
+
+  for (let i = 0; i < jobIds.length; i += EXPORT_HISTORY_CHUNK) {
+    const chunk = jobIds.slice(i, i + EXPORT_HISTORY_CHUNK);
+    const { data, error } = await supabase
+      .from('job_status_history')
+      .select('job_id, to_status, created_at')
+      .in('job_id', chunk)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[loadStatusSetAtTimes]', error);
+      continue;
+    }
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const jobId = (row as { job_id?: string | null }).job_id;
+      const toStatus = (row as { to_status?: string | null }).to_status;
+      const createdAt = (row as { created_at?: string | null }).created_at;
+      if (!jobId || !toStatus || !createdAt) continue;
+      if (out.has(jobId)) continue;
+      if (statusById.get(jobId) !== toStatus) continue;
+      out.set(jobId, createdAt);
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -918,6 +982,142 @@ export async function getImportBatchesForTenant(
 }
 
 /**
+ * Portal: import batches for one linked customer (no synthetic "ungrouped" row).
+ * Relies on portal RLS for import_sources / import_history + jobs.
+ */
+export async function getImportBatchesForCustomer(
+  customerId: string
+): Promise<{ batches: ImportBatchRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+
+    const { data: sourceRows, error: sourcesError } = await supabase
+      .from('import_sources')
+      .select('id')
+      .eq('customer_id', customerId);
+
+    if (sourcesError) {
+      console.error('[getImportBatchesForCustomer] import_sources', sourcesError);
+      return {
+        batches: [],
+        error: new Error(sourcesError.message ?? 'Failed to load import sources'),
+      };
+    }
+
+    const sourceIds = (sourceRows ?? [])
+      .map((row) => (row as { id?: string }).id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    if (sourceIds.length === 0) {
+      return { batches: [], error: null };
+    }
+
+    const { data: historyRows, error: historyError } = await supabase
+      .from('import_history')
+      .select('id, file_name, started_at, rows_imported, import_source_id, job_ids')
+      .in('import_source_id', sourceIds)
+      .order('started_at', { ascending: false });
+
+    if (historyError) {
+      console.error('[getImportBatchesForCustomer] import_history', historyError);
+      return {
+        batches: [],
+        error: new Error(historyError.message ?? 'Failed to load import batches'),
+      };
+    }
+
+    const rows = Array.isArray(historyRows) ? historyRows : [];
+    const allHistoryJobIds = new Set<string>();
+    for (const row of rows) {
+      const ids = (row as { job_ids?: string[] | null }).job_ids;
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        if (typeof id === 'string' && id.length > 0) allHistoryJobIds.add(id);
+      }
+    }
+
+    const { data: customerRow } = await supabase
+      .from('customers')
+      .select('name')
+      .eq('id', customerId)
+      .maybeSingle();
+    const customerName =
+      ((customerRow as { name?: string | null } | null)?.name ?? null)?.trim() ||
+      'Customer';
+
+    const statusByJobId = new Map<string, JobStatus>();
+    if (allHistoryJobIds.size > 0) {
+      const { data: jobRows, error: jobsError } = await supabase
+        .from('jobs')
+        .select('id, status')
+        .eq('customer_id', customerId)
+        .in('status', LIVE_BATCH_STATUSES);
+
+      if (jobsError) {
+        console.error('[getImportBatchesForCustomer] jobs', jobsError);
+        return {
+          batches: [],
+          error: new Error(jobsError.message ?? 'Failed to load import batch counts'),
+        };
+      }
+
+      for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
+        const id = (jobRow as { id?: string }).id;
+        const status = (jobRow as { status?: JobStatus | null }).status;
+        if (id && status && allHistoryJobIds.has(id)) statusByJobId.set(id, status);
+      }
+    }
+
+    const batches: ImportBatchRow[] = [];
+    for (const row of rows) {
+      const r = row as {
+        id: string;
+        file_name?: string | null;
+        started_at?: string | null;
+        rows_imported?: number | null;
+        import_source_id?: string | null;
+        job_ids?: string[] | null;
+      };
+      const counts = emptyBatchStatusCounts();
+      const liveJobIds: string[] = [];
+      if (Array.isArray(r.job_ids)) {
+        for (const id of r.job_ids) {
+          const status = statusByJobId.get(id);
+          if (!status) continue;
+          liveJobIds.push(id);
+          incrementBatchStatusCount(counts, status);
+        }
+      }
+      if (liveJobTotal(counts) === 0) continue;
+      batches.push({
+        id: r.id,
+        file_name: r.file_name ?? null,
+        started_at: r.started_at ?? null,
+        rows_imported: typeof r.rows_imported === 'number' ? r.rows_imported : 0,
+        import_source_id: r.import_source_id ?? null,
+        customer_id: customerId,
+        customer_name: customerName,
+        job_ids: liveJobIds,
+        pending: counts.pending,
+        pending_send: counts.pending_send,
+        assigned: counts.assigned,
+        in_progress: counts.in_progress,
+        paused: counts.paused,
+        completed: counts.completed,
+      });
+    }
+
+    return { batches, error: null };
+  } catch (err) {
+    console.error('[getImportBatchesForCustomer]', err);
+    return {
+      batches: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+/**
  * Returns distinct customers that have jobs for this tenant, with job counts.
  * Used for the customer filter dropdown ("ABC Property Management (234 jobs)").
  */
@@ -1255,6 +1455,251 @@ export async function getFieldFilterValuesForTenant(
     }
   } catch (err) {
     console.error('[getFieldFilterValuesForTenant]', err);
+    return { values: [], error: toError(err) };
+  }
+}
+
+/**
+ * Portal: status summary for one linked customer (RLS scopes readable rows).
+ */
+export async function getJobsStatusSummaryForCustomer(
+  customerId: string
+): Promise<JobsStatusSummary> {
+  const supabase = await createClient();
+
+  const countStatus = async (status: JobStatus) =>
+    supabase
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', customerId)
+      .eq('status', status);
+
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
+    await Promise.all([
+      countStatus('pending'),
+      countStatus('in_progress'),
+      countStatus('paused'),
+      countStatus('assigned'),
+      countStatus('pending_send'),
+      countStatus('completed'),
+      countStatus('incomplete'),
+    ]);
+
+  return {
+    notStarted: notStarted.count ?? 0,
+    inProgress: inProgress.count ?? 0,
+    paused: paused.count ?? 0,
+    assigned: assigned.count ?? 0,
+    readyToSend: readyToSend.count ?? 0,
+    completed: completed.count ?? 0,
+    incomplete: incomplete.count ?? 0,
+  };
+}
+
+/**
+ * Portal: paginated jobs for one customer — same filters/sort as the office list.
+ * Does not filter by tenant_id; RLS + customer_id enforce access.
+ */
+export async function getJobsForCustomer(
+  customerId: string,
+  filters: JobsFilters & { page?: number }
+): Promise<{ jobs: JobRow[]; totalCount: number; error: Error | null }> {
+  try {
+    if (filters.job_ids && filters.job_ids.length === 0) {
+      return { jobs: [], totalCount: 0, error: null };
+    }
+
+    const supabase = await createClient();
+    const page = Math.max(1, filters.page ?? 1);
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    const scoped: JobsFilters & { page?: number } = {
+      ...filters,
+      customer_id: customerId,
+    };
+
+    let query = supabase
+      .from('jobs')
+      .select(
+        `
+      *,
+      customer:customers!customer_id(id, name),
+      worker:workers!assigned_worker_id(id, full_name),
+      job_group:job_groups!job_group_id(id, label)
+    `,
+        { count: 'exact' }
+      )
+      .eq('customer_id', customerId)
+      .range(from, to);
+
+    query = applyJobsFilters(query, scoped);
+    query = applyJobsListSort(query, scoped);
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      console.error('[getJobsForCustomer] Supabase query error:', error);
+      return {
+        jobs: [],
+        totalCount: 0,
+        error: new Error(error.message ?? 'Failed to load jobs'),
+      };
+    }
+
+    const jobs: JobRow[] = (Array.isArray(data) ? data : []).map((row) =>
+      mapJobRow(row as Record<string, unknown>, scoped)
+    );
+
+    return {
+      jobs,
+      totalCount: typeof count === 'number' ? count : 0,
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getJobsForCustomer] Unexpected error:', err);
+    return {
+      jobs: [],
+      totalCount: 0,
+      error: toError(err),
+    };
+  }
+}
+
+/**
+ * Portal: distinct source_fields keys on this customer's jobs.
+ */
+export async function getSourceFieldKeysForCustomer(
+  customerId: string
+): Promise<{ keys: string[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('source_fields')
+      .eq('customer_id', customerId)
+      .limit(SOURCE_FIELDS_SCAN_LIMIT);
+
+    if (error) {
+      console.error('[getSourceFieldKeysForCustomer]', error);
+      return { keys: [], error: toError(error) };
+    }
+
+    const keys = new Set<string>();
+    for (const row of data ?? []) {
+      const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+      for (const key of Object.keys(fields)) keys.add(key);
+    }
+    return {
+      keys: [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+      error: null,
+    };
+  } catch (err) {
+    console.error('[getSourceFieldKeysForCustomer]', err);
+    return { keys: [], error: toError(err) };
+  }
+}
+
+/**
+ * Portal: distinct values for a field filter, scoped to one customer.
+ */
+export async function getFieldFilterValuesForCustomer(
+  customerId: string,
+  field: string
+): Promise<{ values: FieldFilterValueOption[]; error: Error | null }> {
+  try {
+    if (!field.trim()) return { values: [], error: null };
+
+    if (isSourceFieldFilter(field)) {
+      const key = decodeSourceFieldFilter(field);
+      if (!key) return { values: [], error: null };
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('source_fields')
+        .eq('customer_id', customerId)
+        .limit(SOURCE_FIELDS_SCAN_LIMIT);
+      if (error) {
+        console.error('[getFieldFilterValuesForCustomer] source', error);
+        return { values: [], error: toError(error) };
+      }
+      const values = new Set<string>();
+      for (const row of data ?? []) {
+        const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+        const v = fields[key]?.trim();
+        if (v) values.add(v);
+      }
+      return {
+        values: [...values]
+          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          .map((v) => ({ value: v, label: v })),
+        error: null,
+      };
+    }
+
+    switch (field as SystemFilterFieldKey) {
+      case 'status': {
+        const statuses: JobStatus[] = [
+          'pending',
+          'pending_send',
+          'assigned',
+          'in_progress',
+          'paused',
+          'completed',
+          'incomplete',
+          'declined',
+          'cancelled',
+        ];
+        return {
+          values: statuses.map((s) => ({
+            value: s,
+            label: JOB_STATUS_DISPLAY[s]?.label ?? s,
+          })),
+          error: null,
+        };
+      }
+      case 'priority': {
+        const priorities: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+        return {
+          values: priorities.map((p) => ({
+            value: p,
+            label: p.charAt(0).toUpperCase() + p.slice(1),
+          })),
+          error: null,
+        };
+      }
+      case 'postcode': {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from('jobs')
+          .select('postcode')
+          .eq('customer_id', customerId)
+          .not('postcode', 'is', null)
+          .limit(SOURCE_FIELDS_SCAN_LIMIT);
+        if (error) {
+          console.error('[getFieldFilterValuesForCustomer] postcode', error);
+          return { values: [], error: toError(error) };
+        }
+        const values = new Set<string>();
+        for (const row of data ?? []) {
+          const pc = String((row as { postcode?: string | null }).postcode ?? '').trim();
+          if (pc) values.add(pc);
+        }
+        return {
+          values: [...values]
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+            .map((v) => ({ value: v, label: v })),
+          error: null,
+        };
+      }
+      case 'customer_id':
+      case 'assigned_worker_id':
+        return { values: [], error: null };
+      default:
+        return { values: [], error: null };
+    }
+  } catch (err) {
+    console.error('[getFieldFilterValuesForCustomer]', err);
     return { values: [], error: toError(err) };
   }
 }

@@ -20,12 +20,7 @@ import {
   Check,
   X,
   Trash2,
-  CircleDashed,
   RadioTower,
-  PauseCircle,
-  CheckCircle2,
-  CircleAlert,
-  UserCheck,
   UserPlus,
   Group,
   Ungroup,
@@ -63,12 +58,18 @@ import {
   writeFieldFiltersToSearchParams,
 } from '@/lib/jobs/field-filter';
 import type { SearchableSelectOption } from '@/components/ui/searchable-select';
-import { fetchFieldFilterValuesAction } from '@/lib/actions/jobs-field-filter';
 import {
   jobDetailHref,
+  portalJobDetailHref,
   rememberJobsListState,
+  rememberPortalJobsListState,
 } from '@/lib/jobs/jobs-list-query';
 import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
+import {
+  StatusSummaryStrip,
+  type StatusSummaryCounts,
+  type StatusSummaryKey,
+} from '@/components/jobs/status-summary-strip';
 import {
   Dialog,
   DialogContent,
@@ -101,6 +102,8 @@ import { JobsColumnsPicker } from '@/components/jobs/jobs-columns-picker';
 import { updateJobsListColumns } from '@/lib/actions/jobs-columns';
 import { type JobsListColumnKey } from '@/lib/data/settings-types';
 import { FloatingAddButton } from '@/components/ui/floating-add-button';
+import { fetchFieldFilterValuesAction } from '@/lib/actions/jobs-field-filter';
+import { fetchPortalFieldFilterValuesAction } from '@/lib/actions/portal-jobs-field-filter';
 
 const PAGE_SIZE = 50;
 const DEBOUNCE_MS = 300;
@@ -127,7 +130,7 @@ function StatusBadge({ status }: { status: JobStatus | null }) {
       <TooltipTrigger asChild>
         <span
           className={cn(
-            'inline-flex cursor-help items-center rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm transition-shadow',
+            'inline-flex cursor-help items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-shadow',
             meta?.badgeClass
           )}
         >
@@ -142,10 +145,12 @@ function StatusBadge({ status }: { status: JobStatus | null }) {
 }
 
 const PRIORITY_BADGE_CLASS: Record<JobPriority, string> = {
-  low: 'border-slate-400/60 bg-slate-500/10 text-slate-700 dark:text-slate-300',
-  normal: 'border-blue-400/60 bg-blue-500/10 text-blue-800 dark:text-blue-300',
-  high: 'border-amber-400/60 bg-amber-500/10 text-amber-900 dark:text-amber-300',
-  emergency: 'border-red-400/60 bg-red-500/10 text-red-900 dark:text-red-300',
+  low: 'border-slate-300/65 bg-gradient-to-br from-slate-100/90 to-slate-50/70 text-slate-700 backdrop-blur-sm dark:border-slate-600/40 dark:from-slate-800/45 dark:to-slate-900/30 dark:text-slate-300',
+  normal:
+    'border-sky-300/65 bg-gradient-to-br from-sky-100/90 to-blue-50/70 text-sky-900 backdrop-blur-sm dark:border-sky-700/40 dark:from-sky-950/40 dark:to-blue-950/25 dark:text-sky-200',
+  high: 'border-amber-300/65 bg-gradient-to-br from-amber-100/90 to-orange-50/70 text-amber-950 backdrop-blur-sm dark:border-amber-700/40 dark:from-amber-950/40 dark:to-orange-950/20 dark:text-amber-200',
+  emergency:
+    'border-rose-300/65 bg-gradient-to-br from-rose-100/90 to-red-50/70 text-rose-950 backdrop-blur-sm dark:border-rose-700/40 dark:from-rose-950/40 dark:to-red-950/20 dark:text-rose-200',
 };
 
 function PriorityBadge({ priority }: { priority: JobPriority | null }) {
@@ -198,10 +203,10 @@ function SendJobBadge({
             else onArm(jobId);
           }}
           className={cn(
-            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm transition-all',
+            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all',
             armed
-              ? 'animate-pulse border-cyan-500 bg-cyan-600 text-white shadow-[0_0_0_2px_rgba(8,145,178,0.25)]'
-              : cn('cursor-pointer hover:brightness-95', meta?.badgeClass),
+              ? 'animate-pulse border-cyan-400/70 bg-gradient-to-br from-cyan-500 to-sky-600 text-white shadow-sm'
+              : cn('cursor-pointer hover:brightness-[0.98]', meta?.badgeClass),
             sending && 'cursor-wait opacity-70'
           )}
         >
@@ -295,6 +300,19 @@ interface JobsTableProps {
   initialVisibleColumns: JobsListColumnKey[];
   /** Assignable workers (invite accepted) for the inline worker column + bulk assign. */
   workers: { id: string; full_name: string }[];
+  /**
+   * Where filter updates navigate. Default `/jobs`.
+   * Dashboard day overview uses `/dashboard`.
+   * Customer portal uses `/portal`.
+   */
+  basePath?: string;
+  /**
+   * `full` — jobs page (date range, batches, import batch).
+   * `day` — single scheduled day; date is controlled outside via `date` URL param.
+   * `portal` — customer portal list: search / date / field filters / status strip,
+   *            no office actions (assign, delete, batches, new job).
+   */
+  variant?: 'full' | 'day' | 'portal';
 }
 
 export function JobsTable({
@@ -309,7 +327,14 @@ export function JobsTable({
   fieldFilterValuesByField,
   initialVisibleColumns,
   workers,
+  basePath = '/jobs',
+  variant = 'full',
 }: JobsTableProps) {
+  const isDayView = variant === 'day';
+  const isPortalView = variant === 'portal';
+  const showOfficeTools = variant === 'full';
+  const showDateAndFieldFilters = variant === 'full' || variant === 'portal';
+  const showBatchFilter = showOfficeTools || isPortalView;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -362,13 +387,14 @@ export function JobsTable({
       columnsDidMount.current = true;
       return;
     }
+    if (isPortalView) return;
     const t = setTimeout(() => {
       void updateJobsListColumns([...visibleColumns]).then((result) => {
         if (!result.success) toast.error('Failed to save column preferences');
       });
     }, 500);
     return () => clearTimeout(t);
-  }, [visibleColumns]);
+  }, [visibleColumns, isPortalView]);
   const toggleColumn = useCallback((key: JobsListColumnKey) => {
     setVisibleColumns((prev) => {
       const next = new Set(prev);
@@ -650,16 +676,26 @@ export function JobsTable({
     );
   }, [fieldFiltersKey, initialFilters.field_filters]);
 
-  // Only persist while we are actually on the list. During detail navigation,
-  // useSearchParams can briefly update and would otherwise wipe the snapshot.
-  // Prefer committed rows from UI state so stacked filters aren't lost.
+  // Only persist while we are actually on the jobs list. During detail
+  // navigation, useSearchParams can briefly update and would otherwise wipe
+  // the snapshot. Prefer committed rows from UI state so stacked filters aren't
+  // lost. Dashboard day view must not overwrite the jobs-list back link.
   useEffect(() => {
+    if (isDayView) return;
+    if (isPortalView) {
+      if (pathname !== '/portal') return;
+      rememberPortalJobsListState(
+        searchParams.toString(),
+        committedFiltersFromRows(filterRows)
+      );
+      return;
+    }
     if (pathname !== '/jobs') return;
     rememberJobsListState(
       searchParams.toString(),
       committedFiltersFromRows(filterRows)
     );
-  }, [pathname, searchParams, filterRows]);
+  }, [pathname, searchParams, filterRows, isDayView, isPortalView]);
 
   useEffect(() => {
     if (fetchError) {
@@ -668,6 +704,22 @@ export function JobsTable({
       });
     }
   }, [fetchError]);
+
+  const pushListQuery = useCallback(
+    (next: URLSearchParams) => {
+      if (isPortalView) {
+        const tenant = searchParams.get('tenant');
+        if (tenant) next.set('tenant', tenant);
+        rememberPortalJobsListState(next.toString(), committedFiltersFromRows(filterRows));
+      } else if (!isDayView) {
+        rememberJobsListState(next.toString(), committedFiltersFromRows(filterRows));
+      }
+      const qs = next.toString();
+      router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false });
+      setIsNavigating(true);
+    },
+    [router, basePath, isDayView, isPortalView, filterRows, searchParams]
+  );
 
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
@@ -681,11 +733,20 @@ export function JobsTable({
           next.set(key, value);
         }
       }
-      rememberJobsListState(next.toString(), committedFiltersFromRows(filterRows));
-      router.push(`/jobs?${next.toString()}`, { scroll: false });
-      setIsNavigating(true);
+      // Day overview owns the calendar day via `date` — never let filter
+      // updates drop it or write competing date_from/date_to params.
+      if (isDayView) {
+        next.delete('date_from');
+        next.delete('date_to');
+        next.delete('view');
+        next.delete('batchId');
+      }
+      if (isPortalView) {
+        next.delete('view');
+      }
+      pushListQuery(next);
     },
-    [router, searchParams, filterRows]
+    [searchParams, isDayView, isPortalView, pushListQuery]
   );
 
   // Debounced search → URL. Do not reset the input when results return mid-typing.
@@ -716,25 +777,34 @@ export function JobsTable({
       const committed = committedFiltersFromRows(rows);
       writeFieldFiltersToSearchParams(next, committed);
       lastPushedFieldFilters.current = JSON.stringify(committed);
+      if (isDayView) {
+        next.delete('date_from');
+        next.delete('date_to');
+        next.delete('view');
+        next.delete('batchId');
+      }
+      if (isPortalView) {
+        next.delete('view');
+      }
       const qs = next.toString();
-      rememberJobsListState(qs, committed);
       if (qs === searchParams.toString()) return;
-      router.push(`/jobs?${qs}`, { scroll: false });
-      setIsNavigating(true);
+      pushListQuery(next);
     },
-    [router, searchParams]
+    [searchParams, isDayView, isPortalView, pushListQuery]
   );
 
   const ensureValuesForField = useCallback(
     async (field: string) => {
       if (!field || valuesByField[field]) return;
-      // Source-field options only ever appear in fieldFilterOptions when
-      // we're scoped to a customer (see JobsPage) — safe to always pass
-      // customer_id through, it's a no-op for system fields.
-      const values = await fetchFieldFilterValuesAction(field, initialFilters.customer_id);
+      const values = isPortalView
+        ? await fetchPortalFieldFilterValuesAction(
+            field,
+            initialFilters.customer_id ?? ''
+          )
+        : await fetchFieldFilterValuesAction(field, initialFilters.customer_id);
       setValuesByField((prev) => ({ ...prev, [field]: values }));
     },
-    [valuesByField, initialFilters.customer_id]
+    [valuesByField, initialFilters.customer_id, isPortalView]
   );
 
   const updateFilterRow = (id: string, patch: Partial<FilterRowState>) => {
@@ -825,13 +895,12 @@ export function JobsTable({
   const hasFilters = !!(
     initialFilters.search ||
     initialFilters.status ||
-    initialFilters.date_from ||
-    initialFilters.date_to ||
-    initialFilters.customer_id ||
+    (showDateAndFieldFilters && (initialFilters.date_from || initialFilters.date_to)) ||
+    (!isPortalView && initialFilters.customer_id) ||
     initialFilters.priority ||
     (initialFilters.field_filters && initialFilters.field_filters.length > 0) ||
     initialFilters.job_group_id ||
-    activeBatchId
+    (showBatchFilter && activeBatchId)
   );
   // Label for the active group filter — every row on the page belongs to it.
   const activeGroupLabel = initialFilters.job_group_id
@@ -869,107 +938,69 @@ export function JobsTable({
     }
   }, []);
 
-  const summaryItems = [
-    {
-      key: 'pending',
-      count: statusSummary.notStarted,
-      title: 'Not Started',
-      icon: CircleDashed,
-      glow: 'rgb(100 116 139)',
+  const summaryCounts: StatusSummaryCounts = {
+    pending: statusSummary.notStarted,
+    pending_send: statusSummary.readyToSend,
+    assigned: statusSummary.assigned,
+    in_progress: statusSummary.inProgress,
+    paused: statusSummary.paused,
+    completed: statusSummary.completed,
+    incomplete: statusSummary.incomplete,
+  };
+
+  const activeStatusFilter =
+    (initialFilters.field_filters ?? []).find((f) => f.field === 'status')?.value ?? null;
+
+  const applyStatusFilter = useCallback(
+    (status: StatusSummaryKey) => {
+      const current = committedFiltersFromRows(filterRows);
+      const withoutStatus = current.filter((f) => f.field !== 'status');
+      const nextCommitted =
+        activeStatusFilter === status
+          ? withoutStatus
+          : [...withoutStatus, { field: 'status', value: status }];
+      const nextRows =
+        nextCommitted.length === 0
+          ? [newFilterRow()]
+          : nextCommitted.map((f) => newFilterRow({ field: f.field, value: f.value }));
+      setFilterRows(nextRows);
+      void ensureValuesForField('status');
+      commitFilterRows(nextRows);
     },
-    {
-      key: 'pending_send',
-      count: statusSummary.readyToSend,
-      title: 'Ready to send',
-      icon: RadioTower,
-      glow: 'rgb(6 182 212)',
-    },
-    {
-      key: 'assigned',
-      count: statusSummary.assigned,
-      title: 'Assigned',
-      icon: UserCheck,
-      glow: 'rgb(245 158 11)',
-    },
-    {
-      key: 'in_progress',
-      count: statusSummary.inProgress,
-      title: 'In Progress',
-      icon: Briefcase,
-      glow: 'rgb(59 130 246)',
-    },
-    {
-      key: 'paused',
-      count: statusSummary.paused,
-      title: 'Paused',
-      icon: PauseCircle,
-      glow: 'rgb(180 83 9)',
-    },
-    {
-      key: 'completed',
-      count: statusSummary.completed,
-      title: 'Completed',
-      icon: CheckCircle2,
-      glow: 'rgb(16 185 129)',
-    },
-    {
-      key: 'incomplete',
-      count: statusSummary.incomplete,
-      title: 'Not completed',
-      icon: CircleAlert,
-      glow: 'rgb(249 115 22)',
-    },
-  ] as const;
+    [filterRows, activeStatusFilter, ensureValuesForField, commitFilterRows]
+  );
 
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        {/* Status summary (counts only — filter via Where → Status) */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-          {summaryItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.key}
-                className={cn(
-                  'relative overflow-hidden rounded-2xl border bg-[var(--glass-bg)] p-4',
-                  'border-[var(--glass-border)] shadow-[var(--shadow-glass-value)]',
-                  'dark:border-white/[0.06]'
-                )}
-                style={{
-                  boxShadow: `0 0 0 1px ${item.glow}18, var(--shadow-glass-value)`,
-                }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-muted-foreground">{item.title}</p>
-                    <p className="mt-1.5 text-2xl font-bold tracking-tight text-foreground tabular-nums">
-                      {item.count}
-                    </p>
-                  </div>
-                  <span
-                    className="flex size-9 shrink-0 items-center justify-center rounded-lg text-foreground/75"
-                    style={{ backgroundColor: `${item.glow}22` }}
-                  >
-                    <Icon className="size-4" strokeWidth={2} />
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <StatusSummaryStrip
+          counts={summaryCounts}
+          activeStatus={activeStatusFilter}
+          onSelect={applyStatusFilter}
+          label={isDayView ? 'This day' : 'Overview'}
+        />
 
         <Card
           className={cn(
-            'glass-card overflow-hidden border-border/80 transition-all duration-300',
-            'dark:border-white/[0.06]',
-            'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+            'overflow-hidden border-border/80 transition-all duration-300',
+            isDayView
+              ? 'border bg-card shadow-sm dark:border-white/[0.08]'
+              : cn(
+                  'glass-card',
+                  'dark:border-white/[0.06]',
+                  'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+                )
           )}
         >
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-end gap-3">
-                <div className="flex min-w-[180px] flex-1 flex-col gap-1.5 sm:max-w-[280px]">
+                <div
+                  className={cn(
+                    'flex min-w-[180px] flex-col gap-1.5',
+                    isDayView ? 'w-full sm:w-auto sm:min-w-[200px] sm:flex-1 sm:max-w-[240px]' : 'flex-1 sm:max-w-[280px]'
+                  )}
+                >
                   <label className="text-xs font-medium text-muted-foreground">Search</label>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
@@ -996,73 +1027,155 @@ export function JobsTable({
                     )}
                   </div>
                 </div>
-                <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Scheduled date</label>
-                  <JobsDateRangeFilter
-                    dateFrom={initialFilters.date_from}
-                    dateTo={initialFilters.date_to}
-                    onChange={({ date_from, date_to }) => updateParams({ date_from, date_to })}
-                  />
-                </div>
-                <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Import batch</label>
-                  <SearchableSelect
-                    value={activeBatchId ?? '__all__'}
-                    onValueChange={(v) => {
-                      if (v === '__all__') updateParams({ batchId: undefined });
-                      else updateParams({ batchId: v });
-                    }}
-                    placeholder="All batches"
-                    searchPlaceholder="Search batch..."
-                    className="h-10 w-full"
-                    options={[
-                      { value: '__all__', label: 'All batches' },
-                      ...sortedBatchFilterOptions.map((b) => {
-                        const liveTotal =
-                          b.pending +
-                          b.pending_send +
-                          b.assigned +
-                          b.in_progress +
-                          b.paused +
-                          b.completed;
-                        return {
-                          value: b.id,
-                          label: `${b.file_name ?? 'Unnamed import'} (${liveTotal})`,
-                        };
-                      }),
-                    ]}
-                  />
-                </div>
-                <div className="flex items-center gap-1 rounded-md border border-border/80 p-0.5">
+                {!isDayView && (
+                  <>
+                    <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Scheduled date</label>
+                      <JobsDateRangeFilter
+                        dateFrom={initialFilters.date_from}
+                        dateTo={initialFilters.date_to}
+                        onChange={({ date_from, date_to }) => updateParams({ date_from, date_to })}
+                      />
+                    </div>
+                    {showBatchFilter && batches.length > 0 && (
+                    <div className="flex min-w-[200px] max-w-[min(100%,280px)] flex-col gap-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">Import batch</label>
+                      <SearchableSelect
+                        value={activeBatchId ?? '__all__'}
+                        onValueChange={(v) => {
+                          if (v === '__all__') updateParams({ batchId: undefined });
+                          else updateParams({ batchId: v });
+                        }}
+                        placeholder="All batches"
+                        searchPlaceholder="Search batch..."
+                        className="h-10 w-full"
+                        options={[
+                          { value: '__all__', label: 'All batches' },
+                          ...sortedBatchFilterOptions.map((b) => {
+                            const liveTotal =
+                              b.pending +
+                              b.pending_send +
+                              b.assigned +
+                              b.in_progress +
+                              b.paused +
+                              b.completed;
+                            return {
+                              value: b.id,
+                              label: `${b.file_name ?? 'Unnamed import'} (${liveTotal})`,
+                            };
+                          }),
+                        ]}
+                      />
+                    </div>
+                    )}
+                    {showOfficeTools && (
+                    <div className="flex items-center gap-1 rounded-md border border-border/80 p-0.5">
+                      <Button
+                        variant={
+                          !initialFilters.view || initialFilters.view === 'list'
+                            ? 'secondary'
+                            : 'ghost'
+                        }
+                        size="sm"
+                        className="h-8 gap-1"
+                        onClick={() =>
+                          updateParams(
+                            initialFilters.view === 'batches'
+                              ? { view: 'list', batchId: undefined }
+                              : { view: 'list' }
+                          )
+                        }
+                      >
+                        <List className="size-3.5" />
+                        List
+                      </Button>
+                      <Button
+                        variant={initialFilters.view === 'batches' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-8 gap-1"
+                        onClick={() => updateParams({ view: 'batches', batchId: undefined })}
+                      >
+                        <Layers className="size-3.5" />
+                        Batches
+                      </Button>
+                    </div>
+                    )}
+                  </>
+                )}
+                {isDayView &&
+                  filterRows.map((row, index) => {
+                    const valueOptions = row.field ? valuesByField[row.field] ?? [] : [];
+                    return (
+                      <div key={row.id} className="flex flex-wrap items-end gap-2">
+                        <div className="flex min-w-[140px] max-w-[200px] flex-col gap-1.5">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            {index === 0 ? 'Where' : 'And'}
+                          </label>
+                          <SearchableSelect
+                            value={row.field ?? '__none__'}
+                            onValueChange={(v) => {
+                              const field = v === '__none__' ? null : v;
+                              if (field) void ensureValuesForField(field);
+                              updateFilterRow(row.id, { field, value: null });
+                            }}
+                            placeholder="Choose field"
+                            searchPlaceholder="Search fields…"
+                            className="h-10 w-full"
+                            options={[
+                              { value: '__none__', label: 'Any field' },
+                              ...fieldFilterOptions,
+                            ]}
+                          />
+                        </div>
+                        <div className="flex min-w-[140px] max-w-[200px] flex-col gap-1.5">
+                          <label className="text-xs font-medium text-muted-foreground">Is</label>
+                          <SearchableSelect
+                            value={row.value ?? '__none__'}
+                            onValueChange={(v) => {
+                              updateFilterRow(row.id, {
+                                value: v === '__none__' ? null : v,
+                              });
+                            }}
+                            placeholder={row.field ? 'Choose value' : 'Pick a field first'}
+                            searchPlaceholder="Search values…"
+                            className="h-10 w-full"
+                            disabled={!row.field}
+                            options={[
+                              { value: '__none__', label: 'Any value' },
+                              ...valueOptions.map((v) => ({
+                                value: v.value,
+                                label: v.label,
+                              })),
+                            ]}
+                          />
+                        </div>
+                        {(filterRows.length > 1 || row.field || row.value) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-10 px-2 text-muted-foreground"
+                            onClick={() => removeFilterRow(row.id)}
+                            aria-label="Remove filter"
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                {isDayView && filterRows.length < MAX_FIELD_FILTERS && (
                   <Button
-                    variant={
-                      !initialFilters.view || initialFilters.view === 'list'
-                        ? 'secondary'
-                        : 'ghost'
-                    }
+                    type="button"
+                    variant="outline"
                     size="sm"
-                    className="h-8 gap-1"
-                    onClick={() =>
-                      updateParams(
-                        initialFilters.view === 'batches'
-                          ? { view: 'list', batchId: undefined }
-                          : { view: 'list' }
-                      )
-                    }
+                    className="h-10 gap-1.5 self-end"
+                    onClick={addFilterRow}
                   >
-                    <List className="size-3.5" />
-                    List
+                    <Plus className="size-3.5" />
+                    Filter
                   </Button>
-                  <Button
-                    variant={initialFilters.view === 'batches' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className="h-8 gap-1"
-                    onClick={() => updateParams({ view: 'batches', batchId: undefined })}
-                  >
-                    <Layers className="size-3.5" />
-                    Batches
-                  </Button>
-                </div>
+                )}
                 <div className="ml-auto flex items-center gap-2 self-end">
                   {hasFilters && (
                     <Button
@@ -1073,20 +1186,49 @@ export function JobsTable({
                         lastPushedFieldFilters.current = '[]';
                         setSearchInput('');
                         setFilterRows([newFilterRow()]);
-                        rememberJobsListState('', []);
-                        router.push('/jobs', { scroll: false });
+                        if (isDayView) {
+                          const date = searchParams.get('date');
+                          const next = new URLSearchParams();
+                          if (date) next.set('date', date);
+                          pushListQuery(next);
+                        } else if (isPortalView) {
+                          const next = new URLSearchParams();
+                          const tenant = searchParams.get('tenant');
+                          if (tenant) next.set('tenant', tenant);
+                          rememberPortalJobsListState(next.toString(), []);
+                          pushListQuery(next);
+                        } else {
+                          rememberJobsListState('', []);
+                          router.push(basePath, { scroll: false });
+                        }
                       }}
                     >
                       Clear filters
                     </Button>
                   )}
                   {!isBrowsingBatchesGrid && (
-                    <JobsColumnsPicker visibleColumns={visibleColumns} onToggle={toggleColumn} />
+                    <JobsColumnsPicker
+                      visibleColumns={visibleColumns}
+                      onToggle={toggleColumn}
+                      allowedColumns={
+                        isPortalView
+                          ? ['address', 'postcode', 'scheduled', 'priority', 'status', 'created_at']
+                          : undefined
+                      }
+                    />
                   )}
-                  <ExportJobsButton jobs={initialJobs} totalCount={totalCount} filters={initialFilters} />
+                  {showOfficeTools && (
+                    <ExportJobsButton
+                      jobs={initialJobs}
+                      totalCount={totalCount}
+                      filters={initialFilters}
+                      selectedIds={Array.from(selectedIds)}
+                    />
+                  )}
                 </div>
               </div>
 
+              {!isDayView && (
               <div className="space-y-2 border-t border-border/60 pt-3">
                 {filterRows.map((row, index) => {
                   const valueOptions = row.field ? valuesByField[row.field] ?? [] : [];
@@ -1164,6 +1306,7 @@ export function JobsTable({
                   </Button>
                 )}
               </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1301,9 +1444,14 @@ export function JobsTable({
 
         <Card
           className={cn(
-            'glass-card overflow-hidden border-border/80 transition-all duration-300',
-            'dark:border-white/[0.06]',
-            'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+            'overflow-hidden border-border/80 transition-all duration-300',
+            isDayView
+              ? 'border bg-card shadow-sm dark:border-white/[0.08]'
+              : cn(
+                  'glass-card',
+                  'dark:border-white/[0.06]',
+                  'backdrop-blur-[var(--blur-glass)] shadow-[var(--shadow-glass-value)]'
+                )
           )}
         >
           {isNavigating ? (
@@ -1340,32 +1488,60 @@ export function JobsTable({
                   <Briefcase className="size-8 text-primary" />
                 </div>
                 <h3 className="mt-4 text-lg font-semibold text-foreground">
-                  {hasFilters ? 'No jobs match your filters' : 'No jobs yet'}
+                  {hasFilters
+                    ? 'No jobs match your filters'
+                    : isDayView
+                      ? 'No jobs scheduled for this day'
+                      : isPortalView
+                        ? 'No jobs yet'
+                        : 'No jobs yet'}
                 </h3>
                 <p className="mt-2 max-w-sm text-sm text-muted-foreground">
                   {hasFilters
                     ? 'Try clearing filters or changing your criteria.'
-                    : 'Get started by creating your first job or importing from CSV.'}
+                    : isDayView
+                      ? 'Pick another day, or create / import jobs with this scheduled date.'
+                      : isPortalView
+                        ? 'When your provider raises work for you, it will show up here.'
+                        : 'Get started by creating your first job or importing from CSV.'}
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   {hasFilters ? (
                     <Button
                       variant="outline"
                       size="lg"
-                      onClick={() => router.push('/jobs', { scroll: false })}
+                      onClick={() => {
+                        if (isDayView) {
+                          const date = searchParams.get('date');
+                          const next = new URLSearchParams();
+                          if (date) next.set('date', date);
+                          pushListQuery(next);
+                        } else if (isPortalView) {
+                          const next = new URLSearchParams();
+                          const tenant = searchParams.get('tenant');
+                          if (tenant) next.set('tenant', tenant);
+                          pushListQuery(next);
+                        } else {
+                          router.push(basePath, { scroll: false });
+                        }
+                      }}
                     >
                       Clear filters
                     </Button>
                   ) : null}
-                  <Button variant="gradient" size="lg" asChild>
-                    <Link href="/jobs/new">
-                      <Plus className="size-4" />
-                      Create Job
-                    </Link>
-                  </Button>
-                  <Button variant="outline" size="lg" asChild>
-                    <Link href="/import">Import Jobs</Link>
-                  </Button>
+                  {showOfficeTools && (
+                    <>
+                      <Button variant="gradient" size="lg" asChild>
+                        <Link href="/jobs/new">
+                          <Plus className="size-4" />
+                          Create Job
+                        </Link>
+                      </Button>
+                      <Button variant="outline" size="lg" asChild>
+                        <Link href="/import">Import Jobs</Link>
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -1403,7 +1579,14 @@ export function JobsTable({
                   </p>
                 </div>
               ) : null}
-              <div className="flex max-h-[calc(100vh-14rem)] min-h-[320px] flex-col">
+              <div
+                className={cn(
+                  'flex min-h-[320px] flex-col',
+                  // Jobs page keeps an inner scroll pane; day overview lets the
+                  // page scroll so the list is never clipped under a fixed max-height.
+                  !isDayView && 'max-h-[calc(100vh-14rem)]'
+                )}
+              >
                 {activeGroupLabel && (
                   <div className="flex shrink-0 items-center gap-2 border-b border-border/80 bg-muted/30 px-4 py-2 text-sm">
                     <Group className="size-4 text-primary" />
@@ -1421,7 +1604,7 @@ export function JobsTable({
                     </Button>
                   </div>
                 )}
-                {selectedIds.size > 0 && (
+                {selectedIds.size > 0 && showOfficeTools && (
                   <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border/80 bg-primary/5 px-4 py-2">
                     <span className="text-sm font-medium">{selectedIds.size} selected</span>
                     <Button
@@ -1502,6 +1685,7 @@ export function JobsTable({
                   <table className="w-full caption-bottom text-sm">
                     <TableHeader>
                       <TableRow className="border-border/80 hover:bg-transparent">
+                        {showOfficeTools && (
                         <TableHead className="w-10 text-muted-foreground">
                           <button
                             type="button"
@@ -1520,6 +1704,7 @@ export function JobsTable({
                             )}
                           </button>
                         </TableHead>
+                        )}
                         <TableHead className="text-muted-foreground">
                           <button
                             type="button"
@@ -1602,6 +1787,7 @@ export function JobsTable({
                               key={`group-${group.id}`}
                               className="border-l-2 border-l-primary/60 border-border/60 bg-primary/[0.09] hover:bg-primary/[0.12] dark:bg-primary/[0.16]"
                             >
+                              {showOfficeTools && (
                               <TableCell className="w-10 align-middle">
                                 <button
                                   type="button"
@@ -1625,7 +1811,8 @@ export function JobsTable({
                                   )}
                                 </button>
                               </TableCell>
-                              <TableCell colSpan={1 + visibleColumns.size} className="py-1.5">
+                              )}
+                              <TableCell colSpan={(showOfficeTools ? 1 : 0) + visibleColumns.size} className="py-1.5">
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                                   <button
                                     type="button"
@@ -1639,7 +1826,7 @@ export function JobsTable({
                                   <span className="text-xs text-muted-foreground">
                                     {members.length} job{members.length === 1 ? '' : 's'}
                                   </span>
-                                  {workers.length > 0 && (
+                                  {showOfficeTools && workers.length > 0 && (
                                     <SearchableSelect
                                       options={workerOptions}
                                       value={sharedWorkerId}
@@ -1660,6 +1847,7 @@ export function JobsTable({
                                       )}
                                     />
                                   )}
+                                  {showOfficeTools && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1674,6 +1862,7 @@ export function JobsTable({
                                     )}
                                     Ungroup
                                   </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1705,11 +1894,22 @@ export function JobsTable({
                           )}
                           onClick={() => {
                             const committed = committedFiltersFromRows(filterRows);
+                            if (isPortalView) {
+                              router.push(
+                                portalJobDetailHref(job.id, searchParams.toString(), committed)
+                              );
+                              return;
+                            }
+                            if (isDayView) {
+                              router.push(`/jobs/${job.id}`);
+                              return;
+                            }
                             router.push(
                               jobDetailHref(job.id, searchParams.toString(), committed)
                             );
                           }}
                         >
+                          {showOfficeTools && (
                           <TableCell
                             className="w-10 align-middle"
                             onClick={(e) => e.stopPropagation()}
@@ -1744,16 +1944,29 @@ export function JobsTable({
                               </button>
                             )}
                           </TableCell>
+                          )}
                           <TableCell className="font-medium">
                             <Link
-                              href={`/jobs/${job.id}`}
+                              href={
+                                isPortalView
+                                  ? `/portal/jobs/${job.id}`
+                                  : `/jobs/${job.id}`
+                              }
                               className="text-primary hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                rememberJobsListState(
-                                  searchParams.toString(),
-                                  committedFiltersFromRows(filterRows)
-                                );
+                                const committed = committedFiltersFromRows(filterRows);
+                                if (isPortalView) {
+                                  rememberPortalJobsListState(
+                                    searchParams.toString(),
+                                    committed
+                                  );
+                                } else {
+                                  rememberJobsListState(
+                                    searchParams.toString(),
+                                    committed
+                                  );
+                                }
                               }}
                             >
                               {job.reference_number || job.id.slice(0, 8)}
@@ -1843,7 +2056,7 @@ export function JobsTable({
                           )}
                           {visibleColumns.has('status') && (
                             <TableCell>
-                              {job.status === 'pending_send' ? (
+                              {job.status === 'pending_send' && showOfficeTools ? (
                                 <SendJobBadge
                                   jobId={job.id}
                                   armed={armedSendId === job.id}
@@ -1923,7 +2136,9 @@ export function JobsTable({
           )}
         </Card>
       </div>
-      <FloatingAddButton href="/jobs/new" label="New Job" desktopLabel={false} />
+      {showOfficeTools && (
+        <FloatingAddButton href="/jobs/new" label="New Job" desktopLabel={false} />
+      )}
     </TooltipProvider>
   );
 }

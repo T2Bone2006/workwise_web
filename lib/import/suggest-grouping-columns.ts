@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { GROUPING_AI_MODEL, supportsEffort } from '@/lib/ai/model';
 import { logStructuredAiInteraction } from '@/lib/services/ai-interaction-log';
-import { computeRowGroups, resolveGroupingColumns } from '@/lib/import/job-grouping';
+import { resolveGroupingColumns } from '@/lib/import/job-grouping';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -45,14 +45,21 @@ async function callWithRetry<T>(call: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
-const SYSTEM_PROMPT = `You look at a UK field-service job spreadsheet and decide which columns, if any, identify a set of rows that one worker should be sent to together as a single run.
+const SYSTEM_PROMPT = `You look at a UK field-service job spreadsheet and decide which columns, if any, identify a set of rows that one worker should be sent to together as a single run (one visit / one stop / one day-run unit).
 
-Typical signals: several rows share the same escort/officer/engineer name and contact number, the same site or building, or the same client visit reference, on the same date — and each such set should go to one worker so they can travel together.
+This is trade-agnostic. Different sheets use different keys for "travel together":
+- Same escort / warrant officer / engineer name (+ contact) on the same calendar day, across different addresses
+- Same property / site (address, postcode, building or BR reference), possibly same day
+- Same client visit or estate / round stop reference
 
 Rules:
-- Pick the smallest set of columns that reliably distinguishes one run from another. Include a date column when the same person/site recurs on different days.
-- Do NOT pick columns that describe the individual job (address, postcode, job reference, lock type, notes) or that are the same on every row (client name, "Y/N" flags with one value).
-- Only propose grouping when the sample actually contains at least one set of two or more rows that agree on every proposed column. If rows look independent, return an empty list.
+- Pick the smallest set of columns that reliably distinguishes one run from another.
+- Include a calendar-date column when the same person or site recurs on different days, so each day is its own group. Prefer a date-only column over a date+time column (times rarely match across jobs on the same visit).
+- Address and postcode ARE allowed when they identify the site the worker should do together. Do not ban them.
+- Do NOT pick columns that describe the individual job attribute rather than the visit: lock/job/service type, notes, comments, free-text descriptions, Y/N flags, shutter flags, empty/__EMPTY columns, or columns that are the same on every row (client company name).
+- Do NOT pick a job reference / our-ref / unique id that differs on every row.
+- Propose columns from the headers even when this sample looks like a flat list with no obvious clusters or blank-row separators. Flat lists still group when values match.
+- Only return an empty list when no column set could plausibly mean "one run for one worker."
 - Use the column headers exactly as given.`;
 
 const SuggestionSchema = z.object({
@@ -61,7 +68,9 @@ const SuggestionSchema = z.object({
     .describe('Column headers, verbatim, whose matching values define one run. [] if none.'),
   reason: z
     .string()
-    .describe('One short sentence for the user explaining the choice, e.g. "Rows with the same officer and date are one visit."'),
+    .describe(
+      'One short sentence for the user explaining the choice, e.g. "Same officer and date are one visit." or "Same address and postcode are one site."'
+    ),
 });
 
 export type GroupingSuggestion = {
@@ -88,11 +97,63 @@ function formatSample(headers: string[], rows: Record<string, string>[]): string
   return `Columns: ${headers.join(', ')}\n\n${lines.join('\n')}`;
 }
 
+function normalizeCell(value: string | undefined): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Headers that often repeat but are job attributes, not a visit key.
+ * Dropped after the model answers so lock type / notes cannot win.
+ */
+function isJobSpecHeader(header: string): boolean {
+  const h = header.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!h || h.startsWith('__empty')) return true;
+  if (
+    /^(lock\s*type|locktype|shutters?|notes?|special notes|comments?|description|y\/n|yes\/no|flag)$/.test(
+      h
+    )
+  ) {
+    return true;
+  }
+  if (/lock\s*type|special\s*notes|job\s*notes|engineer\s*notes|service\s*type|job\s*type/.test(h)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Keep only real headers that could be a visit key on this sheet:
+ * drop junk / job-spec names, all-blank, constant-across-all-rows, and
+ * unique-per-row ids. Address is allowed when it actually repeats.
+ * Not exported — this file is `'use server'` and sync exports are invalid.
+ */
+function sanitizeGroupingColumns(
+  proposed: readonly string[],
+  headers: readonly string[],
+  rows: readonly Record<string, string>[]
+): string[] {
+  const resolved = resolveGroupingColumns(proposed, headers);
+  return resolved.filter((col) => {
+    if (isJobSpecHeader(col)) return false;
+    const values = rows.map((r) => normalizeCell(r[col])).filter((v) => v !== '');
+    if (values.length === 0) return false;
+    const unique = new Set(values);
+    // Same value on every filled row → client name / single flag, not a visit.
+    if (unique.size === 1 && values.length === rows.length) return false;
+    // Every filled value unique → job ref / our-ref, not a shared visit.
+    if (unique.size === values.length) return false;
+    return true;
+  });
+}
+
 /**
  * Grouping columns for this customer's sheets. Returns the saved choice when
  * the import source has one (including [] = grouping switched off); otherwise
- * asks the model once and validates the answer against the actual rows.
- * Nothing is saved here — importJobs persists whatever the user confirms.
+ * asks the model once and sanitises the answer. Nothing is saved here —
+ * importJobs persists whatever the user confirms.
  */
 export async function suggestGroupingColumns(params: {
   customerId: string;
@@ -165,19 +226,21 @@ export async function suggestGroupingColumns(params: {
     );
 
     const parsed = response.parsed_output;
-    // The model proposes; the rows dispose. Keep only real headers, and only
-    // if applying them actually yields a group in the sample.
-    let columns = parsed ? resolveGroupingColumns(parsed.grouping_columns, headers) : [];
-    if (columns.length > 0 && computeRowGroups(sample, columns).length === 0) {
-      columns = [];
-    }
+    // Model proposes; sanitise against the full sheet (not only the sample) so
+    // repeats past row 40 still count, and job-spec columns cannot win.
+    const columns = parsed
+      ? sanitizeGroupingColumns(parsed.grouping_columns, headers, params.rows)
+      : [];
 
     await logStructuredAiInteraction(supabase, {
       tenantId,
       interactionType: 'column_mapping',
       prompt: userPrompt,
       inputData: { purpose: 'job_grouping', headers, sample_rows: sample.length },
-      parsedOutput: { proposed: parsed?.grouping_columns ?? [], accepted: columns },
+      parsedOutput: {
+        proposed: parsed?.grouping_columns ?? [],
+        accepted: columns,
+      },
       model: GROUPING_AI_MODEL,
       tokensInput: response.usage.input_tokens,
       tokensOutput: response.usage.output_tokens,

@@ -9,6 +9,7 @@ import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { findAuthUserIdByEmail } from '@/lib/supabase/find-auth-user';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const ACTIVE_JOB_STATUSES = ['pending', 'pending_send', 'assigned', 'in_progress'] as const;
@@ -493,27 +494,6 @@ export async function updateWorkerAutoAssign(workerId: string, exclude: boolean)
   revalidatePath('/workers');
   revalidatePath(`/workers/${workerId}`);
   return { success: true, error: null };
-}
-
-async function findAuthUserIdByEmail(
-  admin: SupabaseClient,
-  email: string
-): Promise<string | null> {
-  const normalized = email.trim().toLowerCase();
-  let page = 1;
-  const perPage = 200;
-  while (page <= 10) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-    if (error) {
-      console.error('[findAuthUserIdByEmail] listUsers:', error);
-      return null;
-    }
-    const match = data.users.find((u) => u.email?.toLowerCase() === normalized);
-    if (match) return match.id;
-    if (data.users.length < perPage) break;
-    page += 1;
-  }
-  return null;
 }
 
 async function deleteAuthUserForWorker(

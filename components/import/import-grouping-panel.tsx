@@ -62,7 +62,7 @@ export function ImportGroupingPanel({
     if (suggestion.source === 'ai') {
       return suggestion.reason ?? 'Suggested from the sheet contents.';
     }
-    return 'No obvious grouping in this sheet — pick columns below if rows should travel together.';
+    return 'Pick which columns mean these jobs travel together for this customer — or leave grouping off.';
   })();
 
   return (
@@ -72,8 +72,9 @@ export function ImportGroupingPanel({
         Group jobs that go together
       </legend>
       <p className="text-sm text-muted-foreground">
-        Rows with the same values in the ticked columns become one group, assigned to a
-        single worker. Your choice is remembered for this customer.
+        Rows with the same values in every ticked column become one group (e.g. same
+        officer and date, or same address), assigned to a single worker. Your choice is
+        remembered for this customer.
       </p>
 
       {suggestionNote && (

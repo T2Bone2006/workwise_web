@@ -34,7 +34,10 @@ export function TenantSelector({ options, selectedCustomerId }: TenantSelectorPr
           router.push(`/portal?tenant=${customerId}`);
         }}
       >
-        <SelectTrigger id="portal-tenant-select" className="w-full sm:w-[280px]">
+        <SelectTrigger
+          id="portal-tenant-select"
+          className="w-full border-sky-300/60 bg-white/70 backdrop-blur-sm dark:border-sky-800/50 dark:bg-background/60 sm:w-[280px]"
+        >
           <SelectValue placeholder="Select provider" />
         </SelectTrigger>
         <SelectContent>

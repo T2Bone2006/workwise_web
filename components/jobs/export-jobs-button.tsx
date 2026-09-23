@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -28,11 +28,12 @@ interface ExportJobsButtonProps {
   jobs: JobRow[];
   totalCount: number;
   filters: JobsFilters;
+  /** Checked row IDs on the current page (for the Selected scope). */
+  selectedIds?: string[];
 }
 
-/** Rows exported may come from the current page (JobRow, no lifecycle timestamps) or a
- * server fetch (ExportJobRow) — columns that need the latter degrade to blank for page scope. */
-type ExportableRow = JobRow & Partial<Pick<ExportJobRow, 'started_at' | 'arrived_at' | 'completed_at' | 'completion_notes'>>;
+/** Full export rows always come from the server so lifecycle timestamps are present. */
+type ExportableRow = ExportJobRow;
 
 function formatDateForExport(value: string | null | undefined): string {
   if (!value) return '';
@@ -84,6 +85,11 @@ const EXPORT_COLUMNS: {
     label: 'Status',
     get: (j) => (j.status ? (JOB_STATUS_DISPLAY[j.status]?.label ?? j.status) : ''),
   },
+  {
+    key: 'status_set_at',
+    label: 'Status set at',
+    get: (j) => formatDateTimeForExport(j.status_set_at),
+  },
   { key: 'worker_name', label: 'Assigned To', get: (j) => j.worker_name ?? 'Unassigned' },
   { key: 'scheduled_date', label: 'Scheduled Date', get: (j) => formatDateForExport(j.scheduled_date) },
   {
@@ -91,45 +97,161 @@ const EXPORT_COLUMNS: {
     label: 'Start Time',
     get: (j) => formatDateTimeForExport(j.started_at ?? j.arrived_at),
   },
-  {
-    key: 'completed_at',
-    label: 'Completion Date & Time',
-    get: (j) => formatDateTimeForExport(j.completed_at),
-  },
   { key: 'completion_notes', label: 'Completion Notes', get: (j) => j.completion_notes ?? '' },
 ];
 
-type Scope = 'page' | 'all' | 'custom';
+type Scope = 'page' | 'all' | 'custom' | 'selected';
 
-async function buildAndDownloadWorkbook(rows: ExportableRow[], columnKeys: string[]) {
-  const columns = EXPORT_COLUMNS.filter((c) => columnKeys.includes(c.key));
-  const XLSX = await import('xlsx');
+/** Excel sheet names: max 31 chars, no \ / ? * [ ] */
+function sanitizeSheetName(raw: string, used: Set<string>): string {
+  let base = raw
+    .replace(/[\\/?*[\]:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!base) base = 'Sheet';
+  base = base.slice(0, 31);
 
-  const sheetRows = rows.map((job) => {
-    const record: Record<string, string> = {};
-    columns.forEach((c) => {
-      record[c.label] = c.get(job);
-    });
-    return record;
-  });
-
-  const worksheet = XLSX.utils.json_to_sheet(sheetRows, {
-    header: columns.map((c) => c.label),
-  });
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Jobs');
-  XLSX.writeFile(workbook, `workwise-jobs-${formatTodayForFilename()}.xlsx`);
+  let name = base;
+  let n = 2;
+  while (used.has(name.toLowerCase())) {
+    const suffix = ` (${n})`;
+    name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+    n += 1;
+  }
+  used.add(name.toLowerCase());
+  return name;
 }
 
-export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButtonProps) {
-  const isDisabled = jobs.length === 0;
+function groupRowsByCustomer(rows: ExportableRow[]): Array<{
+  sheetLabel: string;
+  rows: ExportableRow[];
+}> {
+  const order: string[] = [];
+  const groups = new Map<string, { sheetLabel: string; rows: ExportableRow[] }>();
+
+  for (const job of rows) {
+    const key = job.customer_id ?? '__none__';
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rows.push(job);
+      continue;
+    }
+    order.push(key);
+    groups.set(key, {
+      sheetLabel: (job.customer_name ?? '').trim() || 'No customer',
+      rows: [job],
+    });
+  }
+
+  return order.map((key) => groups.get(key)!);
+}
+
+function sourceFieldKeysForGroup(rows: ExportableRow[]): string[] {
+  const keys = new Set<string>();
+  for (const job of rows) {
+    const fields = job.source_fields ?? {};
+    for (const key of Object.keys(fields)) {
+      if (key.trim()) keys.add(key);
+    }
+  }
+  return [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+async function buildAndDownloadWorkbook(
+  rows: ExportableRow[],
+  columnKeys: string[],
+  opts: { fileName: string; sheetName?: string }
+) {
+  const systemColumns = EXPORT_COLUMNS.filter((c) => columnKeys.includes(c.key));
+  const systemLabels = new Set(systemColumns.map((c) => c.label));
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.utils.book_new();
+  const usedNames = new Set<string>();
+
+  const groups = groupRowsByCustomer(rows);
+  const singleSheet = groups.length === 1;
+  for (const group of groups) {
+    const sourceKeys = sourceFieldKeysForGroup(group.rows);
+    // Avoid colliding with a system column header of the same name.
+    const sourceHeaders = sourceKeys.map((key) =>
+      systemLabels.has(key) ? `Field: ${key}` : key
+    );
+
+    const headers = [...systemColumns.map((c) => c.label), ...sourceHeaders];
+    const sheetRows = group.rows.map((job) => {
+      const record: Record<string, string> = {};
+      for (const col of systemColumns) {
+        record[col.label] = col.get(job);
+      }
+      const fields = job.source_fields ?? {};
+      sourceKeys.forEach((key, i) => {
+        record[sourceHeaders[i]!] = fields[key] ?? '';
+      });
+      return record;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(sheetRows, { header: headers });
+    const label =
+      singleSheet && opts.sheetName?.trim()
+        ? opts.sheetName.trim()
+        : group.sheetLabel;
+    const sheetName = sanitizeSheetName(label, usedNames);
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  }
+
+  const safeFile = opts.fileName
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.xlsx$/i, '');
+  const fileBase = safeFile || `workwise-jobs-${formatTodayForFilename()}`;
+  XLSX.writeFile(workbook, `${fileBase}.xlsx`);
+}
+
+function defaultExportName(): string {
+  return `workwise-jobs-${formatTodayForFilename()}`;
+}
+
+export function ExportJobsButton({
+  jobs,
+  totalCount,
+  filters,
+  selectedIds = [],
+}: ExportJobsButtonProps) {
+  const selectedCount = selectedIds.length;
+  const isDisabled = jobs.length === 0 && selectedCount === 0;
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<Scope>(totalCount > jobs.length ? 'all' : 'page');
   const [customCount, setCustomCount] = useState(String(Math.min(totalCount, 100)));
+  const [exportName, setExportName] = useState(defaultExportName);
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(
-    new Set(EXPORT_COLUMNS.map((c) => c.key))
+    () => new Set(EXPORT_COLUMNS.map((c) => c.key))
   );
   const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    if (scope === 'selected' && selectedCount === 0) {
+      setScope(totalCount > jobs.length ? 'all' : 'page');
+    }
+  }, [scope, selectedCount, totalCount, jobs.length]);
+
+  const openDialog = () => {
+    if (selectedCount > 0) setScope('selected');
+    else setScope(totalCount > jobs.length ? 'all' : 'page');
+    setExportName(defaultExportName());
+    setSelectedColumns((prev) => {
+      const valid = new Set(EXPORT_COLUMNS.map((c) => c.key));
+      const next = new Set([...prev].filter((k) => valid.has(k)));
+      // Always default this on — one column for whatever the current status is.
+      next.add('status_set_at');
+      // First open / empty state: all WorkWise columns on.
+      if (next.size <= 1) {
+        for (const key of valid) next.add(key);
+      }
+      return next;
+    });
+    setOpen(true);
+  };
 
   const toggleColumn = (key: string) => {
     setSelectedColumns((prev) => {
@@ -146,12 +268,46 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
       return;
     }
 
+    if (scope === 'selected' && selectedCount === 0) {
+      toast.error('Select at least one job in the list first.');
+      return;
+    }
+
     setIsExporting(true);
     try {
       let rows: ExportableRow[];
 
       if (scope === 'page') {
-        rows = jobs;
+        const pageIds = jobs.map((j) => j.id);
+        const result = await getJobsForExportAction(
+          { ...filters, job_ids: pageIds },
+          { type: 'all' }
+        );
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+        const byId = new Map(result.jobs.map((j) => [j.id, j]));
+        rows = pageIds
+          .map((id) => byId.get(id))
+          .filter((j): j is ExportJobRow => !!j);
+      } else if (scope === 'selected') {
+        const result = await getJobsForExportAction(
+          { ...filters, job_ids: selectedIds },
+          { type: 'all' }
+        );
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+        // Preserve selection order as much as possible.
+        const byId = new Map(result.jobs.map((j) => [j.id, j]));
+        rows = selectedIds
+          .map((id) => byId.get(id))
+          .filter((j): j is ExportJobRow => !!j);
+        if (result.capped) {
+          toast.warning(`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows.`);
+        }
       } else {
         const result = await getJobsForExportAction(
           filters,
@@ -172,7 +328,10 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
         return;
       }
 
-      await buildAndDownloadWorkbook(rows, [...selectedColumns]);
+      await buildAndDownloadWorkbook(rows, [...selectedColumns], {
+        fileName: exportName,
+        sheetName: exportName,
+      });
       setOpen(false);
     } catch (err) {
       console.error('[ExportJobsButton] export failed', err);
@@ -193,7 +352,7 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
               size="sm"
               className="gap-2"
               disabled={isDisabled}
-              onClick={() => setOpen(true)}
+              onClick={openDialog}
             >
               <Download className="size-4" />
               Export
@@ -208,7 +367,8 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
           <DialogHeader>
             <DialogTitle>Export jobs</DialogTitle>
             <DialogDescription>
-              Choose which jobs and columns to include in the spreadsheet.
+              Choose which jobs and WorkWise columns to include. Spreadsheet fields from
+              each job are added automatically, with one sheet per customer.
             </DialogDescription>
           </DialogHeader>
 
@@ -216,6 +376,22 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
             <div className="space-y-2">
               <Label>Rows to export</Label>
               <div className="space-y-2 text-sm">
+                <label
+                  className={`flex items-center gap-2 ${selectedCount === 0 ? 'opacity-50' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="export-scope"
+                    className="border-border"
+                    checked={scope === 'selected'}
+                    disabled={selectedCount === 0}
+                    onChange={() => setScope('selected')}
+                  />
+                  Selected ({selectedCount})
+                  {selectedCount === 0 ? (
+                    <span className="text-xs text-muted-foreground">— tick rows in the list</span>
+                  ) : null}
+                </label>
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
@@ -235,7 +411,10 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
                     onChange={() => setScope('all')}
                   />
                   All matching filters ({totalCount.toLocaleString()}
-                  {totalCount > EXPORT_MAX_ROWS ? `, capped at ${EXPORT_MAX_ROWS.toLocaleString()}` : ''})
+                  {totalCount > EXPORT_MAX_ROWS
+                    ? `, capped at ${EXPORT_MAX_ROWS.toLocaleString()}`
+                    : ''}
+                  )
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -261,7 +440,23 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
             </div>
 
             <div className="space-y-2">
-              <Label>Columns</Label>
+              <Label htmlFor="export-name">Sheet name</Label>
+              <Input
+                id="export-name"
+                value={exportName}
+                onChange={(e) => setExportName(e.target.value)}
+                placeholder={defaultExportName()}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for the download filename. If the export is a single customer, this
+                is also the Excel tab name; with multiple customers, each tab stays named
+                after that customer.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>WorkWise columns</Label>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
                 {EXPORT_COLUMNS.map((c) => (
                   <label key={c.key} className="flex items-center gap-2">
@@ -275,6 +470,10 @@ export function ExportJobsButton({ jobs, totalCount, filters }: ExportJobsButton
                   </label>
                 ))}
               </div>
+              <p className="text-xs text-muted-foreground">
+                Each job’s spreadsheet fields are included automatically. The workbook uses
+                one tab per customer so different layouts stay separate.
+              </p>
             </div>
           </div>
 

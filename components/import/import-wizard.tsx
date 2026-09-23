@@ -273,7 +273,8 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
 
   /**
    * Ask for grouping columns alongside extraction — saved choice for a
-   * returning customer, otherwise one AI suggestion — and pre-tick them.
+   * returning customer, otherwise one trade-neutral AI suggestion — and
+   * pre-tick them.
    */
   const runGroupingSuggestion = useCallback(
     async (rows: Record<string, string>[], forCustomerId: string) => {
