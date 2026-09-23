@@ -93,6 +93,11 @@ export interface ExportJobRow extends JobRow {
   arrived_at: string | null;
   completed_at: string | null;
   completion_notes: string | null;
+  /**
+   * When the job entered its *current* status — from `job_status_history`,
+   * with fallbacks to `completed_at` / `started_at` when history is missing.
+   */
+  status_set_at: string | null;
 }
 
 /** Dashboard-style counts for the jobs list summary bar (excludes cancelled). */
@@ -525,21 +530,88 @@ export async function getJobsForExport(
       return { jobs: [], error: new Error(error.message ?? 'Failed to load jobs for export') };
     }
 
-    const jobs: ExportJobRow[] = (Array.isArray(data) ? data : []).map(
+    const baseJobs: ExportJobRow[] = (Array.isArray(data) ? data : []).map(
       (row: Record<string, unknown>) => ({
         ...mapJobRow(row),
         started_at: (row.started_at as string | null) ?? null,
         arrived_at: (row.arrived_at as string | null) ?? null,
         completed_at: (row.completed_at as string | null) ?? null,
         completion_notes: (row.completion_notes as string | null) ?? null,
+        status_set_at: null,
       })
     );
+
+    const statusSetAtByJobId = await loadStatusSetAtTimes(
+      supabase,
+      baseJobs.map((j) => ({ id: j.id, status: j.status }))
+    );
+
+    const jobs: ExportJobRow[] = baseJobs.map((job) => {
+      const fromHistory = statusSetAtByJobId.get(job.id) ?? null;
+      const fallback =
+        job.status === 'completed'
+          ? job.completed_at
+          : job.status === 'in_progress' || job.status === 'paused'
+            ? job.started_at ?? job.arrived_at
+            : null;
+      return {
+        ...job,
+        status_set_at: fromHistory ?? fallback ?? null,
+      };
+    });
 
     return { jobs, error: null };
   } catch (err) {
     console.error('[getJobsForExport] Unexpected error:', err);
     return { jobs: [], error: toError(err) };
   }
+}
+
+const EXPORT_HISTORY_CHUNK = 150;
+
+/**
+ * Latest `job_status_history.created_at` where `to_status` matches each job's
+ * current status — one timestamp that works for completed, cancelled, declined,
+ * paused, in progress, etc.
+ */
+async function loadStatusSetAtTimes(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  jobs: Array<{ id: string; status: JobStatus | null }>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const jobIds = jobs.map((j) => j.id).filter(Boolean);
+  if (jobIds.length === 0) return out;
+
+  const statusById = new Map(
+    jobs.filter((j) => j.status).map((j) => [j.id, j.status as JobStatus])
+  );
+
+  for (let i = 0; i < jobIds.length; i += EXPORT_HISTORY_CHUNK) {
+    const chunk = jobIds.slice(i, i + EXPORT_HISTORY_CHUNK);
+    const { data, error } = await supabase
+      .from('job_status_history')
+      .select('job_id, to_status, created_at')
+      .in('job_id', chunk)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[loadStatusSetAtTimes]', error);
+      continue;
+    }
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const jobId = (row as { job_id?: string | null }).job_id;
+      const toStatus = (row as { to_status?: string | null }).to_status;
+      const createdAt = (row as { created_at?: string | null }).created_at;
+      if (!jobId || !toStatus || !createdAt) continue;
+      if (out.has(jobId)) continue;
+      if (statusById.get(jobId) !== toStatus) continue;
+      out.set(jobId, createdAt);
+    }
+  }
+
+  return out;
 }
 
 /**

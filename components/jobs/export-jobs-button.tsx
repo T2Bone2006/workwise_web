@@ -32,10 +32,8 @@ interface ExportJobsButtonProps {
   selectedIds?: string[];
 }
 
-/** Rows exported may come from the current page (JobRow, no lifecycle timestamps) or a
- * server fetch (ExportJobRow) — columns that need the latter degrade to blank for page scope. */
-type ExportableRow = JobRow &
-  Partial<Pick<ExportJobRow, 'started_at' | 'arrived_at' | 'completed_at' | 'completion_notes'>>;
+/** Full export rows always come from the server so lifecycle timestamps are present. */
+type ExportableRow = ExportJobRow;
 
 function formatDateForExport(value: string | null | undefined): string {
   if (!value) return '';
@@ -87,17 +85,17 @@ const EXPORT_COLUMNS: {
     label: 'Status',
     get: (j) => (j.status ? (JOB_STATUS_DISPLAY[j.status]?.label ?? j.status) : ''),
   },
+  {
+    key: 'status_set_at',
+    label: 'Status set at',
+    get: (j) => formatDateTimeForExport(j.status_set_at),
+  },
   { key: 'worker_name', label: 'Assigned To', get: (j) => j.worker_name ?? 'Unassigned' },
   { key: 'scheduled_date', label: 'Scheduled Date', get: (j) => formatDateForExport(j.scheduled_date) },
   {
     key: 'start_time',
     label: 'Start Time',
     get: (j) => formatDateTimeForExport(j.started_at ?? j.arrived_at),
-  },
-  {
-    key: 'completed_at',
-    label: 'Completion Date & Time',
-    get: (j) => formatDateTimeForExport(j.completed_at),
   },
   { key: 'completion_notes', label: 'Completion Notes', get: (j) => j.completion_notes ?? '' },
 ];
@@ -241,6 +239,17 @@ export function ExportJobsButton({
     if (selectedCount > 0) setScope('selected');
     else setScope(totalCount > jobs.length ? 'all' : 'page');
     setExportName(defaultExportName());
+    setSelectedColumns((prev) => {
+      const valid = new Set(EXPORT_COLUMNS.map((c) => c.key));
+      const next = new Set([...prev].filter((k) => valid.has(k)));
+      // Always default this on — one column for whatever the current status is.
+      next.add('status_set_at');
+      // First open / empty state: all WorkWise columns on.
+      if (next.size <= 1) {
+        for (const key of valid) next.add(key);
+      }
+      return next;
+    });
     setOpen(true);
   };
 
@@ -269,7 +278,19 @@ export function ExportJobsButton({
       let rows: ExportableRow[];
 
       if (scope === 'page') {
-        rows = jobs;
+        const pageIds = jobs.map((j) => j.id);
+        const result = await getJobsForExportAction(
+          { ...filters, job_ids: pageIds },
+          { type: 'all' }
+        );
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+        const byId = new Map(result.jobs.map((j) => [j.id, j]));
+        rows = pageIds
+          .map((id) => byId.get(id))
+          .filter((j): j is ExportJobRow => !!j);
       } else if (scope === 'selected') {
         const result = await getJobsForExportAction(
           { ...filters, job_ids: selectedIds },
