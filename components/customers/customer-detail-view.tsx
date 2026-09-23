@@ -27,6 +27,7 @@ import type { RecentJobRow } from '@/lib/data/jobs';
 import {
   getCustomerPortalInviteState,
   inviteCustomerToPortal,
+  resendCustomerInvite,
 } from '@/lib/actions/customers';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
@@ -66,7 +67,9 @@ export function CustomerDetailView({
 }: CustomerDetailViewProps) {
   const router = useRouter();
   const [isInviting, setIsInviting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [canInviteToPortal, setCanInviteToPortal] = useState(false);
+  const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
 
   const isBulk = customer.type === 'bulk_client';
 
@@ -79,10 +82,15 @@ export function CustomerDetailView({
 
       if (!state.success) {
         setCanInviteToPortal(false);
+        setPendingInviteId(null);
         return;
       }
 
-      setCanInviteToPortal(state.hasEmail && !state.hasPortalUser);
+      setPendingInviteId(state.pendingInviteId ?? null);
+      // Invite when not yet accepted and nothing pending. Resend when pending.
+      setCanInviteToPortal(
+        Boolean(state.hasEmail && !state.pendingInviteId && !state.hasAcceptedInvite)
+      );
     }
 
     void loadPortalInviteState();
@@ -100,11 +108,39 @@ export function CustomerDetailView({
     if (result.success) {
       toast.success('Portal invite sent');
       setCanInviteToPortal(false);
+      const state = await getCustomerPortalInviteState(customer.id);
+      if (state.success) {
+        setPendingInviteId(state.pendingInviteId ?? null);
+      }
       router.refresh();
       return;
     }
 
     toast.error(result.error ?? 'Failed to send portal invite');
+  };
+
+  const handleResendInvite = async () => {
+    if (!pendingInviteId) {
+      // Fallback: mint a fresh invite if state is stale.
+      await handleInviteToPortal();
+      return;
+    }
+
+    setIsResending(true);
+    const result = await resendCustomerInvite(pendingInviteId);
+    setIsResending(false);
+
+    if (result.success) {
+      toast.success('Invitation resent');
+      const state = await getCustomerPortalInviteState(customer.id);
+      if (state.success) {
+        setPendingInviteId(state.pendingInviteId ?? null);
+      }
+      router.refresh();
+      return;
+    }
+
+    toast.error(result.error ?? 'Failed to resend invitation');
   };
 
   return (
@@ -312,6 +348,21 @@ export function CustomerDetailView({
               >
                 {isInviting ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
                 Invite to Portal
+              </Button>
+            )}
+            {pendingInviteId && (
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-2"
+                onClick={() => void handleResendInvite()}
+                disabled={isResending || isInviting}
+              >
+                {isResending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Mail className="size-4" />
+                )}
+                Resend Invitation
               </Button>
             )}
           </CardContent>

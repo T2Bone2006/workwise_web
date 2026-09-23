@@ -67,6 +67,12 @@ export async function middleware(request: NextRequest) {
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
   const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
   const isPortalLogin = pathname === '/portal/login';
+  const isPortalForgotPassword =
+    pathname === '/portal/forgot-password' || pathname.startsWith('/portal/forgot-password/');
+  const isPortalResetPassword =
+    pathname === '/portal/reset-password' || pathname.startsWith('/portal/reset-password/');
+  const isPortalAuthRoute =
+    isPortalLogin || isPortalAcceptInvite || isPortalForgotPassword || isPortalResetPassword;
 
   if (!isAuthenticated && isDashboard) {
     const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
@@ -74,7 +80,7 @@ export async function middleware(request: NextRequest) {
     return redirectResponse;
   }
 
-  if (!isAuthenticated && isPortalPage && !isPortalAcceptInvite && !isPortalLogin) {
+  if (!isAuthenticated && isPortalPage && !isPortalAuthRoute) {
     const redirectResponse = NextResponse.redirect(new URL('/portal/login', request.url));
     copyCookiesToResponse(response, redirectResponse);
     return redirectResponse;
@@ -128,7 +134,7 @@ export async function middleware(request: NextRequest) {
         return response;
       }
 
-      if (isCustomerPortal && !isPortalPage && !isPortalAcceptInvite) {
+      if (isCustomerPortal && !isPortalPage) {
         const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
         copyCookiesToResponse(response, redirectResponse);
         return redirectResponse;

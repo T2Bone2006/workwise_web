@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -108,7 +109,15 @@ export default function PortalLoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="portal-password">Password</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="portal-password">Password</Label>
+                <Link
+                  href="/portal/forgot-password"
+                  className="text-xs text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="portal-password"
                 type="password"

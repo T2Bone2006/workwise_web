@@ -125,38 +125,49 @@ export async function logout(
   }
 }
 
-export async function requestAdminPasswordReset(email: string) {
+const APP_ORIGIN = 'https://app.joinworkwise.com';
+
+type PasswordResetRole = 'worker' | 'customer_portal' | string;
+
+function resetPathForRole(role: PasswordResetRole): {
+  path: string;
+  audience: 'admin' | 'worker' | 'portal';
+} {
+  if (role === 'worker') {
+    return { path: '/reset-password', audience: 'worker' };
+  }
+  if (role === 'customer_portal') {
+    return { path: '/portal/reset-password', audience: 'portal' };
+  }
+  return { path: '/admin-reset-password', audience: 'admin' };
+}
+
+/**
+ * Escape LIKE/ILIKE wildcards so email lookups stay exact (case-insensitive only).
+ */
+function escapeIlikeExact(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+async function createAndSendPasswordReset({
+  admin,
+  userId,
+  email,
+  recipientName,
+  role,
+  logPrefix,
+}: {
+  admin: ReturnType<typeof createAdminClient>;
+  userId: string;
+  email: string;
+  recipientName: string;
+  role: PasswordResetRole;
+  logPrefix: string;
+}): Promise<{ success: true } | { success: false; error: string }> {
   const emailNorm = email.trim().toLowerCase();
-  if (!emailNorm) {
-    return { success: true as const };
-  }
-
-  let admin;
-  try {
-    admin = createAdminClient();
-  } catch (e) {
-    console.error('[requestAdminPasswordReset] admin client:', e);
-    return { success: false as const, error: 'Server configuration error' };
-  }
-
-  const { data: userRecord, error: userError } = await admin
-    .from('users')
-    .select('id, role, full_name')
-    .eq('email', emailNorm)
-    .maybeSingle();
-
-  if (userError) {
-    console.error('[requestAdminPasswordReset] lookup user:', userError);
-    return { success: false as const, error: 'Failed to process password reset' };
-  }
-
-  if (!userRecord || userRecord.role === 'customer_portal' || userRecord.role === 'worker') {
-    return { success: true as const };
-  }
-
-  const userId = userRecord.id;
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const { path, audience } = resetPathForRole(role);
 
   const { error: deleteOldTokensError } = await admin
     .from('password_resets')
@@ -165,8 +176,8 @@ export async function requestAdminPasswordReset(email: string) {
     .is('used_at', null);
 
   if (deleteOldTokensError) {
-    console.error('[requestAdminPasswordReset] delete existing tokens:', deleteOldTokensError);
-    return { success: false as const, error: 'Failed to process password reset' };
+    console.error(`[${logPrefix}] delete existing tokens:`, deleteOldTokensError);
+    return { success: false, error: 'Failed to process password reset' };
   }
 
   const { error: insertTokenError } = await admin.from('password_resets').insert({
@@ -177,30 +188,83 @@ export async function requestAdminPasswordReset(email: string) {
   });
 
   if (insertTokenError) {
-    console.error('[requestAdminPasswordReset] insert token:', insertTokenError);
-    return { success: false as const, error: 'Failed to process password reset' };
+    console.error(`[${logPrefix}] insert token:`, insertTokenError);
+    return { success: false, error: 'Failed to process password reset' };
   }
 
-  const resetUrl = `https://app.joinworkwise.com/admin-reset-password?token=${token}`;
+  const resetUrl = `${APP_ORIGIN}${path}?token=${token}`;
   const { subject, html } = buildPasswordResetEmail({
-    recipientName: userRecord.full_name ?? 'there',
+    recipientName,
     resetUrl,
-    isWorker: false,
+    audience,
   });
 
   try {
-    await resend.emails.send({
+    const { error: resendError } = await resend.emails.send({
       from: FROM_EMAIL,
       to: emailNorm,
       subject,
       html,
     });
+    if (resendError) {
+      console.error(`[${logPrefix}] resend:`, resendError);
+      return { success: false, error: 'Failed to send reset email' };
+    }
   } catch (e) {
-    console.error('[requestAdminPasswordReset] resend:', e);
-    return { success: false as const, error: 'Failed to send reset email' };
+    console.error(`[${logPrefix}] resend:`, e);
+    return { success: false, error: 'Failed to send reset email' };
   }
 
-  return { success: true as const };
+  return { success: true };
+}
+
+/**
+ * Self-serve password reset for office, portal, and worker accounts.
+ * Unknown emails still return success (no account enumeration).
+ */
+export async function requestPasswordReset(email: string) {
+  const emailNorm = email.trim().toLowerCase();
+  if (!emailNorm) {
+    return { success: true as const };
+  }
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    console.error('[requestPasswordReset] admin client:', e);
+    return { success: false as const, error: 'Server configuration error' };
+  }
+
+  const { data: userRecord, error: userError } = await admin
+    .from('users')
+    .select('id, role, full_name, email')
+    .ilike('email', escapeIlikeExact(emailNorm))
+    .maybeSingle();
+
+  if (userError) {
+    console.error('[requestPasswordReset] lookup user:', userError);
+    return { success: false as const, error: 'Failed to process password reset' };
+  }
+
+  // Silent success — don't reveal whether the account exists.
+  if (!userRecord) {
+    return { success: true as const };
+  }
+
+  return createAndSendPasswordReset({
+    admin,
+    userId: userRecord.id,
+    email: userRecord.email ?? emailNorm,
+    recipientName: userRecord.full_name ?? 'there',
+    role: userRecord.role ?? 'admin',
+    logPrefix: 'requestPasswordReset',
+  });
+}
+
+/** @deprecated Prefer `requestPasswordReset`. */
+export async function requestAdminPasswordReset(email: string) {
+  return requestPasswordReset(email);
 }
 
 export async function requestWorkerPasswordReset(workerId: string) {
@@ -252,49 +316,22 @@ export async function requestWorkerPasswordReset(workerId: string) {
     return { success: false as const, error: 'Server configuration error' };
   }
 
-  const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-  const { error: deleteOldTokensError } = await admin
-    .from('password_resets')
-    .delete()
-    .eq('user_id', worker.user_id)
-    .is('used_at', null);
-
-  if (deleteOldTokensError) {
-    console.error('[requestWorkerPasswordReset] delete existing tokens:', deleteOldTokensError);
-    return { success: false as const, error: 'Failed to send password reset email' };
-  }
-
-  const { error: insertTokenError } = await admin.from('password_resets').insert({
-    token,
-    user_id: worker.user_id,
+  const result = await createAndSendPasswordReset({
+    admin,
+    userId: worker.user_id,
     email: worker.email,
-    expires_at: expiresAt,
+    recipientName: worker.full_name ?? 'there',
+    role: 'worker',
+    logPrefix: 'requestWorkerPasswordReset',
   });
 
-  if (insertTokenError) {
-    console.error('[requestWorkerPasswordReset] insert token:', insertTokenError);
-    return { success: false as const, error: 'Failed to send password reset email' };
-  }
-
-  const resetUrl = `https://app.joinworkwise.com/reset-password?token=${token}`;
-  const { subject, html } = buildPasswordResetEmail({
-    recipientName: worker.full_name,
-    resetUrl,
-    isWorker: true,
-  });
-
-  try {
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to: worker.email,
-      subject,
-      html,
-    });
-  } catch (e) {
-    console.error('[requestWorkerPasswordReset] resend:', e);
-    return { success: false as const, error: 'Failed to send password reset email' };
+  if (!result.success) {
+    return {
+      success: false as const,
+      error: result.error === 'Failed to send reset email'
+        ? 'Failed to send password reset email'
+        : result.error,
+    };
   }
 
   return { success: true as const };
