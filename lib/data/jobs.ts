@@ -495,6 +495,10 @@ export async function getJobsForExport(
   limit?: number
 ): Promise<{ jobs: ExportJobRow[]; error: Error | null }> {
   try {
+    if (filters.job_ids && filters.job_ids.length === 0) {
+      return { jobs: [], error: null };
+    }
+
     const supabase = await createClient();
     const cappedLimit = Math.min(limit && limit > 0 ? limit : EXPORT_MAX_ROWS, EXPORT_MAX_ROWS);
 

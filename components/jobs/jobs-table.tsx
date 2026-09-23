@@ -1218,7 +1218,12 @@ export function JobsTable({
                     />
                   )}
                   {showOfficeTools && (
-                    <ExportJobsButton jobs={initialJobs} totalCount={totalCount} filters={initialFilters} />
+                    <ExportJobsButton
+                      jobs={initialJobs}
+                      totalCount={totalCount}
+                      filters={initialFilters}
+                      selectedIds={Array.from(selectedIds)}
+                    />
                   )}
                 </div>
               </div>
