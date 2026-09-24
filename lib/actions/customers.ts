@@ -126,7 +126,7 @@ export async function createRoundsCustomer(formData: FormData) {
   formData.set('type', 'individual');
   const result = await createCustomer(formData);
   if (result.success) {
-    revalidatePath('/rounds/customers');
+    revalidatePath('/customers');
   }
   return result;
 }
@@ -226,8 +226,8 @@ export async function updateCustomer(customerId: string, formData: FormData) {
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
   revalidatePath(`/customers/${customerId}/edit`);
-  revalidatePath('/rounds/customers');
-  revalidatePath(`/rounds/customers/${customerId}`);
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
   return { success: true };
 }
 
@@ -407,6 +407,8 @@ export async function deactivateCustomer(customerId: string) {
     }
   }
 
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
   return { success: true };

@@ -30,14 +30,14 @@ describe('foldVisitCounts', () => {
   it('buckets total / done / skipped by day; cancelled is skipped', () => {
     expect(
       foldVisitCounts([
-        { scheduled_date: '2026-09-18', status: 'assigned' },
-        { scheduled_date: '2026-09-18', status: 'completed' },
-        { scheduled_date: '2026-09-18', status: 'cancelled' },
-        { scheduled_date: '2026-09-19', status: 'assigned' },
+        { scheduled_date: '2026-09-18', status: 'assigned', quoted_amount: 12 },
+        { scheduled_date: '2026-09-18', status: 'completed', quoted_amount: 18 },
+        { scheduled_date: '2026-09-18', status: 'cancelled', quoted_amount: 40 },
+        { scheduled_date: '2026-09-19', status: 'assigned', quoted_amount: '9.50' },
       ]),
     ).toEqual({
-      '2026-09-18': { total: 3, done: 1, skipped: 1 },
-      '2026-09-19': { total: 1, done: 0, skipped: 0 },
+      '2026-09-18': { total: 3, done: 1, skipped: 1, plannedAmount: 30 },
+      '2026-09-19': { total: 1, done: 0, skipped: 0, plannedAmount: 9.5 },
     });
   });
 });

@@ -25,6 +25,7 @@ interface SettingsViewProps {
   initialTenantSkills: TenantSkillRow[];
   billing: BillingSummary;
   rounds?: { settings: RoundsSettings } | null;
+  showSkills: boolean;
 }
 
 const baseTabs = [
@@ -39,6 +40,7 @@ export function SettingsView({
   initialTenantSkills,
   billing,
   rounds = null,
+  showSkills,
 }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
@@ -91,6 +93,7 @@ export function SettingsView({
           <SettingsCompanyTab
             data={initialData}
             initialTenantSkills={initialTenantSkills}
+            showSkills={showSkills}
             onSaved={onSaved}
           />
         </TabsContent>

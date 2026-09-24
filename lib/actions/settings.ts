@@ -2,11 +2,12 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import type {
-  TenantSettings,
-  IntegrationsSettings,
-  NotificationsSettings,
-  IndustryOption,
+import {
+  INDUSTRIES,
+  type TenantSettings,
+  type IntegrationsSettings,
+  type NotificationsSettings,
+  type IndustryOption,
 } from '@/lib/data/settings-types';
 
 async function getTenantId(): Promise<string | null> {
@@ -39,8 +40,9 @@ export async function updateCompanySettings(formData: FormData): Promise<{ succe
   const email = (formData.get('email') as string)?.trim() || undefined;
   const address = (formData.get('address') as string)?.trim() || undefined;
 
-  const validIndustries: IndustryOption[] = ['Locksmith', 'Plumbing', 'Electrical', 'HVAC', 'General'];
-  const industryValue = industry && validIndustries.includes(industry) ? industry : undefined;
+  const industryValue = (INDUSTRIES as readonly string[]).includes(industry ?? '')
+    ? (industry as IndustryOption)
+    : undefined;
 
   const { data: tenant } = await supabase
     .from('tenants')

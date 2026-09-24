@@ -5,12 +5,43 @@
 
 import type { RoundsSettings } from '@/lib/rounds/settings';
 
-export type IndustryOption =
-  | 'Locksmith'
-  | 'Plumbing'
-  | 'Electrical'
-  | 'HVAC'
-  | 'General';
+export const INDUSTRIES = [
+  'Appliance repair',
+  'Building',
+  'Carpentry',
+  'Carpet cleaning',
+  'Chimney sweep',
+  'Cleaning',
+  'Dog walking',
+  'Driveways and patios',
+  'Electrical',
+  'Fencing',
+  'Gardening',
+  'Glazing',
+  'Gutter cleaning',
+  'Handyman',
+  'Heating',
+  'HVAC',
+  'Landscaping',
+  'Locksmith',
+  'Mobile mechanic',
+  'Oven cleaning',
+  'Painting and decorating',
+  'Pest control',
+  'Plastering',
+  'Plumbing',
+  'Pressure washing',
+  'Roofing',
+  'Security and alarms',
+  'Tiling',
+  'Tree surgery',
+  'Vehicle valeting',
+  'Waste removal',
+  'Window cleaning',
+  'General',
+] as const;
+
+export type IndustryOption = (typeof INDUSTRIES)[number];
 
 export interface TenantSettingsCompany {
   industry?: IndustryOption;

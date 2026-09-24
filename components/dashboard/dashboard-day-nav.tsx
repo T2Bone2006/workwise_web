@@ -50,7 +50,7 @@ export function DashboardDayNav({ selectedDate }: { selectedDate: string }) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
       <Button
         type="button"
         variant="outline"
@@ -67,10 +67,15 @@ export function DashboardDayNav({ selectedDate }: { selectedDate: string }) {
           <Button
             type="button"
             variant="outline"
-            className={cn('min-w-[12.5rem] justify-start gap-2 font-medium')}
+            className={cn(
+              'min-w-0 flex-1 justify-start gap-2 font-medium sm:min-w-[12.5rem] sm:flex-none',
+            )}
           >
-            <CalendarIcon className="size-4 text-muted-foreground" />
-            {format(day, 'EEE d MMM yyyy')}
+            <CalendarIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate sm:hidden">{format(day, 'EEE d MMM')}</span>
+            <span className="hidden truncate sm:inline">
+              {format(day, 'EEE d MMM yyyy')}
+            </span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
@@ -102,7 +107,7 @@ export function DashboardDayNav({ selectedDate }: { selectedDate: string }) {
         type="button"
         variant={isToday ? 'secondary' : 'ghost'}
         size="sm"
-        className="h-9"
+        className="h-9 shrink-0"
         disabled={isToday}
         onClick={() => goTo(today)}
       >

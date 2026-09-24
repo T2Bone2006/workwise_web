@@ -45,10 +45,10 @@ function emptyToNull(value: string | null | undefined): string | null {
 }
 
 function revalidateVisits(customerId?: string | null) {
-  revalidatePath('/rounds');
   revalidatePath('/dashboard');
-  revalidatePath('/rounds/calendar');
-  if (customerId) revalidatePath(`/rounds/customers/${customerId}`);
+  revalidatePath('/calendar');
+  revalidatePath('/customers');
+  if (customerId) revalidatePath(`/customers/${customerId}`);
 }
 
 async function requireActor(): Promise<

@@ -4,10 +4,6 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import {
-  SERVICE_PRESETS,
-  type ServicePreset,
-} from '@/lib/rounds/service-catalog-presets';
 import { serviceSchema, type ServiceInput } from '@/lib/validations/rounds/service';
 
 export type ActionResult = { success: true } | { success: false; error: string };
@@ -23,7 +19,7 @@ function isUniqueViolation(error: { code?: string } | null): boolean {
 }
 
 function revalidateCatalog() {
-  revalidatePath('/rounds/services');
+  revalidatePath('/services');
   revalidatePath('/rounds');
   revalidatePath('/dashboard');
 }
@@ -152,23 +148,46 @@ export async function deactivateService(id: string): Promise<ActionResult> {
   return { success: true };
 }
 
+const groupKeySchema = z.string().regex(/^[a-z_]+$/, 'Unknown preset group');
+
 export async function addServicePresets(
-  group: keyof typeof SERVICE_PRESETS,
-): Promise<{ success: true; added: number } | { success: false; error: string }> {
+  group: string,
+): Promise<{ success: true; added: number; label: string } | { success: false; error: string }> {
   const tenantId = await getTenantIdForCurrentUser();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
-  const presetGroup = SERVICE_PRESETS[group];
-  if (!presetGroup) return { success: false, error: 'Unknown preset group' };
+  const groupParsed = groupKeySchema.safeParse(group);
+  if (!groupParsed.success) return { success: false, error: firstZodError(groupParsed.error) };
 
   const supabase = await createClient();
+  const { data: presetGroup, error: groupError } = await supabase
+    .from('service_preset_groups')
+    .select('label, service_presets(name, default_price, default_duration_minutes, default_frequency_days, sort_order)')
+    .eq('key', groupParsed.data)
+    .maybeSingle();
+
+  if (groupError) {
+    console.error('[addServicePresets]', groupError);
+    return { success: false, error: groupError.message };
+  }
+  if (!presetGroup) return { success: false, error: 'Unknown preset group' };
+
+  const label = typeof presetGroup.label === 'string' ? presetGroup.label : 'Presets';
+  const presets = Array.isArray(presetGroup.service_presets)
+    ? [...presetGroup.service_presets].sort(
+        (a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0),
+      )
+    : [];
+  if (presets.length === 0) return { success: true, added: 0, label };
+
   const sortOrder = await nextSortOrder(supabase, tenantId);
-  const rows = presetGroup.services.map((preset: ServicePreset, index: number) => ({
+  const rows = presets.map((preset, index) => ({
     tenant_id: tenantId,
-    name: preset.name,
-    default_price: preset.default_price,
-    default_duration_minutes: preset.default_duration_minutes,
-    default_frequency_days: preset.default_frequency_days,
+    name: String(preset.name),
+    default_price: Number(preset.default_price),
+    default_duration_minutes: Number(preset.default_duration_minutes),
+    default_frequency_days:
+      preset.default_frequency_days == null ? null : Number(preset.default_frequency_days),
     is_active: true,
     sort_order: sortOrder + index,
   }));
@@ -184,5 +203,5 @@ export async function addServicePresets(
   }
 
   revalidateCatalog();
-  return { success: true, added: data?.length ?? 0 };
+  return { success: true, added: data?.length ?? 0, label };
 }

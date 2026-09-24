@@ -67,14 +67,14 @@ function buildNavSections(features: TenantFeatures): NavSection[] {
     { href: '/import', label: 'Import', icon: Upload, show: true },
   ];
   const rounds: NavItem[] = [
-    { href: '/rounds/customers', label: 'Customers', icon: Route, show: true },
-    { href: '/rounds/calendar', label: 'Calendar', icon: CalendarDays, show: true },
-    { href: '/rounds/services', label: 'Services', icon: Wrench, show: true },
-    { href: '/rounds/import', label: 'Import', icon: Upload, show: true },
-    { href: '/rounds/payments', label: 'Payments', icon: Wallet, show: true },
-    { href: '/rounds/bank', label: 'Bank', icon: Landmark, show: true },
-    { href: '/rounds/messages', label: 'Messages', icon: MessageSquare, show: true },
-    { href: '/rounds/expenses', label: 'Expenses', icon: Receipt, show: true },
+    { href: '/customers', label: 'Customers', icon: Route, show: true },
+    { href: '/calendar', label: 'Calendar', icon: CalendarDays, show: true },
+    { href: '/services', label: 'Services', icon: Wrench, show: true },
+    // Import deferred — early customers onboarded manually as a service.
+    { href: '/payments', label: 'Payments', icon: Wallet, show: true },
+    { href: '/bank', label: 'Bank', icon: Landmark, show: true },
+    { href: '/messages', label: 'Messages', icon: MessageSquare, show: true },
+    { href: '/expenses', label: 'Expenses', icon: Receipt, show: true },
   ];
   const lite: NavItem[] = [
     { href: '/lite', label: 'Leads', icon: Bot, show: true },

@@ -1,8 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { usesProCrm, usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
 import { CustomerForm } from '@/components/customers/customer-form';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
 
 function NoTenantMessage() {
   return (
@@ -16,17 +19,47 @@ function NoTenantMessage() {
 }
 
 export default async function NewCustomerPage() {
-  const tenantId = await getTenantIdForCurrentUser();
+  const [tenantId, products] = await Promise.all([
+    getTenantIdForCurrentUser(),
+    getTenantProducts(),
+  ]);
 
   if (!tenantId) {
     return <NoTenantMessage />;
+  }
+
+  if (usesRoundsCrm(products)) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild aria-label="Back to customers">
+            <Link href={paths.customers}>
+              <ArrowLeft className="size-4" />
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Add customer
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Name and contact first — you&apos;ll add their service on the next screen.
+            </p>
+          </div>
+        </div>
+        <CustomerForm mode="create" variant="rounds" tenantId={tenantId} />
+      </div>
+    );
+  }
+
+  if (!usesProCrm(products)) {
+    redirect('/dashboard');
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild aria-label="Back to customers">
-          <Link href="/customers">
+          <Link href={paths.customers}>
             <ArrowLeft className="size-4" />
           </Link>
         </Button>
@@ -39,7 +72,6 @@ export default async function NewCustomerPage() {
           </p>
         </div>
       </div>
-
       <CustomerForm mode="create" tenantId={tenantId} />
     </div>
   );

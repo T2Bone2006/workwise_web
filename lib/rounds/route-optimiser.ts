@@ -15,6 +15,7 @@ function hasCoords(stop: RouteStop): stop is GeoStop {
 export function routeDistanceKm(
   start: RoutePoint | null,
   orderedStops: RoutePoint[],
+  end: RoutePoint | null = null,
 ): number {
   if (orderedStops.length === 0) return 0;
 
@@ -26,6 +27,10 @@ export function routeDistanceKm(
       distance += haversineDistance(prev.lat, prev.lng, stop.lat, stop.lng);
     }
     prev = stop;
+  }
+
+  if (end && prev) {
+    distance += haversineDistance(prev.lat, prev.lng, end.lat, end.lng);
   }
 
   return distance;
@@ -92,9 +97,13 @@ function reverseSegment<T>(items: T[], from: number, to: number): T[] {
   return next;
 }
 
-function twoOpt(start: RoutePoint | null, stops: GeoStop[]): GeoStop[] {
+function twoOpt(
+  start: RoutePoint | null,
+  stops: GeoStop[],
+  end: RoutePoint | null,
+): GeoStop[] {
   let order = stops;
-  let bestDistance = routeDistanceKm(start, order);
+  let bestDistance = routeDistanceKm(start, order, end);
 
   for (let pass = 0; pass < TWO_OPT_MAX_PASSES; pass++) {
     let improved = false;
@@ -104,7 +113,7 @@ function twoOpt(start: RoutePoint | null, stops: GeoStop[]): GeoStop[] {
     for (let i = 0; i < order.length - 1; i++) {
       for (let j = i + 1; j < order.length; j++) {
         const candidate = reverseSegment(order, i, j);
-        const distance = routeDistanceKm(start, candidate);
+        const distance = routeDistanceKm(start, candidate, end);
         if (distance + IMPROVEMENT_EPS < passBestDistance) {
           passBestDistance = distance;
           passBestOrder = candidate;
@@ -124,6 +133,7 @@ function twoOpt(start: RoutePoint | null, stops: GeoStop[]): GeoStop[] {
 export function optimiseRoute(
   start: RoutePoint | null,
   stops: RouteStop[],
+  end: RoutePoint | null = null,
 ): { order: string[]; distanceKm: number } {
   const withCoords: GeoStop[] = [];
   const withoutCoords: RouteStop[] = [];
@@ -136,9 +146,9 @@ export function optimiseRoute(
     }
   }
 
-  const improved = twoOpt(start, nearestNeighbour(start, withCoords));
+  const improved = twoOpt(start, nearestNeighbour(start, withCoords), end);
   return {
     order: [...improved.map((stop) => stop.id), ...withoutCoords.map((stop) => stop.id)],
-    distanceKm: routeDistanceKm(start, improved),
+    distanceKm: routeDistanceKm(start, improved, end),
   };
 }

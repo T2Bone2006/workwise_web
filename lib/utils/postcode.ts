@@ -1,6 +1,29 @@
 /** Valid UK postcode without spaces (M3, BL3, WN1, SW1A, etc.). */
 const UK_POSTCODE_REGEX = /^[A-Z]{1,2}\d{1,2}[A-Z]?\d[A-Z]{2}$/;
 
+/**
+ * First part of a UK postcode (the outward code). Falls back to the text
+ * before the first space when the value is not a full postcode.
+ */
+export function ukPostcodeOutward(raw: string): string {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/\s+/g, '');
+  const full = compact.match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)(\d[A-Z]{2})$/);
+  if (full) return full[1]!;
+  const head = trimmed.split(/\s+/)[0] ?? '';
+  return head;
+}
+
+/** True when `postcode` sits in an area described by `area` (outward code or a shorter prefix such as SW). */
+export function postcodeMatchesArea(postcode: string, area: string): boolean {
+  const token = area.trim().toUpperCase().replace(/\s+/g, '');
+  if (!token) return false;
+  const outward = ukPostcodeOutward(postcode);
+  const compact = postcode.trim().toUpperCase().replace(/\s+/g, '');
+  return outward === token || outward.startsWith(token) || compact.startsWith(token);
+}
+
 /** UK postcode token inside free text (outward + inward). */
 const UK_POSTCODE_IN_TEXT =
   /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2})\b/gi;

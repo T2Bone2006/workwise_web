@@ -99,6 +99,20 @@ export function frequencyLabel(days: number): string {
   return `Every ${days} days`;
 }
 
+/** A month on the wheels is 4 weeks, so 1 month and 2 weeks is 6 weeks. */
+export function frequencyParts(days: number): { months: number; weeks: number } {
+  const totalWeeks = Math.min(51, Math.max(1, Math.round(days / 7)));
+  const months = Math.min(12, Math.floor(totalWeeks / 4));
+  const weeks = totalWeeks - months * 4;
+  return { months, weeks: weeks > 3 ? 3 : weeks };
+}
+
+export function frequencyDaysFromParts(months: number, weeks: number): number {
+  const safeMonths = Math.min(12, Math.max(0, months));
+  const safeWeeks = Math.min(3, Math.max(0, weeks));
+  return Math.max(7, safeMonths * 28 + safeWeeks * 7);
+}
+
 export const FREQUENCY_PRESETS: { days: number; label: string }[] = [
   7, 14, 21, 28, 42, 56, 84, 91, 182, 365,
 ].map((days) => ({ days, label: frequencyLabel(days) }));

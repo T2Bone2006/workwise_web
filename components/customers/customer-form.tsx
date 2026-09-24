@@ -73,7 +73,7 @@ export function CustomerForm({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isRounds = variant === 'rounds';
-  const cancelHref = isRounds ? '/rounds/customers' : '/customers';
+  const cancelHref = '/customers';
 
   const form = useForm<CustomerFormInput>({
     resolver: zodResolver(customerSchema),
@@ -126,11 +126,11 @@ export function CustomerForm({
       toast.success(mode === 'create' ? 'Customer created' : 'Customer updated');
       if (isRounds) {
         if (mode === 'create' && 'id' in result && typeof result.id === 'string') {
-          router.push(`/rounds/customers/${result.id}/agreements/new?first=1`);
+          router.push(`/customers/${result.id}/agreements/new?first=1`);
         } else if (customer?.id) {
-          router.push(`/rounds/customers/${customer.id}`);
+          router.push(`/customers/${customer.id}`);
         } else {
-          router.push('/rounds/customers');
+          router.push('/customers');
         }
       } else {
         router.push('/customers');

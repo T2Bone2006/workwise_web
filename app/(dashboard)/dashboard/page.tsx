@@ -24,6 +24,7 @@ import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banne
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getRoundsHomeData } from '@/lib/data/rounds/home';
 import { RoundsHome } from '@/components/rounds/rounds-home';
 import { NoProducts } from '@/components/dashboard/no-products';
 
@@ -140,7 +141,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // Non-Pro tenants get their product's home here; /dashboard stays the one
   // URL every login lands on.
   if (products.primary === 'rounds') {
-    return <RoundsHome tenantName={tenantName} />;
+    const rawParams = await searchParams;
+    const day = parseDayParam(rawParams.date);
+    const data = await getRoundsHomeData(tenantId, day);
+    return <RoundsHome key={day} tenantName={tenantName} data={data} />;
   }
   if (products.primary === 'lite') {
     redirect('/lite');

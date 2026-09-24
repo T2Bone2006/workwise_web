@@ -13,30 +13,25 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { updateCompanySettings } from '@/lib/actions/settings';
-import type { SettingsPageData, IndustryOption } from '@/lib/data/settings-types';
+import { INDUSTRIES, type SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import { SettingsSkillsSection } from './settings-skills-section';
 import { cn } from '@/lib/utils';
 
-const INDUSTRIES: IndustryOption[] = ['Locksmith', 'Plumbing', 'Electrical', 'HVAC', 'General'];
-
 interface SettingsCompanyTabProps {
   data: SettingsPageData;
   initialTenantSkills: TenantSkillRow[];
+  /** Pro uses skills to match workers to jobs. Lite and Rounds do not. */
+  showSkills: boolean;
   onSaved: () => void;
 }
 
 export function SettingsCompanyTab({
   data,
   initialTenantSkills,
+  showSkills,
   onSaved,
 }: SettingsCompanyTabProps) {
   const [saving, setSaving] = useState(false);
@@ -44,9 +39,12 @@ export function SettingsCompanyTab({
   const company = tenant?.settings?.company ?? {};
 
   const [name, setName] = useState(tenant?.name ?? '');
-  const [industry, setIndustry] = useState<string>(tenant?.industry ?? company?.industry ?? '');
+  const storedIndustry = tenant?.industry ?? company?.industry ?? '';
+  const [industry, setIndustry] = useState(storedIndustry === 'Rounds' ? '' : storedIndustry);
   const [phone, setPhone] = useState(company?.phone ?? '');
-  const [email, setEmail] = useState(company?.email ?? '');
+  // Signup stores the address on the login, not in company settings, so the
+  // box is blank until they save. Show the login email until they set one.
+  const [email, setEmail] = useState(company?.email?.trim() || data.user?.email || '');
   const [address, setAddress] = useState(company?.address ?? '');
 
   async function handleSubmit(e: React.FormEvent) {
@@ -99,7 +97,11 @@ export function SettingsCompanyTab({
           <div>
             <span className="text-muted-foreground">Account created</span>
             <p className="text-foreground">
-              {tenant.created_at ? new Date(tenant.created_at).toLocaleDateString() : '—'}
+              {tenant.created_at
+                ? new Date(tenant.created_at).toLocaleDateString('en-GB', {
+                    timeZone: 'Europe/London',
+                  })
+                : '—'}
             </p>
           </div>
           <div>
@@ -139,18 +141,20 @@ export function SettingsCompanyTab({
           </div>
           <div className="space-y-2">
             <Label htmlFor="industry">Industry</Label>
-            <Select value={industry || undefined} onValueChange={setIndustry}>
-              <SelectTrigger id="industry" className="w-full">
-                <SelectValue placeholder="Select industry" />
-              </SelectTrigger>
-              <SelectContent>
-                {INDUSTRIES.map((ind) => (
-                  <SelectItem key={ind} value={ind}>
-                    {ind}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              id="industry"
+              value={industry || undefined}
+              onValueChange={setIndustry}
+              placeholder="Select industry"
+              searchPlaceholder="Search industries"
+              emptyText="No industry matches."
+              options={[
+                ...(industry && !(INDUSTRIES as readonly string[]).includes(industry)
+                  ? [{ value: industry, label: industry }]
+                  : []),
+                ...INDUSTRIES.map((name) => ({ value: name, label: name })),
+              ]}
+            />
           </div>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
@@ -193,11 +197,13 @@ export function SettingsCompanyTab({
       </Card>
     </form>
 
-      <SettingsSkillsSection
-        tenantId={tenant.id}
-        initialSkills={initialTenantSkills}
-        onSaved={onSaved}
-      />
+      {showSkills ? (
+        <SettingsSkillsSection
+          tenantId={tenant.id}
+          initialSkills={initialTenantSkills}
+          onSaved={onSaved}
+        />
+      ) : null}
     </div>
   );
 }

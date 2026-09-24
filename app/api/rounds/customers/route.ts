@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import {
   firstZodError,
   readJsonBody,
   requireRoundsApi,
 } from '@/lib/api/rounds-request';
+import {
+  setCustomerActiveCore,
+  updateCustomerProfileCore,
+} from '@/lib/rounds/customer-profile';
 import { createAgreementCore, jobIdsForAgreement } from '@/lib/rounds/create-agreement';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
@@ -108,4 +113,58 @@ export async function POST(request: Request) {
     agreementId: created.id,
     jobIds,
   });
+}
+
+const profileSchema = z.object({
+  customerId: z.string().uuid(),
+  name: z.string().trim().min(2).max(120),
+  phone: z.string().trim().min(7).max(30),
+  email: z.string().trim().email().optional().or(z.literal('')),
+  access_notes: z.string().trim().max(500).optional().or(z.literal('')),
+});
+
+const activeSchema = z.object({
+  customerId: z.string().uuid(),
+  is_active: z.boolean(),
+});
+
+export async function PATCH(request: Request) {
+  const auth = await requireRoundsApi(request);
+  if (!auth.ok) return auth.response;
+
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
+
+  if ('is_active' in json.body) {
+    const parsed = activeSchema.safeParse(json.body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstZodError(parsed.error) }, { status: 400 });
+    }
+    const result = await setCustomerActiveCore(auth.ctx.supabase, {
+      tenantId: auth.ctx.tenantId,
+      customerId: parsed.data.customerId,
+      active: parsed.data.is_active,
+    });
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  const parsed = profileSchema.safeParse(json.body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstZodError(parsed.error) }, { status: 400 });
+  }
+  const result = await updateCustomerProfileCore(auth.ctx.supabase, {
+    tenantId: auth.ctx.tenantId,
+    customerId: parsed.data.customerId,
+    name: parsed.data.name,
+    phone: parsed.data.phone,
+    email: parsed.data.email?.trim() ? parsed.data.email.trim() : null,
+    accessNotes: parsed.data.access_notes?.trim() ? parsed.data.access_notes.trim() : null,
+  });
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  return NextResponse.json({ ok: true });
 }

@@ -9,6 +9,7 @@ import {
   occurrencesFrom,
   oneOffReferenceNumber,
   planNextAfterCompletion,
+  forecastVisits,
   planVisits,
   shiftForWorkingDaysAndBlackouts,
   snapToPreferredWeekday,
@@ -150,6 +151,50 @@ describe('planVisits (fixed)', () => {
       visits: [],
       lastOccurrence: null,
     });
+  });
+});
+
+describe('forecastVisits', () => {
+  it('shows the next two dates when the next clean is outside the 8-week job window', () => {
+    const planned = forecastVisits(
+      agreement({ frequency_days: 91, next_due_date: '2026-12-15', preferred_weekday: 2 }),
+      SETTINGS,
+      TODAY,
+    );
+    expect(planned).toEqual([
+      { occurrenceDate: '2026-12-15', scheduledDate: '2026-12-15' },
+      { occurrenceDate: '2027-03-16', scheduledDate: '2027-03-16' },
+    ]);
+  });
+
+  it('starts from the cursor, so dates already written as jobs are not repeated', () => {
+    const planned = forecastVisits(
+      agreement({ frequency_days: 7, next_due_date: '2026-11-17' }),
+      SETTINGS,
+      TODAY,
+    );
+    expect(planned.map((visit) => visit.scheduledDate)).toEqual([
+      '2026-11-17',
+      '2026-11-24',
+    ]);
+  });
+
+  it('shows one date for after_completion, and none once a visit is already booked', () => {
+    const open = forecastVisits(
+      agreement({ schedule_mode: 'after_completion', frequency_days: 84, next_due_date: '2026-12-01' }),
+      SETTINGS,
+      TODAY,
+    );
+    expect(open).toHaveLength(1);
+    expect(open[0]?.scheduledDate).toBe('2026-12-01');
+
+    const booked = forecastVisits(
+      agreement({ schedule_mode: 'after_completion', next_due_date: '2026-12-01' }),
+      SETTINGS,
+      TODAY,
+      new Set(['2026-12-01']),
+    );
+    expect(booked).toEqual([]);
   });
 });
 

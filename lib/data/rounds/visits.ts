@@ -26,7 +26,13 @@ export type VisitRow = {
   completed_at: string | null;
 };
 
-export type VisitDayCounts = { total: number; done: number; skipped: number };
+export type VisitDayCounts = {
+  total: number;
+  done: number;
+  skipped: number;
+  /** Sum of quoted_amount for non-cancelled visits (matches home “planned £”). */
+  plannedAmount: number;
+};
 
 const VISIT_SELECT = [
   'id',
@@ -118,16 +124,29 @@ export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
 }
 
 export function foldVisitCounts(
-  rows: Array<{ scheduled_date: unknown; status: unknown }>,
+  rows: Array<{
+    scheduled_date: unknown;
+    status: unknown;
+    quoted_amount?: unknown;
+  }>,
 ): Record<Ymd, VisitDayCounts> {
   const counts: Record<Ymd, VisitDayCounts> = {};
   for (const row of rows) {
     const date = asYmd(row.scheduled_date);
     if (!date) continue;
-    const bucket = counts[date] ?? { total: 0, done: 0, skipped: 0 };
+    const bucket = counts[date] ?? {
+      total: 0,
+      done: 0,
+      skipped: 0,
+      plannedAmount: 0,
+    };
     bucket.total += 1;
     if (row.status === 'completed') bucket.done += 1;
-    if (row.status === 'cancelled') bucket.skipped += 1;
+    if (row.status === 'cancelled') {
+      bucket.skipped += 1;
+    } else {
+      bucket.plannedAmount += asFiniteNumber(row.quoted_amount) ?? 0;
+    }
     counts[date] = bucket;
   }
   return counts;
@@ -181,7 +200,7 @@ export async function getVisitCountsForMonth(
     const to = endOfMonth(monthYmd);
     const { data, error } = await supabase
       .from('jobs')
-      .select('scheduled_date, status')
+      .select('scheduled_date, status, quoted_amount')
       .eq('tenant_id', tenantId)
       .gte('scheduled_date', from)
       .lte('scheduled_date', to);

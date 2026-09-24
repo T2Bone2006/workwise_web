@@ -19,7 +19,10 @@ routes. Nothing may change how Pro behaves or looks. If a change would touch
 Pro's jobs, workers, or phone tabs, that is a bug, not a feature.
 
 **Being built: Rounds + Lite + self-serve signup.** Eight phases, ~12 weeks,
-one person plus agents. Currently **Phase 1**, branch `rounds-foundations`.
+one person plus agents. Phase 1 code is on branch `rounds-foundations` and is
+**not deployed**. Next build is Phase 2 (payments): spec written 2026-09-24 at
+`../docs/specs/phase-2.md` (33 step cards; start at step 1, SQL pasted at step 6). Do not push, deploy, or OTA until the owner asks — they want every phase
+finished, and to be happy with it, before anything goes live.
 
 **Two rules that apply to every phase:**
 - Deploy order is always **paste migrations → deploy web → mobile OTA**. An OTA
@@ -35,7 +38,8 @@ one person plus agents. Currently **Phase 1**, branch `rounds-foundations`.
 |---|---|
 | `../docs/PRODUCT.md` | "Are we building the company I want?" The overview. Wins any disagreement. |
 | `../docs/ROUNDS-PLAN.md` | The 12-week engineering plan and cross-repo technical design. |
-| `../docs/specs/phase-1.md` | What to build this phase. §9 is the step list. |
+| `../docs/specs/phase-1.md` | Phase 1 (done). §9 is its step list. |
+| `../docs/specs/phase-2.md` | What to build now (payments). §6.0 is the step index; each step is a self-contained card. |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
 
@@ -69,11 +73,59 @@ New chat should start: read this file, then `../docs/PRODUCT.md`, then
 
 ---
 
-## Phase 1 — Rounds core (branch `rounds-foundations`) — IN PROGRESS, at step 18 of 32
+## Phase 1 — Rounds core (branch `rounds-foundations`) — CODE COMPLETE, not deployed
 
 Spec: `../docs/specs/phase-1.md` (§9 is the step list). Product picture:
-`../docs/PRODUCT.md`. Steps 1–17 are done; **step 18 (`/rounds/services`)
-is next**.
+`../docs/PRODUCT.md`. Steps 1–22, 25–31 done; **23–24 deferred**; **32 waits
+on a deploy the owner has not asked for**.
+
+**Owner decision (2026-09-24) — do not go live yet**
+- Finish the later phases before anything ships. No `git push` on web or mobile.
+  No web deploy. No mobile OTA. Step 32 (checks against the deployed APIs) stays
+  closed until they ask.
+
+**Verified**
+- Web: `tsc` clean, `npm test` 146 passed (step 25). Phase 1 eslint clean.
+  Full-repo lint still fails on pre-existing Pro issues.
+- Phone: `tsc` clean and `expo export --platform ios` bundled (step 30).
+
+**Not verified** (needs the owner, on a login — not a reason to deploy)
+- Dashboard §7 checks 2–6 and 8 (no password in the agent session). Check 7
+  skipped (import deferred).
+- Phone on a device: Today + planned £, Start day / Continue day, Go to today,
+  Done auto-advances, Move remaining, airplane-mode Done + Skip then reconnect,
+  Calendar opens Stop, Customers lookup + Add, push deep-link, RS Locksmiths
+  login still on the old job screen.
+
+**Known gaps (not missing Phase 1 work)**
+- A real `skipped` job status is Phase 8. Phase 1 skip is `cancelled` + `skip_reason`.
+- Taking payment on the Stop screen is Phase 2. Completion leaves `payment_status` unpaid.
+- Reminder copy (“We're coming Thursday, reply NO”) is Phase 3. Phase 1 sends nothing and does not wait for a YES.
+- Bank connect and Stripe Connect, from both the phone and the dashboard, are Phases 2 and 4.
+- Phone visual redesign (neumorphism) is Phase 7.
+- `after_completion` shipped. It is not a gap.
+- Spreadsheet import (steps 23–24) stays deferred until real customer sheets exist.
+
+**Step 30 compile (2026-09-24)**
+- `npx tsc --noEmit` clean.
+- `npx expo export --platform ios` bundled (2011 modules) and wrote `dist/`
+  (gitignored).
+- Device §7 checks still need the Rounds login on a phone: Today + planned £,
+  Start day / Continue day, Go to today, Done auto-advances, Move remaining,
+  airplane-mode Done + Skip then reconnect, Calendar opens Stop, Customers
+  lookup + Add, push deep-link, RS Locksmiths login unchanged.
+
+**Step 25 verification (2026-09-23)**
+- `npx tsc --noEmit` clean; `npm test` — 146 passed.
+- Phase 1 surface eslint clean (rounds / calendar / customers / services /
+  dashboard / import redirect / rounds APIs). Full-repo `npm run lint` still
+  fails on **pre-existing** Pro/settings/sidebar issues (same class as noted in
+  Phase 0) — not introduced here; left untouched.
+- Redirects: `/rounds` → `/dashboard`, `/rounds/customers` → `/customers`,
+  `/rounds/services` → `/services`.
+- DB: "Test rounds 2" already has the 6 Window cleaning presets.
+- §7 interactive UI checks 2–6 and 8 need a logged-in browser session (agent
+  has no password). Check 7 skipped (import deferred).
 
 **Done so far**
 - **Step 1** — `vitest` added (`npm test`, `vitest.config.ts` with the `@/` alias,
@@ -140,7 +192,72 @@ is next**.
   then Payments / Bank / Messages / Expenses. Settings gains a **Rounds** tab
   (only if the tenant has Rounds): usual work days, days off, “move visits off
   days I don’t work” off by default, horizon, reminder days, route start.
-- 146 unit tests pass; `tsc --noEmit` clean.
+- **Step 18** — `/services` and `service-catalog-table.tsx`. Inline add
+  and edit, deactivate (and activate again), and **Add presets…** per trade
+  group. The page says price, duration, and repeat are defaults: each customer
+  gets a copy you can change when you add them and again later, including on
+  the day. Editing a default does not rewrite customers already set up.
+  Switched-off services sit in a collapsed list under the active ones.
+- **Step 19** — `/customers` list (search + active/inactive filter,
+  Import link, floating add), `new`, `[id]` detail (payment badge, Deactivate,
+  agreements card with Pause/Resume/End/Edit, visits Upcoming/Recent, notes),
+  and `[id]/edit`. Uses the rounds `CustomerForm` from step 16. Agreement
+  create/edit routes are linked but land in step 20.
+- **Step 20** — `agreement-form.tsx` + `/agreements/new` and
+  `/agreements/[agreementId]/edit`. Service from catalog (fills title/price/
+  duration/frequency), address autocomplete, how often, anchor date, **Next
+  visit from when I last did it** (off → `fixed`), preferred weekday/time,
+  usual payment method, reminders, access notes. Create after new customer
+  shows the “Now add their first service” banner (`?first=1`). Edit asks
+  whether to reprice upcoming visits when price changes.
+- **Step 21** — `/calendar` month + day. `visit-actions` (Done / Skip /
+  Reschedule / **Move remaining**), `rounds-month-grid` (counts + working-day /
+  blackout shade), `rounds-day-plan` (▲▼ + drag reorder, Save order, Optimise,
+  one-off job).
+- **Step 22** — Rounds `/dashboard` home: stat tiles, today's stops with
+  Done/Skip/Reschedule, Optimise when unordered, **Move remaining**, empty
+  states for no customers / empty catalog.
+- **Step 26** — mobile types hand-edit (`service_catalog`, `service_agreements`,
+  jobs/customers rounds columns); `fetchJobsForWorker` date window + customer
+  embed; `fetchJobById` embed; `openNavigation.ts` extracted from JobDetail.
+- **Step 27** — `workwise-mobile/src/lib/rounds/`: query keys (persisted root
+  already wired), `selectDayPlan` / `nextStopAfter` / `localYmd`, skip reason
+  labels, `fetchRoundsCustomers` + `useRoundsCustomers`, and `bearerFetch` +
+  Optimise / Done / Skip / Move remaining / doorstep / agreement API helpers.
+  `.env.example` documents `EXPO_PUBLIC_API_URL`. `tsc` clean. Screens land in
+  steps 28–29.
+- **Step 28** — phone day-run: `TodayScreen` (day chips, £ planned, Optimise,
+  Move remaining, Start day), `StopScreen` (Navigate / Done / Skip with
+  auto-advance), `SkipReasonSheet`, wired on `TodayStack`. Online Done/Skip
+  hit the bearer APIs; offline patches the job and relies on cron for
+  `after_completion` backfill. `tsc` clean. Today’s start and end chips can
+  each take a one-off postcode for Optimise; the saved route start is unchanged.
+  With no override, the day leaves home and the distance includes the drive back.
+  After the run has begun, Today’s primary button says **Continue day**.
+- **Step 29** — phone calendar is its own month grid (stop count, £, green
+  heat for busier days, done bar). Tap a day, then a stop, to open Stop.
+  Pro calendar unchanged. Customers tab is
+  lookup (search, detail, call, upcoming visits) plus a two-step Add while
+  out (person, then service, one doorstep API call, default `fixed`). Push
+  deep-link goes to Stop when `appMode` is rounds. Money stays a placeholder.
+  `tsc` clean. Device checks wait for step 30.
+- **Settings, same branch** — Company → skills only when the tenant has Pro.
+  Lite and Rounds do not match workers to jobs, so that block is hidden.
+  Company email was blank because signup stores it on the login, not in
+  `settings.company`. The field now shows the login email until they save a
+  company one. Company industry is the longer trade list in
+  `lib/data/settings-types.ts`. A services interview, if we do one, still waits
+  for self-serve onboarding.
+
+**Owner decision (2026-09-24) — route finishes at home**
+- Optimise is no longer a one-way list that stops at the last house. The
+  distance includes the hop from the last stop to a finish point, so a house
+  near home lands at the end and the far cluster sits in the middle.
+- Finish defaults to the saved route-start postcode, else the worker’s home
+  pin — the same place the day starts from when they do not override it.
+- Phone Today has an end chip with the same badge and mechanic as start:
+  a UK postcode for this optimise only, not written to settings. Dashboard
+  Optimise sends neither override, so that day leaves home and returns home.
 
 **Decision changed mid-phase (2026-09-15 evening, after talking to window cleaners)**
 - **Do not auto-move visits off weekends / days off.** `RoundsSettings` gained
@@ -157,6 +274,24 @@ is next**.
   steps 8 (`moveRemainingCore`), 13 (`moveRemaining` action), 15
   (`/api/rounds/visits/move-remaining`), 21–22 (dashboard), 28 (phone Today).
 
+**Owner decision (2026-09-23) — DONE: product-neutral dashboard URLs**
+- Dashboard paths no longer include `/rounds`. Same login, ordinary paths
+  (`/customers`, `/calendar`, `/services`, …). Entitlement picks the
+  UI: Rounds-only (and Lite+Rounds) get the round CRM at `/customers`; Pro gets
+  the dispatch CRM at the same path. `next.config` redirects old `/rounds/*`
+  bookmarks. Helper: `lib/navigation/dashboard-paths.ts`.
+- **Rounds + Pro on one tenant** is still Phase 8 — today Pro wins shared paths
+  if both somehow exist (`usesRoundsCrm` = hasRounds && !isPro).
+- Phone Add customer (step 29): paginated person → service in one flow when we
+  get there; not two disconnected apps.
+
+**Owner decision (2026-09-23) — DEFERRED: Rounds spreadsheet import (steps 23–24)**
+- Early customers onboarded manually as a service. AI can parse messy
+  name/address rows (Pro jobs import already does), but Rounds sheets need
+  frequency, service matching, and agreement defaults — too unreliable without
+  real sheet shapes. Revisit after those are in hand. Import nav/CTAs hidden
+  for Rounds; `/import` redirects Rounds tenants to `/customers`.
+
 **SQL — already pasted by the owner, in this order** (`supabase/migrations/`):
 1. `20260915100000_service_catalog.sql`
 2. `20260915100100_service_agreements.sql`
@@ -165,17 +300,21 @@ is next**.
 5. `20260915100400_ai_interactions_rounds_types.sql`
 
 **Owner follow-ups still outstanding**
+- Paste `supabase/migrations/20260923190000_industry_is_not_the_product.sql`.
+  Signup was storing industry `Rounds`. New signups leave it blank (Lite still
+  stores the trade they typed). The paste also clears existing `Rounds` industries.
 - Refresh `supabase/schema_current.sql` from the live schema (owner's file; agents
   never edit or commit it).
-- Regenerate `workwise-mobile/src/types/supabase.ts` (or hand-add per spec §5.1)
-  before any mobile work — that is step 26, not now.
-- `EXPO_PUBLIC_API_URL` into EAS env before the OTA (Phase 1 close).
+- Regenerate `workwise-mobile/src/types/supabase.ts` when convenient (step 26
+  hand-added the rounds columns; regenerate keeps them in sync).
+- `EXPO_PUBLIC_API_URL` into EAS env before the OTA (Phase 1 close). Local
+  `.env.local` / simulator needs it pointed at a running web app for phone APIs.
 
-**Not verified yet**: no logged-in Rounds session in the browser this step, so
-the Settings tab and sidebar were not clicked. Pro tenants still omit the
-Rounds tab. Verification plan is spec §7.
+**Not verified yet**: log in as a Rounds tenant and hit `/customers`,
+`/services`, create → agreement. Old `/rounds/customers` should redirect.
+Pro `/customers` must still be the dispatch CRM. Verification plan is spec §7.
 
-**No web env vars added by Phase 1.** No deploy needed yet. Do not OTA.
+**No web env vars added by Phase 1.** Do not push, deploy, or OTA (owner, 2026-09-24).
 
 ---
 

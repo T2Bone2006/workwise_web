@@ -22,6 +22,7 @@ interface SearchableSelectProps {
   emptyText?: string
   className?: string
   disabled?: boolean
+  id?: string
   /** Fired when the dropdown opens or closes. */
   onOpenChange?: (open: boolean) => void
 }
@@ -39,6 +40,7 @@ export function SearchableSelect({
   emptyText = "No options found.",
   className,
   disabled,
+  id,
   onOpenChange,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
@@ -95,6 +97,7 @@ export function SearchableSelect({
       <PopoverTrigger asChild>
         <button
           type="button"
+          id={id}
           role="combobox"
           aria-expanded={open}
           className={cn(

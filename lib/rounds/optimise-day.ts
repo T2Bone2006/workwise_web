@@ -24,7 +24,8 @@ function asFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-async function resolveStart(
+/** Saved route-start postcode, else the solo worker's home pin. */
+async function resolveHome(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<RoutePoint | null> {
@@ -40,18 +41,63 @@ async function resolveStart(
   return null;
 }
 
+async function resolvePoint(
+  overridePostcode: string | null | undefined,
+  home: RoutePoint | null,
+  missingLabel: string,
+): Promise<
+  | { ok: true; point: RoutePoint | null }
+  | { ok: false; error: string }
+> {
+  const override = overridePostcode?.trim();
+  if (!override) return { ok: true, point: home };
+  const geocoded = await postcodeToLatLng(override);
+  if (!geocoded) {
+    return { ok: false, error: missingLabel };
+  }
+  return { ok: true, point: geocoded };
+}
+
 export async function optimiseDayCore(
   supabase: SupabaseClient,
-  params: { tenantId: string; date: Ymd; persist: boolean },
+  params: {
+    tenantId: string;
+    date: Ymd;
+    persist: boolean;
+    /** This run only. Does not rewrite the saved route start. */
+    startPostcode?: string | null;
+    /** This run only. Defaults to home (the saved route start). */
+    finishPostcode?: string | null;
+  },
 ): Promise<
-  | { success: true; stops: OptimisedStop[]; distanceKm: number; start: RoutePoint | null }
+  | {
+      success: true;
+      stops: OptimisedStop[];
+      distanceKm: number;
+      start: RoutePoint | null;
+      finish: RoutePoint | null;
+    }
   | { success: false; error: string }
 > {
   if (!isValidYmd(params.date)) {
     return { success: false, error: 'Pick a valid date.' };
   }
 
-  const start = await resolveStart(supabase, params.tenantId);
+  const home = await resolveHome(supabase, params.tenantId);
+  const resolvedStart = await resolvePoint(
+    params.startPostcode,
+    home,
+    'Could not find that postcode.',
+  );
+  if (!resolvedStart.ok) return { success: false, error: resolvedStart.error };
+  const resolvedFinish = await resolvePoint(
+    params.finishPostcode,
+    home,
+    'Could not find that finish postcode.',
+  );
+  if (!resolvedFinish.ok) return { success: false, error: resolvedFinish.error };
+  const start = resolvedStart.point;
+  const finish = resolvedFinish.point;
   const { data, error } = await supabase
     .from('jobs')
     .select('id, address, postcode, lat, lng, route_position, scheduled_time, created_at')
@@ -77,6 +123,7 @@ export async function optimiseDayCore(
   const { order, distanceKm } = optimiseRoute(
     start,
     jobs.map((job) => ({ id: job.id, lat: job.lat, lng: job.lng })),
+    finish,
   );
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const stops: OptimisedStop[] = order.map((jobId, index) => {
@@ -100,5 +147,5 @@ export async function optimiseDayCore(
     if (!saved.success) return saved;
   }
 
-  return { success: true, stops, distanceKm, start };
+  return { success: true, stops, distanceKm, start, finish };
 }

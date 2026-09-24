@@ -7,6 +7,7 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { addDays, compareYmd, isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { createAgreementCore } from '@/lib/rounds/create-agreement';
+import { updateAgreementCore } from '@/lib/rounds/update-agreement';
 import {
   AGREEMENT_COLUMNS,
   generateVisitsForAgreement,
@@ -73,10 +74,10 @@ function scheduleChanged(existing: AgreementRow, values: AgreementValues): boole
 }
 
 function revalidateAgreement(customerId: string) {
-  revalidatePath('/rounds');
   revalidatePath('/dashboard');
-  revalidatePath('/rounds/calendar');
-  revalidatePath(`/rounds/customers/${customerId}`);
+  revalidatePath('/calendar');
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
 }
 
 async function loadAgreement(
@@ -235,84 +236,16 @@ export async function updateAgreement(
   const values = parsed.data;
 
   const supabase = await createClient();
-  const existing = await loadAgreement(supabase, tenantId, idParsed.data);
-  if (!existing) return { success: false, error: 'Agreement not found' };
-  if (existing.status === 'ended') {
-    return { success: false, error: 'This agreement has ended' };
-  }
-
-  const customerCheck = await assertCustomer(supabase, tenantId, values.customer_id);
-  if (!customerCheck.success) return customerCheck;
-  const catalogCheck = await assertCatalog(supabase, tenantId, values.service_catalog_id);
-  if (!catalogCheck.success) return catalogCheck;
-
-  const today = todayInLondon();
-  const changedSchedule = scheduleChanged(existing, values);
-  const coords =
-    existing.address !== values.address || existing.postcode !== values.postcode
-      ? await geocodeAgreement(values)
-      : { lat: existing.lat, lng: existing.lng };
-
-  let nextDueDate = existing.next_due_date;
-  let regenerated = 0;
-
-  try {
-    if (changedSchedule) {
-      await deleteUntouchedFutureVisits(supabase, {
-        tenantId,
-        agreementId: existing.id,
-        fromDate: today,
-      });
-
-      if (values.schedule_mode === 'fixed') {
-        nextDueDate = firstOccurrenceOnOrAfter(
-          values.anchor_date,
-          values.frequency_days,
-          today,
-        );
-      } else if (!(await hasOutstandingVisit(supabase, tenantId, existing.id, today))) {
-        nextDueDate = afterCompletionCursor(values.anchor_date, today);
-      }
-    }
-
-    const { error } = await supabase
-      .from('service_agreements')
-      .update({
-        ...agreementWriteFields(values, coords),
-        next_due_date: nextDueDate,
-      })
-      .eq('id', existing.id)
-      .eq('tenant_id', tenantId);
-
-    if (error) {
-      console.error('[updateAgreement]', error);
-      return { success: false, error: error.message };
-    }
-
-    if (changedSchedule) {
-      const updated = await loadAgreement(supabase, tenantId, existing.id);
-      if (!updated) return { success: false, error: 'Agreement updated but could not be reloaded' };
-      if (updated.schedule_mode === 'fixed' || !(await hasOutstandingVisit(supabase, tenantId, existing.id, today))) {
-        regenerated = await generateForAgreement(supabase, tenantId, updated);
-      }
-    } else if (existing.price !== values.price && opts.applyPriceToFuture) {
-      regenerated = await repriceUntouchedFutureVisits(supabase, {
-        tenantId,
-        agreementId: existing.id,
-        fromDate: today,
-        price: values.price,
-      });
-    }
-  } catch (err) {
-    console.error('[updateAgreement]', err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Failed to update agreement',
-    };
-  }
+  const result = await updateAgreementCore(supabase, {
+    tenantId,
+    agreementId: idParsed.data,
+    values,
+    applyPriceToFuture: opts.applyPriceToFuture,
+  });
+  if (!result.success) return result;
 
   revalidateAgreement(values.customer_id);
-  return { success: true, regenerated };
+  return { success: true, regenerated: result.regenerated };
 }
 
 export async function pauseAgreement(

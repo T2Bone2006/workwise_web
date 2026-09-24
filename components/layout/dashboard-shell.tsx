@@ -49,7 +49,7 @@ export function DashboardShell({
           onMenuClick={() => setMobileOpen(true)}
           viewAsActive={Boolean(viewAsTenantName)}
         />
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           {children}
         </main>
       </div>

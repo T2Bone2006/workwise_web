@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_ROUNDS_SETTINGS } from '@/lib/rounds/settings';
 import { mapAgreementRow, type AgreementRow } from '@/lib/rounds/generate-visits';
 import { optimiseDayCore } from '@/lib/rounds/optimise-day';
+import { postcodeToLatLng } from '@/lib/utils/postcode';
 import {
   completeVisitCore,
   deleteUntouchedFutureVisits,
@@ -531,10 +532,40 @@ describe('optimiseDayCore', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.start).toEqual({ lat: 51.5, lng: -0.12 });
+    expect(result.finish).toEqual({ lat: 51.5, lng: -0.12 });
     expect(result.stops.map((stop) => stop.jobId)).toHaveLength(3);
     expect(result.stops[result.stops.length - 1]?.jobId).toBe('ghost');
     expect(result.stops.map((stop) => stop.jobId).sort()).toEqual(['far', 'ghost', 'near']);
     expect(db.jobs.find((row) => row.id === result.stops[0]?.jobId)?.route_position).toBe(1);
+  });
+
+  it('uses a finish override for this run and leaves home as the start', async () => {
+    vi.mocked(postcodeToLatLng).mockImplementation(async (postcode: string) => {
+      if (postcode.startsWith('E1')) return { lat: 51.7, lng: -0.05 };
+      return null;
+    });
+    try {
+      const db = emptyDb({
+        jobs: [
+          job({ id: 'far', lat: 51.6, lng: -0.2, address: 'Far' }),
+          job({ id: 'near', lat: 51.501, lng: -0.121, address: 'Near' }),
+        ],
+      });
+      const result = await optimiseDayCore(createFakeSupabase(db), {
+        tenantId: TENANT,
+        date: TODAY,
+        persist: false,
+        finishPostcode: 'E1 6AN',
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.start).toEqual({ lat: 51.5, lng: -0.12 });
+      expect(result.finish).toEqual({ lat: 51.7, lng: -0.05 });
+      expect(db.settings).toEqual({ rounds: DEFAULT_ROUNDS_SETTINGS });
+    } finally {
+      vi.mocked(postcodeToLatLng).mockImplementation(async () => ({ lat: 51.51, lng: -0.14 }));
+    }
   });
 });
 

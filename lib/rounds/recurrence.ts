@@ -75,6 +75,68 @@ function placeOnCalendar(
   );
 }
 
+/** How many dates to show past the visits that already exist as jobs. */
+export const FORECAST_VISIT_COUNT = 2;
+
+/**
+ * Dates to show on a customer before a job exists.
+ * `fixed` counts the next two from the agreement cursor (that cursor already
+ * sits after any visits the 8-week generator has written).
+ * `after_completion` shows only the one next date, and only when no visit
+ * is already booked — the date after that depends on when the clean is done.
+ */
+export function forecastVisits(
+  agreement: AgreementSchedule,
+  settings: RoundsSettings,
+  today: Ymd,
+  bookedOccurrenceDates: ReadonlySet<Ymd> = new Set(),
+): PlannedVisit[] {
+  if (agreement.status !== 'active' || agreement.frequency_days < 1) {
+    return [];
+  }
+
+  if (agreement.schedule_mode === 'after_completion') {
+    if (bookedOccurrenceDates.size > 0) return [];
+    const occurrenceDate = agreement.next_due_date;
+    if (bookedOccurrenceDates.has(occurrenceDate)) return [];
+    let scheduledDate = placeOnCalendar(
+      occurrenceDate,
+      agreement.preferred_weekday,
+      settings,
+    );
+    if (compareYmd(scheduledDate, today) < 0) {
+      scheduledDate = shiftForWorkingDaysAndBlackouts(today, settings);
+    }
+    return [{ occurrenceDate, scheduledDate }];
+  }
+
+  const start =
+    compareYmd(agreement.next_due_date, today) < 0
+      ? firstOccurrenceOnOrAfter(
+          agreement.next_due_date,
+          agreement.frequency_days,
+          today,
+        )
+      : agreement.next_due_date;
+
+  const visits: PlannedVisit[] = [];
+  let cursor = start;
+  for (let guard = 0; visits.length < FORECAST_VISIT_COUNT && guard < 24; guard += 1) {
+    if (!bookedOccurrenceDates.has(cursor)) {
+      const scheduledDate = placeOnCalendar(
+        cursor,
+        agreement.preferred_weekday,
+        settings,
+      );
+      if (compareYmd(scheduledDate, today) >= 0) {
+        visits.push({ occurrenceDate: cursor, scheduledDate });
+      }
+    }
+    cursor = addDays(cursor, agreement.frequency_days);
+  }
+  return visits;
+}
+
 export function planVisits(
   agreement: AgreementSchedule,
   settings: RoundsSettings,

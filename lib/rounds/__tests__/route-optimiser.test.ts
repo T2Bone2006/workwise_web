@@ -35,6 +35,16 @@ describe('routeDistanceKm', () => {
       haversineDistance(1, 0, 0, 0) + haversineDistance(0, 0, 0, 1),
     );
   });
+
+  it('adds the hop from the last stop to the finish', () => {
+    const stop = { lat: 0, lng: 1 };
+    const start = { lat: 0, lng: 0 };
+    const end = { lat: 1, lng: 1 };
+    expect(routeDistanceKm(start, [], end)).toBe(0);
+    expect(routeDistanceKm(start, [stop], end)).toBe(
+      haversineDistance(0, 0, 0, 1) + haversineDistance(0, 1, 1, 1),
+    );
+  });
 });
 
 describe('optimiseRoute small cases', () => {
@@ -88,6 +98,41 @@ describe('optimiseRoute small cases', () => {
     expect(order).toHaveLength(stops.length);
     expect(new Set(order).size).toBe(stops.length);
     expect(order.sort()).toEqual(idsOf(stops).sort());
+  });
+});
+
+describe('finish point', () => {
+  const start = { lat: 0, lng: 0 };
+  const home = { lat: 0, lng: 0 };
+  const a: RouteStop = { id: 'a', lat: 1, lng: 0.1 };
+  const b: RouteStop = { id: 'b', lat: 2, lng: 0 };
+  const c: RouteStop = { id: 'c', lat: 1, lng: -0.1 };
+  const stops = [a, b, c];
+  const point = (id: string) => {
+    const stop = stops.find((item) => item.id === id)!;
+    return { lat: stop.lat!, lng: stop.lng! };
+  };
+
+  it('open path ends at the far stop', () => {
+    const open = optimiseRoute(start, stops);
+    expect(open.order[open.order.length - 1]).toBe('b');
+  });
+
+  it('ending at home puts a nearer stop last and shortens the closed run', () => {
+    const open = optimiseRoute(start, stops);
+    const closed = optimiseRoute(start, stops, home);
+    expect(closed.order).toHaveLength(3);
+    expect(new Set(closed.order).size).toBe(3);
+    expect(closed.order[closed.order.length - 1]).not.toBe('b');
+
+    const closedDistanceOf = (ids: string[]) =>
+      routeDistanceKm(
+        start,
+        ids.map((id) => point(id)),
+        home,
+      );
+    expect(closed.distanceKm).toBeCloseTo(closedDistanceOf(closed.order), 8);
+    expect(closed.distanceKm).toBeLessThan(closedDistanceOf(open.order));
   });
 });
 

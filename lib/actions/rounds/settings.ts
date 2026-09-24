@@ -57,6 +57,6 @@ export async function updateRoundsSettings(
   }
 
   revalidatePath('/settings');
-  revalidatePath('/rounds/calendar');
+  revalidatePath('/calendar');
   return { success: true };
 }

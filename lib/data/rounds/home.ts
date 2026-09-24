@@ -4,7 +4,9 @@ import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 import { getVisitsForDay, type VisitRow } from './visits';
 
 export type RoundsHomeData = {
+  /** Selected day (London Ymd). Defaults to today when the URL has no `date`. */
   today: Ymd;
+  isToday: boolean;
   todayVisits: VisitRow[];
   todayDone: number;
   todayPlannedAmount: number;
@@ -15,7 +17,7 @@ export type RoundsHomeData = {
   catalogEmpty: boolean;
 };
 
-const EMPTY: Omit<RoundsHomeData, 'today'> = {
+const EMPTY: Omit<RoundsHomeData, 'today' | 'isToday'> = {
   todayVisits: [],
   todayDone: 0,
   todayPlannedAmount: 0,
@@ -57,21 +59,26 @@ export function summariseTodayVisits(visits: VisitRow[]): {
   };
 }
 
-export async function getRoundsHomeData(tenantId: string): Promise<RoundsHomeData> {
-  const today = todayInLondon();
-  const weekStart = addDays(today, -(isoWeekday(today) - 1));
+export async function getRoundsHomeData(
+  tenantId: string,
+  selectedDate?: Ymd,
+): Promise<RoundsHomeData> {
+  const londonToday = todayInLondon();
+  const day = selectedDate ?? londonToday;
+  const isToday = day === londonToday;
+  const weekStart = addDays(day, -(isoWeekday(day) - 1));
   const weekEnd = addDays(weekStart, 6);
 
   try {
     const supabase = await createClient();
     const [
-      todayResult,
+      dayResult,
       weekResult,
       customersResult,
       agreementsResult,
       catalogResult,
     ] = await Promise.all([
-      getVisitsForDay(tenantId, today),
+      getVisitsForDay(tenantId, day),
       supabase
         .from('jobs')
         .select('id', { count: 'exact', head: true })
@@ -95,7 +102,7 @@ export async function getRoundsHomeData(tenantId: string): Promise<RoundsHomeDat
         .eq('is_active', true),
     ]);
 
-    if (todayResult.error) console.error('[getRoundsHomeData] today', todayResult.error);
+    if (dayResult.error) console.error('[getRoundsHomeData] day', dayResult.error);
     if (weekResult.error) console.error('[getRoundsHomeData] week', weekResult.error);
     if (customersResult.error) {
       console.error('[getRoundsHomeData] customers', customersResult.error);
@@ -105,11 +112,12 @@ export async function getRoundsHomeData(tenantId: string): Promise<RoundsHomeDat
     }
     if (catalogResult.error) console.error('[getRoundsHomeData] catalog', catalogResult.error);
 
-    const todayVisits = todayResult.visits;
+    const todayVisits = dayResult.visits;
     const summary = summariseTodayVisits(todayVisits);
 
     return {
-      today,
+      today: day,
+      isToday,
       todayVisits,
       todayDone: summary.todayDone,
       todayPlannedAmount: summary.todayPlannedAmount,
@@ -121,6 +129,6 @@ export async function getRoundsHomeData(tenantId: string): Promise<RoundsHomeDat
     };
   } catch (err) {
     console.error('[getRoundsHomeData]', err);
-    return { today, ...EMPTY };
+    return { today: day, isToday, ...EMPTY };
   }
 }

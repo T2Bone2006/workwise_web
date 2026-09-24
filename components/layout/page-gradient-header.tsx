@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 
 interface PageGradientHeaderProps {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   /** Small uppercase line above the title (e.g. tenant name). */
   eyebrow?: string;
   /** Right-side controls (day nav, actions). */
@@ -52,7 +52,9 @@ export function PageGradientHeader({
           <p className="mt-1 text-sm text-sky-900/65 dark:text-muted-foreground">{subtitle}</p>
         ) : null}
       </div>
-      {actions ? <div className="shrink-0">{actions}</div> : null}
+      {actions ? (
+        <div className="w-full min-w-0 sm:w-auto sm:shrink-0">{actions}</div>
+      ) : null}
     </div>
   );
 }

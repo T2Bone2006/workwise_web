@@ -14,7 +14,7 @@ export default async function SettingsPage() {
     getTenantProducts(),
   ]);
   const initialTenantSkills =
-    data.tenantId != null ? await getTenantSkills(data.tenantId) : [];
+    products.isPro && data.tenantId != null ? await getTenantSkills(data.tenantId) : [];
 
   let rounds: { settings: Awaited<ReturnType<typeof getRoundsSettings>> } | null = null;
   if (products.hasRounds && data.tenantId) {
@@ -33,6 +33,7 @@ export default async function SettingsPage() {
         initialTenantSkills={initialTenantSkills}
         billing={billing}
         rounds={rounds}
+        showSkills={products.isPro}
       />
     </div>
   );
