@@ -7,6 +7,8 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { addDays, compareYmd, isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { createAgreementCore } from '@/lib/rounds/create-agreement';
+import { endAgreementCore } from '@/lib/rounds/end-agreement';
+import { setCustomerHouseCore } from '@/lib/rounds/customer-house';
 import { updateAgreementCore } from '@/lib/rounds/update-agreement';
 import {
   AGREEMENT_COLUMNS,
@@ -373,41 +375,13 @@ export async function endAgreement(id: string): Promise<ActionResult> {
   if (!idParsed.success) return { success: false, error: firstZodError(idParsed.error) };
 
   const supabase = await createClient();
-  const existing = await loadAgreement(supabase, tenantId, idParsed.data);
-  if (!existing) return { success: false, error: 'Agreement not found' };
-  if (existing.status === 'ended') return { success: true };
+  const result = await endAgreementCore(supabase, {
+    tenantId,
+    agreementId: idParsed.data,
+  });
+  if (!result.success) return result;
 
-  const today = todayInLondon();
-  try {
-    await deleteUntouchedFutureVisits(supabase, {
-      tenantId,
-      agreementId: existing.id,
-      fromDate: today,
-    });
-
-    const { error } = await supabase
-      .from('service_agreements')
-      .update({
-        status: 'ended',
-        ended_at: new Date().toISOString(),
-        paused_until: null,
-      })
-      .eq('id', existing.id)
-      .eq('tenant_id', tenantId);
-
-    if (error) {
-      console.error('[endAgreement]', error);
-      return { success: false, error: error.message };
-    }
-  } catch (err) {
-    console.error('[endAgreement]', err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Failed to end agreement',
-    };
-  }
-
-  revalidateAgreement(existing.customer_id);
+  revalidateAgreement(result.customerId);
   return { success: true };
 }
 
@@ -440,4 +414,31 @@ export async function regenerateAgreementVisits(
 
   revalidateAgreement(existing.customer_id);
   return { success: true, inserted };
+}
+
+/** The house belongs to the customer. Every service at that customer uses it. */
+export async function setCustomerHouse(
+  customerId: string,
+  address: string,
+  postcode: string,
+): Promise<ActionResult> {
+  const tenantId = await getTenantIdForCurrentUser();
+  if (!tenantId) return { success: false, error: 'Not authenticated' };
+
+  const parsed = agreementSchema
+    .pick({ address: true, postcode: true })
+    .safeParse({ address, postcode });
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  const result = await setCustomerHouseCore(supabase, {
+    tenantId,
+    customerId,
+    address: parsed.data.address,
+    postcode: parsed.data.postcode,
+  });
+  if (!result.success) return result;
+
+  revalidateAgreement(customerId);
+  return { success: true };
 }

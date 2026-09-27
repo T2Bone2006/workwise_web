@@ -77,6 +77,9 @@ export function JobsDateRangeFilter({ dateFrom, dateTo, onChange }: JobsDateRang
     setOpen(false);
   };
 
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+
   const hasValue = !!(dateFrom || dateTo);
 
   const label = React.useMemo(() => {
@@ -92,40 +95,44 @@ export function JobsDateRangeFilter({ dateFrom, dateTo, onChange }: JobsDateRang
     return 'Any date';
   }, [dateFrom, dateTo]);
 
+  const shellClass = cn(
+    'border-input focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50 flex h-10 w-full items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px]',
+    !hasValue && 'text-muted-foreground'
+  );
+
+  const labelNode = (
+    <span className="line-clamp-1 flex min-w-0 items-center gap-2">
+      <CalendarIcon className="size-4 shrink-0 opacity-60" />
+      {label}
+    </span>
+  );
+
+  const clearButton = hasValue ? (
+    <button
+      type="button"
+      onClick={() => commit(undefined)}
+      className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+      aria-label="Clear date range"
+    >
+      <X className="size-3.5" />
+    </button>
+  ) : null;
+
+  if (!mounted) {
+    return (
+      <div className={shellClass}>
+        {labelNode}
+        {clearButton}
+      </div>
+    );
+  }
+
   return (
+    <div className={shellClass}>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'border-input focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50 flex h-10 w-full items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px]',
-            !hasValue && 'text-muted-foreground'
-          )}
-        >
-          <span className="line-clamp-1 flex items-center gap-2">
-            <CalendarIcon className="size-4 shrink-0 opacity-60" />
-            {label}
-          </span>
-          {hasValue && (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                commit(undefined);
-              }}
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                e.preventDefault();
-                e.stopPropagation();
-                commit(undefined);
-              }}
-              className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Clear date range"
-            >
-              <X className="size-3.5" />
-            </span>
-          )}
+        <button type="button" className="flex min-w-0 flex-1 items-center text-left outline-none">
+          {labelNode}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -165,5 +172,7 @@ export function JobsDateRangeFilter({ dateFrom, dateTo, onChange }: JobsDateRang
         </div>
       </PopoverContent>
     </Popover>
+    {clearButton}
+    </div>
   );
 }

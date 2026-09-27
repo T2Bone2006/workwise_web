@@ -10,9 +10,14 @@ import {
   updateCustomerProfileCore,
 } from '@/lib/rounds/customer-profile';
 import { createAgreementCore, jobIdsForAgreement } from '@/lib/rounds/create-agreement';
+import { setCustomerHouseCore } from '@/lib/rounds/customer-house';
 import { todayInLondon } from '@/lib/rounds/dates';
+import { joinHouse } from '@/lib/rounds/house';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
-import { doorstepCustomerSchema } from '@/lib/validations/rounds/agreement';
+import {
+  agreementSchema,
+  doorstepCustomerSchema,
+} from '@/lib/validations/rounds/agreement';
 
 export async function POST(request: Request) {
   const auth = await requireRoundsApi(request);
@@ -59,6 +64,7 @@ export async function POST(request: Request) {
       email,
       phone: values.phone,
       phone_e164: normalizeUkPhoneE164(values.phone),
+      billing_address: joinHouse(values.address, values.postcode),
       access_notes: accessNotes,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -121,6 +127,8 @@ const profileSchema = z.object({
   phone: z.string().trim().min(7).max(30),
   email: z.string().trim().email().optional().or(z.literal('')),
   access_notes: z.string().trim().max(500).optional().or(z.literal('')),
+  address: agreementSchema.shape.address.optional(),
+  postcode: agreementSchema.shape.postcode.optional(),
 });
 
 const activeSchema = z.object({
@@ -166,5 +174,18 @@ export async function PATCH(request: Request) {
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
+
+  if (parsed.data.address && parsed.data.postcode) {
+    const house = await setCustomerHouseCore(auth.ctx.supabase, {
+      tenantId: auth.ctx.tenantId,
+      customerId: parsed.data.customerId,
+      address: parsed.data.address,
+      postcode: parsed.data.postcode,
+    });
+    if (!house.success) {
+      return NextResponse.json({ error: house.error }, { status: 400 });
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }

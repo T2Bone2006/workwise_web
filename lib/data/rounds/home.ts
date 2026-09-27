@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { addDays, isoWeekday, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
+import { getOwedCustomers } from '@/lib/data/payments/owed';
 import { getVisitsForDay, type VisitRow } from './visits';
 
 export type RoundsHomeData = {
@@ -12,6 +13,8 @@ export type RoundsHomeData = {
   todayPlannedAmount: number;
   weekVisitCount: number;
   activeCustomers: number;
+  owedTotal: number;
+  owedCustomers: number;
   activeAgreements: number;
   unorderedToday: boolean;
   catalogEmpty: boolean;
@@ -23,6 +26,8 @@ const EMPTY: Omit<RoundsHomeData, 'today' | 'isToday'> = {
   todayPlannedAmount: 0,
   weekVisitCount: 0,
   activeCustomers: 0,
+  owedTotal: 0,
+  owedCustomers: 0,
   activeAgreements: 0,
   unorderedToday: false,
   catalogEmpty: true,
@@ -77,6 +82,7 @@ export async function getRoundsHomeData(
       customersResult,
       agreementsResult,
       catalogResult,
+      owedResult,
     ] = await Promise.all([
       getVisitsForDay(tenantId, day),
       supabase
@@ -100,6 +106,7 @@ export async function getRoundsHomeData(
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('is_active', true),
+      getOwedCustomers(supabase, tenantId),
     ]);
 
     if (dayResult.error) console.error('[getRoundsHomeData] day', dayResult.error);
@@ -123,6 +130,8 @@ export async function getRoundsHomeData(
       todayPlannedAmount: summary.todayPlannedAmount,
       weekVisitCount: countOrZero(weekResult.count),
       activeCustomers: countOrZero(customersResult.count),
+      owedTotal: owedResult.totalOwed,
+      owedCustomers: owedResult.rows.filter((row) => row.owedAmount > 0).length,
       activeAgreements: countOrZero(agreementsResult.count),
       unorderedToday: summary.unorderedToday,
       catalogEmpty: countOrZero(catalogResult.count) === 0,

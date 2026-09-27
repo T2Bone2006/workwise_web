@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { format, parseISO } from 'date-fns';
-import { CalendarIcon, Loader2, X } from 'lucide-react';
+import { CalendarIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { updateRoundsSettings } from '@/lib/actions/rounds/settings';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import type { Ymd } from '@/lib/rounds/dates';
+import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -52,10 +53,12 @@ function formatBlackout(ymd: Ymd): string {
 interface SettingsRoundsTabProps {
   settings: RoundsSettings;
   onSaved: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function SettingsRoundsTab({ settings, onSaved }: SettingsRoundsTabProps) {
+export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: SettingsRoundsTabProps) {
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [workingDays, setWorkingDays] = useState<number[]>(settings.working_days);
   const [blackouts, setBlackouts] = useState<Ymd[]>(settings.blackouts);
@@ -63,6 +66,25 @@ export function SettingsRoundsTab({ settings, onSaved }: SettingsRoundsTabProps)
   const [horizonWeeks, setHorizonWeeks] = useState(settings.horizon_weeks);
   const [reminderDays, setReminderDays] = useState(settings.reminder_days_before);
   const [startPostcode, setStartPostcode] = useState(settings.start_postcode ?? '');
+  const [baseline, setBaseline] = useState({
+    workingDays: settings.working_days,
+    blackouts: settings.blackouts,
+    shiftOff: settings.shift_off_non_working_days,
+    horizonWeeks: settings.horizon_weeks,
+    reminderDays: settings.reminder_days_before,
+    startPostcode: settings.start_postcode ?? '',
+  });
+  const dirty =
+    workingDays.join() !== baseline.workingDays.join() ||
+    blackouts.join() !== baseline.blackouts.join() ||
+    shiftOff !== baseline.shiftOff ||
+    horizonWeeks !== baseline.horizonWeeks ||
+    reminderDays !== baseline.reminderDays ||
+    startPostcode !== baseline.startPostcode;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   function toggleDay(iso: number) {
     setWorkingDays((current) => {
@@ -100,6 +122,15 @@ export function SettingsRoundsTab({ settings, onSaved }: SettingsRoundsTabProps)
     });
     setSaving(false);
     if (result.success) {
+      setBaseline({
+        workingDays,
+        blackouts,
+        shiftOff,
+        horizonWeeks,
+        reminderDays,
+        startPostcode,
+      });
+      setSavedAt(Date.now());
       toast.success('Rounds settings saved');
       onSaved();
     } else {
@@ -249,16 +280,7 @@ export function SettingsRoundsTab({ settings, onSaved }: SettingsRoundsTabProps)
         </CardContent>
       </Card>
 
-      <Button type="submit" variant="gradient" disabled={saving}>
-        {saving ? (
-          <>
-            <Loader2 className="size-4 animate-spin" />
-            Saving…
-          </>
-        ) : (
-          'Save rounds settings'
-        )}
-      </Button>
+      <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
     </form>
   );
 }

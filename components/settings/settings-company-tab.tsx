@@ -1,9 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -17,6 +16,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { updateCompanySettings } from '@/lib/actions/settings';
 import { INDUSTRIES, type SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
+import { CompanyLogoUpload } from './company-logo-upload';
 import { SettingsSkillsSection } from './settings-skills-section';
 import { cn } from '@/lib/utils';
 
@@ -25,16 +25,23 @@ interface SettingsCompanyTabProps {
   initialTenantSkills: TenantSkillRow[];
   /** Pro uses skills to match workers to jobs. Lite and Rounds do not. */
   showSkills: boolean;
+  companyLogoUrl?: string | null;
+  showLogo?: boolean;
   onSaved: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function SettingsCompanyTab({
   data,
   initialTenantSkills,
   showSkills,
+  companyLogoUrl = null,
+  showLogo = false,
   onSaved,
+  onDirtyChange,
 }: SettingsCompanyTabProps) {
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
   const tenant = data.tenant;
   const company = tenant?.settings?.company ?? {};
 
@@ -46,6 +53,23 @@ export function SettingsCompanyTab({
   // box is blank until they save. Show the login email until they set one.
   const [email, setEmail] = useState(company?.email?.trim() || data.user?.email || '');
   const [address, setAddress] = useState(company?.address ?? '');
+  const [baseline, setBaseline] = useState({
+    name: tenant?.name ?? '',
+    industry: storedIndustry === 'Rounds' ? '' : storedIndustry,
+    phone: company?.phone ?? '',
+    email: company?.email?.trim() || data.user?.email || '',
+    address: company?.address ?? '',
+  });
+  const dirty =
+    name !== baseline.name ||
+    industry !== baseline.industry ||
+    phone !== baseline.phone ||
+    email !== baseline.email ||
+    address !== baseline.address;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,6 +84,8 @@ export function SettingsCompanyTab({
     const result = await updateCompanySettings(formData);
     setSaving(false);
     if (result.success) {
+      setBaseline({ name, industry, phone, email, address });
+      setSavedAt(Date.now());
       toast.success('Company settings saved');
       onSaved();
     } else {
@@ -129,6 +155,9 @@ export function SettingsCompanyTab({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          {showLogo ? (
+            <CompanyLogoUpload tenantId={tenant.id} logoUrl={companyLogoUrl ?? null} />
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="company-name">Company name</Label>
             <Input
@@ -188,13 +217,8 @@ export function SettingsCompanyTab({
             />
           </div>
         </CardContent>
-        <CardContent className="pt-0">
-          <Button type="submit" variant="gradient" disabled={saving}>
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            Save company settings
-          </Button>
-        </CardContent>
       </Card>
+      <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
     </form>
 
       {showSkills ? (

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { sendsInvoice } from '@/lib/payments/terms';
 import {
   mergeFieldsWithHeaders,
   parseWorkerVisibleFields,
@@ -41,7 +42,7 @@ export interface CustomerDetailRow extends CustomerListRow {
   notes: string | null;
   phone_e164?: string | null;
   preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none' | null;
-  payment_terms?: 'on_the_day' | 'monthly_invoice' | null;
+  payment_terms?: 'on_the_day' | 'invoice' | null;
   access_notes?: string | null;
 }
 
@@ -273,7 +274,7 @@ export async function getCustomersForTenantList(
 
     let query = supabase
       .from('customers_with_job_counts')
-      .select('id, tenant_id, name, type, email, phone, notes, created_at, updated_at, job_count', {
+      .select('id, tenant_id, name, type, email, phone, billing_address, notes, created_at, updated_at, job_count', {
         count: 'exact',
       })
       .eq('tenant_id', tenantId)
@@ -341,7 +342,7 @@ export async function getCustomersForTenantList(
         type: (row.type as CustomerType) ?? 'individual',
         email: (row.email as string | null) ?? null,
         phone: (row.phone as string | null) ?? null,
-        address: null,
+        address: (row.billing_address as string | null) ?? null,
         notes: (row.notes as string | null) ?? null,
         created_at: row.created_at as string | undefined,
         updated_at: row.updated_at as string | null | undefined,
@@ -429,7 +430,7 @@ export async function getCustomerById(
     const { data, error } = await supabase
       .from('customers')
       .select(
-        'id, tenant_id, name, type, email, phone, phone_e164, notes, created_at, updated_at, preferred_channel, payment_terms, access_notes, jobs(count)',
+        'id, tenant_id, name, type, email, phone, phone_e164, billing_address, notes, created_at, updated_at, preferred_channel, payment_terms, access_notes, jobs(count)',
       )
       .eq('id', customerId)
       .eq('tenant_id', tenantId)
@@ -466,7 +467,7 @@ export async function getCustomerById(
       type: (row.type as CustomerType) ?? 'individual',
       email: (row.email as string | null) ?? null,
       phone: (row.phone as string | null) ?? null,
-      address: null,
+      address: (row.billing_address as string | null) ?? null,
       notes: (row.notes as string | null) ?? null,
       phone_e164: (row.phone_e164 as string | null) ?? null,
       preferred_channel:
@@ -476,9 +477,12 @@ export async function getCustomerById(
         row.preferred_channel === 'none'
           ? row.preferred_channel
           : null,
-      payment_terms:
-        row.payment_terms === 'monthly_invoice' || row.payment_terms === 'on_the_day'
-          ? row.payment_terms
+      payment_terms: sendsInvoice(
+        typeof row.payment_terms === 'string' ? row.payment_terms : null,
+      )
+        ? 'invoice'
+        : row.payment_terms === 'on_the_day'
+          ? 'on_the_day'
           : null,
       access_notes: (row.access_notes as string | null) ?? null,
       created_at: row.created_at as string | undefined,

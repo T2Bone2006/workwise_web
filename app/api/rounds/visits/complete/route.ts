@@ -28,10 +28,19 @@ export async function POST(request: Request) {
     finalAmount: parsed.data.finalAmount,
     notes: emptyToNull(parsed.data.notes),
     actor,
+    payment: parsed.data.payment,
+    sendInvoice: parsed.data.sendInvoice,
+    clientMutationId: parsed.data.clientMutationId,
+    completedAt: parsed.data.completedAt,
   });
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    alreadyCompleted: result.alreadyCompleted,
+    skippedElsewhere: result.skippedElsewhere,
+    paymentId: result.paymentId,
+  });
 }

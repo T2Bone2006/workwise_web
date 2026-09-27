@@ -19,10 +19,12 @@ routes. Nothing may change how Pro behaves or looks. If a change would touch
 Pro's jobs, workers, or phone tabs, that is a bug, not a feature.
 
 **Being built: Rounds + Lite + self-serve signup.** Eight phases, ~12 weeks,
-one person plus agents. Phase 1 code is on branch `rounds-foundations` and is
-**not deployed**. Next build is Phase 2 (payments): spec written 2026-09-24 at
-`../docs/specs/phase-2.md` (33 step cards; start at step 1, SQL pasted at step 6). Do not push, deploy, or OTA until the owner asks — they want every phase
-finished, and to be happy with it, before anything goes live.
+one person plus agents. Phases 1–2 code is on branch `rounds-foundations` and is
+**not deployed**. Phase 2 (payments) is **code complete** — see the Phase 2
+section below; spec `../docs/specs/phase-2.md`. Next build is Phase 3 (messaging);
+there is no `docs/specs/phase-3.md` yet. Do not push, deploy, or OTA until the
+owner asks — they want every phase finished, and to be happy with it, before
+anything goes live.
 
 **Two rules that apply to every phase:**
 - Deploy order is always **paste migrations → deploy web → mobile OTA**. An OTA
@@ -39,7 +41,8 @@ finished, and to be happy with it, before anything goes live.
 | `../docs/PRODUCT.md` | "Are we building the company I want?" The overview. Wins any disagreement. |
 | `../docs/ROUNDS-PLAN.md` | The 12-week engineering plan and cross-repo technical design. |
 | `../docs/specs/phase-1.md` | Phase 1 (done). §9 is its step list. |
-| `../docs/specs/phase-2.md` | What to build now (payments). §6.0 is the step index; each step is a self-contained card. |
+| `../docs/specs/phase-2.md` | Phase 2 payments (done). §6.0 is the step index. |
+| `../docs/specs/phase-3.md` | Not written yet (messaging). |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
 
@@ -54,8 +57,9 @@ So, as you work:
 1. **Update this file as you go, not just at the end of a phase.** After finishing
    a step (or when a decision changes the design), edit the "IN PROGRESS" section
    below: what is done, what changed, what is next. Two lines is enough.
-2. **Tick the step list in the phase spec** (`../docs/specs/phase-1.md` §9) so the
-   next prompt does not repeat a step. Mark it `— DONE` rather than deleting it.
+2. **Tick the step list in the phase spec** (`../docs/specs/phase-2.md` §6.0 while
+   Phase 2 is open; later the active phase's index) so the next prompt does not
+   repeat a step. Mark it `— **DONE**` rather than deleting it.
 3. **If a product decision changes mid-phase, write it into the spec first**
    (and `../docs/PRODUCT.md` when it changes what the product *is*), then fix any
    code already built to the old rule. Do not leave the decision only in chat.
@@ -68,12 +72,87 @@ So, as you work:
    etc.); anything they should know (defaults, things you did not do, next step
    number). Do not paste that recap into this file.
 
-New chat should start: read this file, then `../docs/PRODUCT.md`, then
-`../docs/specs/phase-1.md` §9, then do the next unticked step.
+A new build chat reads only the two lines under IN PROGRESS, then that one step
+card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
+
+## Next — Phase 3 Messaging
+
+- Phase 2 payments is code-complete and not deployed (section below).
+- Next: write `docs/specs/phase-3.md` (visit-done texts / WhatsApp, reminders).
+
+---
+
+## Phase 2 — Payments (branch `rounds-foundations`) — CODE COMPLETE, not deployed
+
+Spec: `../docs/specs/phase-2.md` (§6.0 is the step list). Steps 1–33 **DONE**.
+Same owner decision as Phase 1: **no push, deploy, or OTA until asked**.
+
+**SQL — already pasted by the owner, in this order** (`supabase/migrations/`):
+1. `20260925100000_tenant_payment_settings.sql`
+2. `20260925100100_customers_payments.sql`
+3. `20260925100200_invoices.sql`
+4. `20260925100300_money_engine.sql`
+
+**Owner follow-ups still outstanding**
+- Refresh `supabase/schema_current.sql` from the live schema (owner's file; agents
+  never edit or commit it).
+- Regenerate `workwise-mobile/src/types/supabase.ts` when convenient (phone money
+  queries hand-select the new columns; regenerate keeps them in sync).
+
+**Env vars to add at deploy** (hosting + keep local `.env.local` for Stripe CLI):
+- `STRIPE_CONNECT_WEBHOOK_SECRET` — from the **hosted** Connect webhook endpoint
+  (step 23; different from the platform `STRIPE_WEBHOOK_SECRET` in production).
+- Already expected: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`,
+  `NEXT_PUBLIC_APP_URL`, Supabase URL / anon / service role, mobile
+  `EXPO_PUBLIC_API_URL`.
+
+**Stripe live checklist (Phase 7 launch)**
+- Repeat step 19 in **live** mode (Connect branding, onboarding countries, connected-account payment methods, emails).
+- Create the hosted Connect webhook (live) for the same event list as step 23; set `STRIPE_CONNECT_WEBHOOK_SECRET` on hosting.
+- Switch `STRIPE_SECRET_KEY` to live.
+- Do **not** run `npm run stripe:probe` against live keys (it refuses). Create one real connected account through the app and delete it in Stripe if needed.
+
+**Stripe Connect params (step 20 probe)**
+- Probe accepted Express + Managed Risk as written in `lib/stripe/connect-params.ts`
+  (`apiVersion: '2026-08-26.preview'`). No parameter had to be removed.
+
+**Verified** (step 32 — owner walkthrough, test mode, 2026-09-27)
+| # | Result | Note |
+|---|---|---|
+| 1 | ✓ | Settings → Payments bank + VAT; Company logo |
+| 2 | ✓ | Stripe test onboarding → card payments on |
+| 3 | ✓ | Done → visit-done email with Pay + bank |
+| 4 | ✓ | Card pay `4242…` → thanks page; Card payment on customer |
+| 5 | ✓ | Cash £30 → thanks + credit email |
+| 6 | ✓ | Next visit paid from credit |
+| 7 | ✓ | No-email customer → Share pay link after Done |
+| 8 | ✓ | Invoice customer → PDF email + Invoices tab |
+| 9 | ✓ | Offline Done / Skip / Mark as paid then reconnect |
+| 10 | ✓ | Undo + Waive |
+| 11 | ✓ | Stripe refund → visit unpaid; Refunded in WorkWise |
+| 12 | ✓ | Dispute card → Disputed in WorkWise (race fixed; row backfilled) |
+| 13 | ✓ | Phone → Open Stripe (Express) |
+| 14 | ✓ | RS Locksmiths unchanged (Pro) |
+
+Web checks (Cursor): `tsc`, tests, eslint on Phase 2 paths, `npm run build` — pass.
+
+**Not verified / light gaps**
+- Dispute **push** to the phone (row 12 UI confirmed; push depends on a real-device token).
+- Claude review still recommended for Connect webhook (step 22) and money outbox (step 27) before live.
+- Hosted Connect webhook + live keys wait for Phase 7.
+
+**Known gaps (not missing Phase 2 work)**
+- Texts / WhatsApp for visit-done and reminders → **Phase 3**.
+- Automatic ticking-off of bank transfers → **Phase 4**.
+- Direct Debit / Bacs / Pay by Bank → **Phase 8**.
+- No automatic retry of a failed visit-done email (Share pay link / resend invoice are the fallbacks).
+- Stripe live mode and the hosted Connect webhook → **Phase 7**.
 
 ---
 
 ## Phase 1 — Rounds core (branch `rounds-foundations`) — CODE COMPLETE, not deployed
+
+Phase 2 (payments) — see the section above.
 
 Spec: `../docs/specs/phase-1.md` (§9 is the step list). Product picture:
 `../docs/PRODUCT.md`. Steps 1–22, 25–31 done; **23–24 deferred**; **32 waits

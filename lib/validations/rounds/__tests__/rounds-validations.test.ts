@@ -108,6 +108,15 @@ describe('visit schemas', () => {
     expect(system.success).toBe(false);
   });
 
+  it('accepts a blank skip note sent as null (phone outbox)', () => {
+    const parsed = skipVisitSchema.parse({
+      jobId: '11111111-1111-4111-8111-111111111111',
+      reason: 'weather',
+      note: null,
+    });
+    expect(parsed.note).toBeNull();
+  });
+
   it('parses move remaining dates', () => {
     const parsed = moveRemainingSchema.parse({
       fromDate: '2026-09-18',

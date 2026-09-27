@@ -1,0 +1,68 @@
+import type { JSX, ReactNode } from 'react';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from '@/components/ui/card';
+import type { PublicBusiness } from '@/lib/data/payments/public-pay';
+
+export function PayPageFrame(props: { children: ReactNode }): JSX.Element {
+  return (
+    <div className="animated-gradient-bg relative flex min-h-screen flex-col items-center px-4 py-10">
+      <div className="relative z-0 w-full max-w-[480px]">{props.children}</div>
+    </div>
+  );
+}
+
+export function PayShell(props: {
+  business: PublicBusiness;
+  children: ReactNode;
+}): JSX.Element {
+  const { business, children } = props;
+  const phone = business.phone?.trim() || null;
+  const email = business.email?.trim() || null;
+
+  return (
+    <PayPageFrame>
+      <Card className="glass-card border-white/10 backdrop-blur-xl transition-all duration-300 dark:border-white/[0.06] dark:backdrop-blur-2xl">
+        <CardHeader className="items-center">
+          {business.logoUrl ? (
+            <div className="flex items-center justify-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={business.logoUrl}
+                alt=""
+                className="max-h-12 max-w-[120px] shrink-0 rounded-lg object-contain"
+              />
+              <p className="text-lg font-semibold tracking-tight">{business.name}</p>
+            </div>
+          ) : (
+            <p className="text-center text-xl font-semibold tracking-tight">{business.name}</p>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-6">{children}</CardContent>
+        <CardFooter className="flex-col gap-1 border-t text-center text-sm text-muted-foreground">
+          {phone || email ? (
+            <p>
+              Questions?{' '}
+              {phone ? (
+                <a className="text-primary underline-offset-4 hover:underline" href={`tel:${phone}`}>
+                  {phone}
+                </a>
+              ) : null}
+              {phone && email ? ' · ' : null}
+              {email ? (
+                <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${email}`}>
+                  {email}
+                </a>
+              ) : null}
+            </p>
+          ) : null}
+          <p>Payments go directly to {business.name}.</p>
+          <p className="text-xs text-muted-foreground/80">Powered by WorkWise</p>
+        </CardFooter>
+      </Card>
+    </PayPageFrame>
+  );
+}

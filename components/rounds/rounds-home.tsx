@@ -13,11 +13,14 @@ import {
   Route,
   SkipForward,
   Users,
+  Wallet,
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { optimiseDay } from '@/lib/actions/rounds/visits';
 import type { RoundsHomeData } from '@/lib/data/rounds/home';
+import { formatGbp } from '@/lib/money/pence';
+import { groupHouseStops } from '@/lib/rounds/house-stops';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { Button } from '@/components/ui/button';
@@ -100,6 +103,13 @@ export function RoundsHome({
       glow: 'rgb(6 182 212)',
       count: data.activeCustomers,
     },
+    {
+      key: 'owed',
+      title: 'Owed',
+      icon: Wallet,
+      glow: 'rgb(225 29 72)',
+      count: `${formatGbp(data.owedTotal)} · ${data.owedCustomers} ${data.owedCustomers === 1 ? 'customer' : 'customers'}`,
+    },
   ];
 
   const visibleVisits =
@@ -118,6 +128,10 @@ export function RoundsHome({
     }
     if (key === 'customers') {
       router.push('/customers');
+      return;
+    }
+    if (key === 'owed') {
+      router.push('/payments?view=overdue');
       return;
     }
     if (key === 'planned_amount') {
@@ -235,7 +249,7 @@ export function RoundsHome({
         activeKey={listFilter}
         onSelect={onSummarySelect}
         items={summaryItems}
-        gridClassName="grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-6"
+        gridClassName="grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-7"
       />
 
       <section className="space-y-3">
@@ -260,11 +274,12 @@ export function RoundsHome({
           </div>
         ) : (
           <ul className="space-y-3">
-            {visibleVisits.map((visit, index) => (
+            {groupHouseStops(visibleVisits).map((group, index) => (
               <VisitStopCard
-                key={visit.id}
-                visit={visit}
-                orderIndex={visit.route_position ?? index + 1}
+                key={group[0]!.id}
+                visit={group[0]!}
+                visits={group}
+                orderIndex={group[0]!.route_position ?? index + 1}
               />
             ))}
           </ul>

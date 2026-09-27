@@ -87,3 +87,60 @@ export function endOfMonth(ymd: Ymd): Ymd {
 export function ymdFromDate(d: Date): Ymd {
   return formatYmd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
+
+/**
+ * UTC ISO bounds for a London calendar day: [start, end) where end is the
+ * next London midnight. BST (e.g. 2026-06-15) starts at 2026-06-14T23:00:00.000Z;
+ * GMT (e.g. 2026-01-15) starts at 2026-01-15T00:00:00.000Z.
+ */
+export function londonDayBoundsUtc(ymd: Ymd): { startIso: string; endIso: string } {
+  if (!isValidYmd(ymd)) {
+    throw new Error(`Invalid Ymd: ${ymd}`);
+  }
+  const start = londonWallTimeToUtc(ymd, 0, 0, 0);
+  const end = londonWallTimeToUtc(addDays(ymd, 1), 0, 0, 0);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
+/** Convert a Europe/London wall-clock date+time to a UTC Date. */
+function londonWallTimeToUtc(
+  ymd: Ymd,
+  hour: number,
+  minute: number,
+  second: number,
+): Date {
+  const { year, month, day } = partsFromYmd(ymd);
+  // First guess: treat the wall time as if it were UTC, then correct.
+  let utcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const parts = formatter.formatToParts(new Date(utcMs));
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((p) => p.type === type)?.value);
+    const asUtcMs = Date.UTC(
+      get('year'),
+      get('month') - 1,
+      get('day'),
+      get('hour'),
+      get('minute'),
+      get('second'),
+    );
+    const wantedMs = Date.UTC(year, month - 1, day, hour, minute, second);
+    const delta = wantedMs - asUtcMs;
+    if (delta === 0) break;
+    utcMs += delta;
+  }
+
+  return new Date(utcMs);
+}
+

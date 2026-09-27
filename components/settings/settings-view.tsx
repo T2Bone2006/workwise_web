@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -8,13 +9,17 @@ import {
   AlertTriangle,
   CreditCard,
   Route,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import type { BillingSummary } from '@/lib/data/billing';
+import type { CardPanelData } from '@/lib/data/payments/card-panel';
+import type { PaymentSettings } from '@/lib/data/payments/settings';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import { SettingsCompanyTab } from './settings-company-tab';
+import { SettingsPaymentsTab } from './settings-payments-tab';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 import { SettingsBillingTab } from './settings-billing-tab';
@@ -25,7 +30,10 @@ interface SettingsViewProps {
   initialTenantSkills: TenantSkillRow[];
   billing: BillingSummary;
   rounds?: { settings: RoundsSettings } | null;
+  payments?: { settings: PaymentSettings; cardPanel: CardPanelData } | null;
+  companyLogoUrl?: string | null;
   showSkills: boolean;
+  defaultTab?: string;
 }
 
 const baseTabs = [
@@ -40,7 +48,10 @@ export function SettingsView({
   initialTenantSkills,
   billing,
   rounds = null,
+  payments = null,
+  companyLogoUrl = null,
   showSkills,
+  defaultTab,
 }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
@@ -48,13 +59,31 @@ export function SettingsView({
     ? [
         baseTabs[0],
         { value: 'rounds', label: 'Rounds', icon: Route },
+        ...(payments
+          ? [{ value: 'payments', label: 'Payments', icon: Wallet }]
+          : []),
         ...baseTabs.slice(1),
       ]
     : [...baseTabs];
+  const tabValues = new Set(tabs.map((item) => item.value));
+  const initialTab = defaultTab && tabValues.has(defaultTab as (typeof tabs)[number]['value'])
+    ? defaultTab
+    : 'company';
+  const [tab, setTab] = useState(initialTab);
+  const [formDirty, setFormDirty] = useState(false);
+
+  function onTabChange(next: string) {
+    if (formDirty && next !== tab) {
+      if (!window.confirm('Not saved. Leave without saving?')) return;
+    }
+    setFormDirty(false);
+    setTab(next);
+  }
 
   return (
     <Tabs
-      defaultValue="company"
+      value={tab}
+      onValueChange={onTabChange}
       orientation="vertical"
       className={cn(
         'flex flex-col gap-6 md:flex-row md:gap-8',
@@ -94,19 +123,36 @@ export function SettingsView({
             data={initialData}
             initialTenantSkills={initialTenantSkills}
             showSkills={showSkills}
+            companyLogoUrl={companyLogoUrl}
+            showLogo={Boolean(payments)}
             onSaved={onSaved}
+            onDirtyChange={setFormDirty}
           />
         </TabsContent>
         {rounds && (
           <TabsContent value="rounds" className="mt-0 outline-none">
-            <SettingsRoundsTab settings={rounds.settings} onSaved={onSaved} />
+            <SettingsRoundsTab
+              settings={rounds.settings}
+              onSaved={onSaved}
+              onDirtyChange={setFormDirty}
+            />
+          </TabsContent>
+        )}
+        {payments && (
+          <TabsContent value="payments" className="mt-0 outline-none">
+            <SettingsPaymentsTab
+              settings={payments.settings}
+              cardPanel={payments.cardPanel}
+              onSaved={onSaved}
+              onDirtyChange={setFormDirty}
+            />
           </TabsContent>
         )}
         <TabsContent value="billing" className="mt-0 outline-none">
           <SettingsBillingTab billing={billing} />
         </TabsContent>
         <TabsContent value="profile" className="mt-0 outline-none">
-          <SettingsUserTab data={initialData} onSaved={onSaved} />
+          <SettingsUserTab data={initialData} onSaved={onSaved} onDirtyChange={setFormDirty} />
         </TabsContent>
         <TabsContent value="danger" className="mt-0 outline-none">
           <SettingsDangerTab data={initialData} />

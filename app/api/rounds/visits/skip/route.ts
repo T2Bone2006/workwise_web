@@ -30,8 +30,15 @@ export async function POST(request: Request) {
     actor,
   });
   if (!result.success) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    const status = result.code === 'already_completed' ? 409 : 400;
+    return NextResponse.json(
+      { error: result.error, ...(result.code ? { code: result.code } : {}) },
+      { status },
+    );
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    alreadySkipped: result.alreadySkipped,
+  });
 }

@@ -131,6 +131,8 @@ export function CustomerVisitsCard({
       skip_reason: null,
       route_position: null,
       completed_at: null,
+      customer_sends_invoice: false,
+      customer_has_email: false,
     })),
   ].sort((a, b) => {
     const da = a.scheduled_date ?? '';
@@ -146,12 +148,27 @@ export function CustomerVisitsCard({
       <CardContent>
         <Tabs defaultValue="upcoming" className="space-y-3">
           <TabsList>
-            <TabsTrigger value="upcoming">
+            <TabsTrigger
+              value="upcoming"
+              id="customer-visits-tab-upcoming"
+              aria-controls="customer-visits-panel-upcoming"
+            >
               Upcoming ({upcomingRows.length})
             </TabsTrigger>
-            <TabsTrigger value="recent">Recent ({recent.length})</TabsTrigger>
+            <TabsTrigger
+              value="recent"
+              id="customer-visits-tab-recent"
+              aria-controls="customer-visits-panel-recent"
+            >
+              Recent ({recent.length})
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value="upcoming" className="mt-0">
+          <TabsContent
+            value="upcoming"
+            className="mt-0"
+            id="customer-visits-panel-upcoming"
+            aria-labelledby="customer-visits-tab-upcoming"
+          >
             {upcomingError ? (
               <p className="text-sm text-destructive">{upcomingError}</p>
             ) : (
@@ -161,7 +178,12 @@ export function CustomerVisitsCard({
               />
             )}
           </TabsContent>
-          <TabsContent value="recent" className="mt-0">
+          <TabsContent
+            value="recent"
+            className="mt-0"
+            id="customer-visits-panel-recent"
+            aria-labelledby="customer-visits-tab-recent"
+          >
             {recentError ? (
               <p className="text-sm text-destructive">{recentError}</p>
             ) : (

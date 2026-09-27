@@ -21,6 +21,38 @@ interface SettingsNotificationsTabProps {
   onSaved: () => void;
 }
 
+function Checkbox({
+  id,
+  label,
+  checked,
+  onChange,
+  help,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  help?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        id={id}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-1 size-4 rounded border-input accent-primary"
+      />
+      <div className="space-y-0.5">
+        <Label htmlFor={id} className="cursor-pointer font-medium">
+          {label}
+        </Label>
+        {help && <p className="text-xs text-muted-foreground">{help}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsNotificationsTab({ data, onSaved }: SettingsNotificationsTabProps) {
   const [saving, setSaving] = useState(false);
   const defaults = getDefaultNotifications();
@@ -64,36 +96,6 @@ export function SettingsNotificationsTab({ data, onSaved }: SettingsNotification
       toast.error(result.error ?? 'Failed to save');
     }
   }
-
-  const Checkbox = ({
-    id,
-    label,
-    checked,
-    onChange,
-    help,
-  }: {
-    id: string;
-    label: string;
-    checked: boolean;
-    onChange: (v: boolean) => void;
-    help?: string;
-  }) => (
-    <div className="flex items-start gap-3">
-      <input
-        type="checkbox"
-        id={id}
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 size-4 rounded border-input accent-primary"
-      />
-      <div className="space-y-0.5">
-        <Label htmlFor={id} className="cursor-pointer font-medium">
-          {label}
-        </Label>
-        {help && <p className="text-xs text-muted-foreground">{help}</p>}
-      </div>
-    </div>
-  );
 
   return (
     <form onSubmit={handleSubmit}>

@@ -59,6 +59,12 @@ import type { RoundsCustomerListRow } from '@/lib/data/rounds/customers';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 import { postcodeMatchesArea, ukPostcodeOutward } from '@/lib/utils/postcode';
 import { cn } from '@/lib/utils';
+import { formatGbp } from '@/lib/money/pence';
+import {
+  SummaryStrip,
+  type SummaryStripItem,
+} from '@/components/jobs/status-summary-strip';
+import { CheckCircle2, CircleAlert } from 'lucide-react';
 
 const DEBOUNCE_MS = 300;
 
@@ -91,7 +97,7 @@ function addDays(ymd: string, days: number): string {
 }
 
 function paymentLabel(terms: RoundsCustomerListRow['payment_terms']): string {
-  return terms === 'monthly_invoice' ? 'Monthly invoice' : 'On the day';
+  return terms === 'invoice' ? 'Invoice' : '—';
 }
 
 function valuesForField(
@@ -196,6 +202,7 @@ export function RoundsCustomersTable({
     'deactivate',
   );
   const [isPending, setIsPending] = useState(false);
+  const [moneyFilter, setMoneyFilter] = useState<'overdue' | 'paid' | null>(null);
 
   const pushFilters = useCallback(
     (
@@ -279,14 +286,53 @@ export function RoundsCustomersTable({
     }
   };
 
-  const narrowed = customers.filter((customer) => matchesFieldFilters(customer, fieldFilters));
+  const narrowed = customers.filter((customer) => {
+    if (!matchesFieldFilters(customer, fieldFilters)) return false;
+    if (moneyFilter === 'overdue') return customer.owed_amount > 0;
+    if (moneyFilter === 'paid') return customer.owed_amount <= 0;
+    return true;
+  });
   const visible = narrowed;
+  const overdueCustomers = customers.filter((customer) => customer.owed_amount > 0);
+  const paidCustomers = customers.filter((customer) => customer.owed_amount <= 0);
+  const overdueTotal = overdueCustomers.reduce((sum, customer) => sum + customer.owed_amount, 0);
+  const moneyItems: SummaryStripItem[] = [
+    {
+      key: 'overdue',
+      title: 'Overdue',
+      icon: CircleAlert,
+      glow: 'rgb(225 29 72)',
+      count: formatGbp(overdueTotal),
+    },
+    {
+      key: 'paid',
+      title: 'Paid',
+      icon: CheckCircle2,
+      glow: 'rgb(16 185 129)',
+      count: paidCustomers.length,
+    },
+  ];
   const emptyBecauseFilter =
     visible.length === 0 &&
-    (search.trim().length > 0 || status !== 'active' || fieldFilters.length > 0);
+    (search.trim().length > 0 ||
+      status !== 'active' ||
+      fieldFilters.length > 0 ||
+      moneyFilter != null);
 
   return (
     <>
+      <SummaryStrip
+        label="Money"
+        hint="· click to see who is overdue"
+        activeKey={moneyFilter}
+        onSelect={(key) => {
+          if (key === 'overdue' || key === 'paid') {
+            setMoneyFilter((prev) => (prev === key ? null : key));
+          }
+        }}
+        items={moneyItems}
+        gridClassName="grid-cols-2 gap-2 sm:gap-3"
+      />
       <Card className="glass-card border-border/80">
         <CardContent className="flex flex-col gap-4 p-4">
           <div className="flex flex-wrap items-end gap-3">
@@ -490,6 +536,7 @@ export function RoundsCustomersTable({
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Money</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>Postcode</TableHead>
                   <TableHead>Agreements</TableHead>
@@ -520,6 +567,17 @@ export function RoundsCustomersTable({
                       {!customer.is_active ? (
                         <span className="ml-2 text-xs text-muted-foreground">Inactive</span>
                       ) : null}
+                    </TableCell>
+                    <TableCell>
+                      {customer.owed_amount > 0 ? (
+                        <span className="inline-flex rounded-full border border-rose-300/70 bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-800 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-200">
+                          Overdue {formatGbp(customer.owed_amount)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full border border-emerald-300/70 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200">
+                          Up to date
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {phoneLabel(customer)}

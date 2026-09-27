@@ -12,6 +12,7 @@ import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/da
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
+import { joinHouse } from '@/lib/rounds/house';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   canonicalFieldKey,
@@ -32,7 +33,8 @@ function getRawFormData(formData: FormData) {
     type: formData.get('type'),
     email: formData.get('email') ?? '',
     phone: formData.get('phone') ?? '',
-    address: formData.get('address') ?? '',
+    address: formData.has('address') ? (optional('address') ?? '') : undefined,
+    postcode: formData.has('postcode') ? (optional('postcode') ?? '') : undefined,
     notes: formData.get('notes') ?? '',
     payment_terms: optional('payment_terms') || undefined,
     access_notes: formData.has('access_notes') ? (optional('access_notes') ?? '') : undefined,
@@ -42,18 +44,25 @@ function getRawFormData(formData: FormData) {
 
 function extraCustomerFields(validated: {
   phone?: string;
-  payment_terms?: 'on_the_day' | 'monthly_invoice';
+  address?: string;
+  postcode?: string;
+  payment_terms?: 'on_the_day' | 'invoice';
   access_notes?: string;
   preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
 }) {
   const extra: {
     phone_e164: string | null;
-    payment_terms?: 'on_the_day' | 'monthly_invoice';
+    billing_address?: string | null;
+    payment_terms?: 'on_the_day' | 'invoice';
     access_notes?: string | null;
     preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
   } = {
     phone_e164: normalizeUkPhoneE164(validated.phone || null),
   };
+  // Absent means "this form does not edit the address"; empty means clear it.
+  if (validated.address !== undefined) {
+    extra.billing_address = joinHouse(validated.address, validated.postcode ?? '');
+  }
   if (validated.payment_terms) extra.payment_terms = validated.payment_terms;
   if (validated.access_notes !== undefined) {
     extra.access_notes = validated.access_notes.trim() || null;

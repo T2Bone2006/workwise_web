@@ -49,6 +49,7 @@ export interface TenantSettingsCompany {
   email?: string;
   address?: string;
   logo_url?: string;
+  logo_path?: string;
 }
 
 export interface PricingMargins {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { firstZodError, readJsonBody, requireRoundsApi } from '@/lib/api/rounds-request';
 import { createAgreementCore, jobIdsForAgreement } from '@/lib/rounds/create-agreement';
+import { endAgreementCore } from '@/lib/rounds/end-agreement';
 import { updateAgreementCore } from '@/lib/rounds/update-agreement';
 import { agreementSchema } from '@/lib/validations/rounds/agreement';
 
@@ -64,4 +65,30 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
   return NextResponse.json({ regenerated: result.regenerated });
+}
+
+const deleteSchema = z.object({
+  agreementId: z.string().uuid('Invalid agreement'),
+});
+
+export async function DELETE(request: Request) {
+  const auth = await requireRoundsApi(request);
+  if (!auth.ok) return auth.response;
+
+  const json = await readJsonBody(request);
+  if (!json.ok) return json.response;
+
+  const parsed = deleteSchema.safeParse(json.body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: firstZodError(parsed.error) }, { status: 400 });
+  }
+
+  const result = await endAgreementCore(auth.ctx.supabase, {
+    tenantId: auth.ctx.tenantId,
+    agreementId: parsed.data.agreementId,
+  });
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  return NextResponse.json({ ok: true });
 }

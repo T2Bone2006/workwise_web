@@ -23,6 +23,7 @@ import {
 import type { CustomerRow } from '@/lib/data/customers';
 import type { VisitRow } from '@/lib/data/rounds/visits';
 import type { Ymd } from '@/lib/rounds/dates';
+import { groupHouseStops } from '@/lib/rounds/house-stops';
 import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import {
@@ -106,14 +107,19 @@ export function RoundsDayPlan({
 
   const moveIndex = (id: string, delta: number) => {
     setOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx < 0) return prev;
+      const groups = groupHouseStops(
+        prev
+          .map((jobId) => visitById.get(jobId))
+          .filter((row): row is VisitRow => row != null),
+      ).map((group) => group.map((row) => row.id));
+      const idx = groups.findIndex((group) => group.includes(id));
       const nextIdx = idx + delta;
-      if (nextIdx < 0 || nextIdx >= prev.length) return prev;
-      const copy = [...prev];
+      if (idx < 0 || nextIdx < 0 || nextIdx >= groups.length) return prev;
+      const copy = [...groups];
       const [item] = copy.splice(idx, 1);
+      if (!item) return prev;
       copy.splice(nextIdx, 0, item);
-      return copy;
+      return copy.flat();
     });
   };
 
@@ -122,13 +128,19 @@ export function RoundsDayPlan({
     e.preventDefault();
     if (!dragId || dragId === overId) return;
     setOrder((prev) => {
-      const from = prev.indexOf(dragId);
-      const to = prev.indexOf(overId);
-      if (from < 0 || to < 0) return prev;
-      const copy = [...prev];
+      const groups = groupHouseStops(
+        prev
+          .map((jobId) => visitById.get(jobId))
+          .filter((row): row is VisitRow => row != null),
+      ).map((group) => group.map((row) => row.id));
+      const from = groups.findIndex((group) => group.includes(dragId));
+      const to = groups.findIndex((group) => group.includes(overId));
+      if (from < 0 || to < 0 || from === to) return prev;
+      const copy = [...groups];
       const [item] = copy.splice(from, 1);
+      if (!item) return prev;
       copy.splice(to, 0, item);
-      return copy;
+      return copy.flat();
     });
   };
   const onDragEnd = () => setDragId(null);
@@ -235,18 +247,21 @@ export function RoundsDayPlan({
         </div>
       ) : (
         <ul className="space-y-3">
-          {orderedVisits.map((visit, index) => (
+          {groupHouseStops(orderedVisits).map((group, index) => {
+            const lead = group[0]!;
+            return (
             <div
-              key={visit.id}
-              draggable={isLeftover(visit.status)}
-              onDragStart={() => onDragStart(visit.id)}
-              onDragOver={(e) => onDragOver(e, visit.id)}
+              key={lead.id}
+              draggable={group.some((visit) => isLeftover(visit.status))}
+              onDragStart={() => onDragStart(lead.id)}
+              onDragOver={(e) => onDragOver(e, lead.id)}
               onDragEnd={onDragEnd}
             >
               <VisitStopCard
-                visit={visit}
+                visit={lead}
+                visits={group}
                 orderIndex={index + 1}
-                dimmed={dragId === visit.id}
+                dimmed={group.some((visit) => dragId === visit.id)}
                 leading={
                   <div className="flex flex-col items-center gap-1 pt-0.5">
                     <span
@@ -262,7 +277,7 @@ export function RoundsDayPlan({
                         size="icon"
                         className="size-6"
                         disabled={index === 0}
-                        onClick={() => moveIndex(visit.id, -1)}
+                        onClick={() => moveIndex(lead.id, -1)}
                         aria-label="Move up"
                       >
                         <ArrowUp className="size-3.5" />
@@ -272,8 +287,8 @@ export function RoundsDayPlan({
                         variant="ghost"
                         size="icon"
                         className="size-6"
-                        disabled={index === orderedVisits.length - 1}
-                        onClick={() => moveIndex(visit.id, 1)}
+                        disabled={index === groupHouseStops(orderedVisits).length - 1}
+                        onClick={() => moveIndex(lead.id, 1)}
                         aria-label="Move down"
                       >
                         <ArrowDown className="size-3.5" />
@@ -283,7 +298,8 @@ export function RoundsDayPlan({
                 }
               />
             </div>
-          ))}
+            );
+          })}
         </ul>
       )}
 

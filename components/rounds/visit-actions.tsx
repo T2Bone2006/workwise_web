@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { format, parseISO } from 'date-fns';
 import { CalendarIcon, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatGbp, parseMoneyInput } from '@/lib/money/pence';
 import {
   completeVisit,
   moveRemaining,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/rounds/skip-reasons';
 import type { Ymd } from '@/lib/rounds/dates';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Calendar } from '@/components/ui/calendar';
 import {
   Dialog,
@@ -56,44 +58,196 @@ function formatYmdDisplay(ymd: string): string {
 export function CompleteVisitButton({
   jobId,
   quotedAmount,
+  customerSendsInvoice,
+  customerHasEmail,
   size = 'sm',
 }: {
   jobId: string;
   quotedAmount?: number | null;
+  customerSendsInvoice: boolean;
+  customerHasEmail: boolean;
   size?: 'default' | 'sm' | 'lg' | 'icon';
 }) {
+  const [open, setOpen] = useState(false);
+  const [session, setSession] = useState(0);
+
+  return (
+    <>
+      <Button
+        size={size}
+        className="min-w-0"
+        onClick={() => {
+          setSession((n) => n + 1);
+          setOpen(true);
+        }}
+      >
+        <Check className="mr-1 size-4 sm:mr-1.5" />
+        Done
+      </Button>
+      <CompleteVisitDialog
+        key={session}
+        jobId={jobId}
+        quotedAmount={quotedAmount ?? null}
+        customerSendsInvoice={customerSendsInvoice}
+        customerHasEmail={customerHasEmail}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
+  );
+}
+
+export function CompleteVisitDialog({
+  jobId,
+  quotedAmount,
+  customerSendsInvoice,
+  customerHasEmail,
+  open,
+  onOpenChange,
+}: {
+  jobId: string;
+  quotedAmount: number | null;
+  customerSendsInvoice: boolean;
+  customerHasEmail: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const router = useRouter();
+  const [method, setMethod] = useState<'cash' | 'cheque' | null>(null);
+  const [amount, setAmount] = useState('');
+  const [sendInvoice, setSendInvoice] = useState(customerSendsInvoice);
   const [pending, setPending] = useState(false);
+  const [amountError, setAmountError] = useState<string | null>(null);
+
+  const parsedAmount = method ? parseMoneyInput(amount) : null;
+  const creditHint =
+    parsedAmount != null && quotedAmount != null && parsedAmount > quotedAmount
+      ? parsedAmount - quotedAmount
+      : null;
+
+  const selectMethod = (next: 'cash' | 'cheque') => {
+    if (method === next) {
+      setMethod(null);
+      setAmount('');
+      setAmountError(null);
+      return;
+    }
+    setMethod(next);
+    setAmount(quotedAmount != null ? String(quotedAmount) : '');
+    setAmountError(null);
+  };
 
   const handle = async () => {
+    let payment: { method: 'cash' | 'cheque'; amount: number } | null = null;
+    if (method) {
+      const parsed = parseMoneyInput(amount);
+      if (parsed == null || parsed <= 0) {
+        setAmountError('Enter an amount');
+        return;
+      }
+      payment = { method, amount: parsed };
+    }
+
     setPending(true);
     const result = await completeVisit({
       jobId,
       finalAmount: quotedAmount ?? null,
+      payment,
+      sendInvoice,
     });
     setPending(false);
     if (result.success) {
-      toast.success('Marked done');
+      if (result.alreadyCompleted) {
+        toast.success('Already done');
+      } else if (payment) {
+        toast.success(`Marked done · ${formatGbp(payment.amount)} ${payment.method} recorded`);
+      } else {
+        toast.success('Marked done');
+      }
+      onOpenChange(false);
       router.refresh();
-    } else {
-      toast.error(result.error);
+      return;
     }
+    toast.error(result.error);
   };
 
   return (
-    <Button
-      size={size}
-      className="min-w-0"
-      onClick={() => void handle()}
-      disabled={pending}
-    >
-      {pending ? (
-        <Loader2 className="size-4 animate-spin" />
-      ) : (
-        <Check className="mr-1 size-4 sm:mr-1.5" />
-      )}
-      Done
-    </Button>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Mark as done</DialogTitle>
+          <DialogDescription>{formatGbp(quotedAmount)}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Paid today?</p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={method === 'cash' ? 'default' : 'outline'}
+                onClick={() => selectMethod('cash')}
+              >
+                Cash
+              </Button>
+              <Button
+                type="button"
+                variant={method === 'cheque' ? 'default' : 'outline'}
+                onClick={() => selectMethod('cheque')}
+              >
+                Cheque
+              </Button>
+            </div>
+            {method ? (
+              <div className="space-y-1">
+                <Label htmlFor={`done-amount-${jobId}`}>Amount</Label>
+                <Input
+                  id={`done-amount-${jobId}`}
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    setAmountError(null);
+                  }}
+                />
+                {amountError ? (
+                  <p className="text-sm text-destructive">{amountError}</p>
+                ) : null}
+                {creditHint != null ? (
+                  <p className="text-sm text-muted-foreground">
+                    {formatGbp(creditHint)} will be credit for next time.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor={`send-invoice-${jobId}`}>Send invoice</Label>
+              <Switch
+                id={`send-invoice-${jobId}`}
+                checked={sendInvoice}
+                onCheckedChange={setSendInvoice}
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">Remembered for this customer.</p>
+          </div>
+          {customerHasEmail ? null : (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              No email for this customer — they won&apos;t get the visit-done message.
+            </p>
+          )}
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handle()} disabled={pending}>
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+            Mark done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -388,12 +542,16 @@ export function VisitActionButtons({
   quotedAmount,
   scheduledDate,
   scheduledTime,
+  customerSendsInvoice,
+  customerHasEmail,
 }: {
   jobId: string;
   status: string;
   quotedAmount?: number | null;
   scheduledDate?: string | null;
   scheduledTime?: string | null;
+  customerSendsInvoice: boolean;
+  customerHasEmail: boolean;
 }) {
   const [skipOpen, setSkipOpen] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -412,7 +570,12 @@ export function VisitActionButtons({
   return (
     <>
       <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap">
-        <CompleteVisitButton jobId={jobId} quotedAmount={quotedAmount} />
+        <CompleteVisitButton
+          jobId={jobId}
+          quotedAmount={quotedAmount}
+          customerSendsInvoice={customerSendsInvoice}
+          customerHasEmail={customerHasEmail}
+        />
         <Button
           variant="outline"
           size="sm"

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { endOfMonth, isValidYmd, startOfMonth, type Ymd } from '@/lib/rounds/dates';
+import { sendsInvoice } from '@/lib/payments/terms';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 
 export type VisitRow = {
@@ -24,6 +25,8 @@ export type VisitRow = {
   skip_reason: string | null;
   route_position: number | null;
   completed_at: string | null;
+  customer_sends_invoice: boolean;
+  customer_has_email: boolean;
 };
 
 export type VisitDayCounts = {
@@ -56,7 +59,7 @@ const VISIT_SELECT = [
   'route_position',
   'completed_at',
   'created_at',
-  'customers ( name )',
+  'customers ( name, email, payment_terms )',
 ].join(', ');
 
 function asString(value: unknown): string | null {
@@ -78,13 +81,20 @@ function asFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function embedName(value: unknown): string | null {
-  if (Array.isArray(value)) return embedName(value[0]);
-  if (value && typeof value === 'object' && 'name' in value) {
-    const name = (value as { name?: unknown }).name;
-    return typeof name === 'string' && name.trim() !== '' ? name : null;
+function embedCustomer(value: unknown): {
+  name: string | null;
+  email: string | null;
+  paymentTerms: string | null;
+} {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row || typeof row !== 'object') {
+    return { name: null, email: null, paymentTerms: null };
   }
-  return null;
+  const record = row as { name?: unknown; email?: unknown; payment_terms?: unknown };
+  const name = typeof record.name === 'string' && record.name.trim() !== '' ? record.name : null;
+  const email = typeof record.email === 'string' && record.email.trim() !== '' ? record.email : null;
+  const paymentTerms = typeof record.payment_terms === 'string' ? record.payment_terms : null;
+  return { name, email, paymentTerms };
 }
 
 export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
@@ -98,11 +108,15 @@ export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
     return null;
   }
 
+  const customer = embedCustomer(raw.customers);
+
   return {
     id,
     reference_number: referenceNumber,
     customer_id: asString(raw.customer_id),
-    customer_name: embedName(raw.customers),
+    customer_name: customer.name,
+    customer_sends_invoice: sendsInvoice(customer.paymentTerms),
+    customer_has_email: customer.email != null,
     service_agreement_id: asString(raw.service_agreement_id),
     agreement_occurrence_date: asYmd(raw.agreement_occurrence_date),
     address,

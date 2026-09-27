@@ -2,11 +2,14 @@ import { createClient } from '@/lib/supabase/server';
 import type { CustomerDetailRow } from '@/lib/data/customers';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
+import { splitHouse } from '@/lib/rounds/house';
 import { frequencyLabel } from '@/lib/rounds/parse-frequency';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
+import { getOwedCustomers } from '@/lib/data/payments/owed';
+import { sendsInvoice } from '@/lib/payments/terms';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 
-export type PaymentTerms = 'on_the_day' | 'monthly_invoice';
+export type PaymentTerms = 'on_the_day' | 'invoice';
 export type PreferredChannel = 'whatsapp' | 'sms' | 'email' | 'none';
 
 export type RoundsCustomerListRow = {
@@ -20,7 +23,7 @@ export type RoundsCustomerListRow = {
   agreement_count: number;
   active_agreement_count: number;
   next_visit_date: Ymd | null;
-  /** Postcode of the first active agreement, if any. */
+  /** Postcode of the first active agreement, else the customer's own. */
   postcode: string | null;
   /** Titles of active agreements, for the service filter. */
   services: string[];
@@ -28,6 +31,8 @@ export type RoundsCustomerListRow = {
   frequencies: string[];
   /** Postcodes of active agreements. */
   postcodes: string[];
+  /** What they still owe. 0 means paid up. */
+  owed_amount: number;
 };
 
 export type RoundsCustomerDetail = CustomerDetailRow & {
@@ -55,7 +60,7 @@ function asString(value: unknown): string | null {
 }
 
 function asPaymentTerms(value: unknown): PaymentTerms {
-  return value === 'monthly_invoice' ? 'monthly_invoice' : 'on_the_day';
+  return sendsInvoice(typeof value === 'string' ? value : null) ? 'invoice' : 'on_the_day';
 }
 
 function asPreferredChannel(value: unknown): PreferredChannel | null {
@@ -184,12 +189,13 @@ export async function getRoundsCustomers(
 ): Promise<{ customers: RoundsCustomerListRow[]; error: Error | null }> {
   try {
     const supabase = await createClient();
+    const owedPromise = getOwedCustomers(supabase, tenantId);
     const status = filters.status ?? 'active';
 
     let query = supabase
       .from('customers')
       .select(
-        'id, name, phone, phone_e164, email, payment_terms, is_active, service_agreements(id, title, status, postcode, frequency_days, next_due_date, preferred_weekday, schedule_mode)',
+        'id, name, phone, phone_e164, email, billing_address, payment_terms, is_active, service_agreements(id, title, status, postcode, frequency_days, next_due_date, preferred_weekday, schedule_mode)',
       )
       .eq('tenant_id', tenantId)
       .order('name');
@@ -214,7 +220,11 @@ export async function getRoundsCustomers(
       .map((row) => (row as { id?: unknown }).id)
       .filter((id): id is string => typeof id === 'string');
 
-    const settings = await getRoundsSettings(supabase, tenantId);
+    const [settings, owed] = await Promise.all([
+      getRoundsSettings(supabase, tenantId),
+      owedPromise,
+    ]);
+    const owedById = new Map(owed.rows.map((row) => [row.customerId, row.owedAmount]));
     const today = todayInLondon();
     const nextByCustomer = new Map<string, Ymd>();
     if (ids.length > 0) {
@@ -266,10 +276,12 @@ export async function getRoundsCustomers(
         agreement_count: summary.agreement_count,
         active_agreement_count: summary.active_agreement_count,
         next_visit_date: nextVisit,
-        postcode: summary.postcode,
+        postcode:
+          summary.postcode ?? (splitHouse(asString(row.billing_address)).postcode || null),
         services: bits.services,
         frequencies: bits.frequencies,
         postcodes: bits.postcodes,
+        owed_amount: owedById.get(id) ?? 0,
       });
     }
 
@@ -292,7 +304,7 @@ export async function getRoundsCustomerById(
     const { data, error } = await supabase
       .from('customers')
       .select(
-        'id, tenant_id, name, type, email, phone, phone_e164, notes, created_at, updated_at, is_active, preferred_channel, payment_terms, access_notes, bank_reference_hint, jobs(count)',
+        'id, tenant_id, name, type, email, phone, phone_e164, billing_address, notes, created_at, updated_at, is_active, preferred_channel, payment_terms, access_notes, bank_reference_hint, jobs(count)',
       )
       .eq('id', customerId)
       .eq('tenant_id', tenantId)
@@ -318,7 +330,7 @@ export async function getRoundsCustomerById(
       type: typeof row.type === 'string' ? row.type : 'individual',
       email: asString(row.email),
       phone: asString(row.phone),
-      address: null,
+      address: asString(row.billing_address),
       notes: asString(row.notes),
       created_at: typeof row.created_at === 'string' ? row.created_at : undefined,
       updated_at: typeof row.updated_at === 'string' ? row.updated_at : null,

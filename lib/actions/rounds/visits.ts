@@ -48,6 +48,7 @@ function revalidateVisits(customerId?: string | null) {
   revalidatePath('/dashboard');
   revalidatePath('/calendar');
   revalidatePath('/customers');
+  revalidatePath('/payments');
   if (customerId) revalidatePath(`/customers/${customerId}`);
 }
 
@@ -70,7 +71,9 @@ function random4hex(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 4);
 }
 
-export async function completeVisit(input: CompleteVisitInput): Promise<ActionResult> {
+export async function completeVisit(
+  input: CompleteVisitInput,
+): Promise<ActionResult & { alreadyCompleted?: boolean }> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
 
@@ -84,11 +87,26 @@ export async function completeVisit(input: CompleteVisitInput): Promise<ActionRe
     finalAmount: parsed.data.finalAmount,
     notes: emptyToNull(parsed.data.notes),
     actor: ctx.actor,
+    payment: parsed.data.payment,
+    sendInvoice: parsed.data.sendInvoice,
+    clientMutationId: parsed.data.clientMutationId,
+    completedAt: parsed.data.completedAt,
   });
   if (!result.success) return result;
 
-  revalidateVisits();
-  return { success: true };
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('customer_id')
+    .eq('id', parsed.data.jobId)
+    .eq('tenant_id', ctx.tenantId)
+    .maybeSingle();
+  const customerId =
+    job && typeof (job as { customer_id?: unknown }).customer_id === 'string'
+      ? (job as { customer_id: string }).customer_id
+      : null;
+
+  revalidateVisits(customerId);
+  return { success: true, alreadyCompleted: result.alreadyCompleted };
 }
 
 export async function skipVisit(input: SkipVisitInput): Promise<ActionResult> {
@@ -106,7 +124,7 @@ export async function skipVisit(input: SkipVisitInput): Promise<ActionResult> {
     note: emptyToNull(parsed.data.note),
     actor: ctx.actor,
   });
-  if (!result.success) return result;
+  if (!result.success) return { success: false, error: result.error };
 
   revalidateVisits();
   return { success: true };

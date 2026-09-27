@@ -96,6 +96,8 @@ function visit(overrides: Partial<VisitRow>): VisitRow {
     skip_reason: null,
     route_position: null,
     completed_at: null,
+    customer_sends_invoice: false,
+    customer_has_email: false,
     ...overrides,
   };
 }

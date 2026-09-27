@@ -17,7 +17,10 @@ export async function requireRoundsApi(
   if (!auth) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Unauthorised' }, { status: 401 }),
+      response: NextResponse.json(
+        { error: 'Unauthorised' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } },
+      ),
     };
   }
 
@@ -25,7 +28,10 @@ export async function requireRoundsApi(
   if (!tenantId) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      ),
     };
   }
 
@@ -59,14 +65,20 @@ export async function readJsonBody(
     if (body == null || typeof body !== 'object' || Array.isArray(body)) {
       return {
         ok: false,
-        response: NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }),
+        response: NextResponse.json(
+          { error: 'Invalid JSON' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } },
+        ),
       };
     }
     return { ok: true, body: body as Record<string, unknown> };
   } catch {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }),
+      response: NextResponse.json(
+        { error: 'Invalid JSON' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      ),
     };
   }
 }
@@ -79,4 +91,15 @@ export function emptyToNull(value: string | null | undefined): string | null {
   if (value == null) return null;
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
+}
+
+export function roundsJson(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+export function moneyErrorStatus(error: string): number {
+  return /not found/i.test(error) ? 404 : 400;
 }

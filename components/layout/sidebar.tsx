@@ -15,7 +15,6 @@ import {
   ChevronLeft,
   Brain,
   Eye,
-  Route,
   CalendarDays,
   Wallet,
   MessageSquare,
@@ -67,7 +66,7 @@ function buildNavSections(features: TenantFeatures): NavSection[] {
     { href: '/import', label: 'Import', icon: Upload, show: true },
   ];
   const rounds: NavItem[] = [
-    { href: '/customers', label: 'Customers', icon: Route, show: true },
+    { href: '/customers', label: 'Customers', icon: Users, show: true },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays, show: true },
     { href: '/services', label: 'Services', icon: Wrench, show: true },
     // Import deferred — early customers onboarded manually as a service.

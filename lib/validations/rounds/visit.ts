@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import { isValidYmd } from '@/lib/rounds/dates';
 import { USER_SKIP_REASONS } from '@/lib/rounds/skip-reasons';
+import { moneyAmountSchema } from '@/lib/validations/payments';
 import { agreementSchema, hhmmTimeSchema } from './agreement';
 
 export const skipVisitSchema = z.object({
   jobId: z.string().uuid('Invalid job'),
   reason: z.enum(USER_SKIP_REASONS),
-  note: z.string().trim().max(300).optional().or(z.literal('')),
+  /** Phone outbox may send `null` when there is no note. */
+  note: z.string().trim().max(300).nullable().optional().or(z.literal('')),
 });
 
 export type SkipVisitInput = z.input<typeof skipVisitSchema>;
@@ -34,6 +36,16 @@ export const completeVisitSchema = z.object({
   jobId: z.string().uuid('Invalid job'),
   finalAmount: z.coerce.number().min(0).nullable().optional(),
   notes: z.string().max(1000).optional().or(z.literal('')),
+  payment: z
+    .object({
+      method: z.enum(['cash', 'cheque']),
+      amount: moneyAmountSchema,
+    })
+    .nullable()
+    .optional(),
+  sendInvoice: z.boolean().nullable().optional(),
+  clientMutationId: z.string().min(8).max(64).optional(),
+  completedAt: z.string().datetime({ offset: true }).optional(),
 });
 
 export type CompleteVisitInput = z.input<typeof completeVisitSchema>;

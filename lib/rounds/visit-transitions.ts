@@ -9,8 +9,26 @@ import {
 import { nextDueAfter, planNextAfterCompletion } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import type { SkipReason } from '@/lib/rounds/skip-reasons';
+import { afterVisitCompleted } from '@/lib/payments/after-complete';
+import { recordPaymentCore } from '@/lib/payments/money-core';
 
 export type TransitionResult = { success: true } | { success: false; error: string };
+
+export type CompleteVisitPayment = { method: 'cash' | 'cheque'; amount: number };
+
+export type CompleteVisitResult =
+  | {
+      success: true;
+      alreadyCompleted: boolean;
+      skippedElsewhere: boolean;
+      paymentId: string | null;
+      paymentDuplicate: boolean;
+    }
+  | { success: false; error: string };
+
+export type SkipVisitResult =
+  | { success: true; alreadySkipped: boolean }
+  | { success: false; error: string; code?: 'already_completed' };
 
 export const UNTOUCHED_STATUSES = ['assigned'] as const;
 
@@ -24,8 +42,6 @@ export const RESCHEDULE_STATUSES = [
 ] as const;
 
 export type Actor = { userId?: string; workerId?: string };
-
-const CLOSED_STATUSES = new Set(['completed', 'cancelled']);
 
 function asYmd(value: unknown): Ymd | null {
   if (typeof value !== 'string' || value.length < 10) return null;
@@ -60,6 +76,7 @@ type JobRow = {
   scheduled_time: string | null;
   service_agreement_id: string | null;
   route_position: number | null;
+  customer_id: string | null;
 };
 
 async function loadJob(
@@ -70,7 +87,7 @@ async function loadJob(
   const { data, error } = await supabase
     .from('jobs')
     .select(
-      'id, status, scheduled_date, scheduled_time, service_agreement_id, route_position',
+      'id, status, scheduled_date, scheduled_time, service_agreement_id, route_position, customer_id',
     )
     .eq('id', jobId)
     .eq('tenant_id', tenantId)
@@ -88,6 +105,7 @@ async function loadJob(
     service_agreement_id:
       typeof data.service_agreement_id === 'string' ? data.service_agreement_id : null,
     route_position: asFiniteNumber(data.route_position),
+    customer_id: typeof data.customer_id === 'string' ? data.customer_id : null,
   };
 }
 
@@ -155,6 +173,58 @@ async function generateAfterCompletion(
   }
 }
 
+const FIVE_MIN_MS = 5 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+function clampCompletedAt(raw: string | null | undefined, now: Date = new Date()): Date {
+  if (!raw) return now;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return now;
+  const t = parsed.getTime();
+  if (t > now.getTime() + FIVE_MIN_MS) return now;
+  if (t < now.getTime() - SEVEN_DAYS_MS) return now;
+  return parsed;
+}
+
+async function recordOptionalPayment(
+  supabase: SupabaseClient,
+  params: {
+    tenantId: string;
+    customerId: string | null;
+    jobId: string;
+    payment: CompleteVisitPayment | null | undefined;
+    clientMutationId?: string | null;
+    userId: string | null;
+  },
+): Promise<
+  | { ok: true; paymentId: string | null; paymentDuplicate: boolean }
+  | { ok: false; error: string }
+> {
+  if (!params.payment) {
+    return { ok: true, paymentId: null, paymentDuplicate: false };
+  }
+  if (!params.customerId) {
+    return { ok: false, error: 'Could not record the payment.' };
+  }
+  const result = await recordPaymentCore(supabase, {
+    tenantId: params.tenantId,
+    customerId: params.customerId,
+    amount: params.payment.amount,
+    method: params.payment.method,
+    appliesToJobId: params.jobId,
+    clientMutationId: params.clientMutationId ?? null,
+    userId: params.userId,
+  });
+  if (!result.success) {
+    return { ok: false, error: result.error };
+  }
+  return {
+    ok: true,
+    paymentId: result.paymentId,
+    paymentDuplicate: result.duplicate,
+  };
+}
+
 export async function completeVisitCore(
   supabase: SupabaseClient,
   params: {
@@ -163,18 +233,68 @@ export async function completeVisitCore(
     finalAmount?: number | null;
     notes?: string | null;
     actor: Actor;
+    payment?: CompleteVisitPayment | null;
+    sendInvoice?: boolean | null;
+    clientMutationId?: string | null;
+    completedAt?: string | null;
   },
-): Promise<TransitionResult> {
+): Promise<CompleteVisitResult> {
   const job = await loadJob(supabase, params.tenantId, params.jobId);
   if (!job) return { success: false, error: 'Visit not found.' };
-  if (job.status === 'completed') {
-    return { success: false, error: 'This visit is already completed.' };
-  }
+
+  const completedAt = clampCompletedAt(params.completedAt);
+  const userId = params.actor.userId ?? null;
+
+  // Skipped elsewhere — keep any cash as credit against this job id.
   if (job.status === 'cancelled') {
-    return { success: false, error: 'This visit was skipped or cancelled.' };
+    const payment = await recordOptionalPayment(supabase, {
+      tenantId: params.tenantId,
+      customerId: job.customer_id,
+      jobId: job.id,
+      payment: params.payment,
+      clientMutationId: params.clientMutationId,
+      userId,
+    });
+    if (!payment.ok) {
+      return { success: false, error: payment.error };
+    }
+    return {
+      success: true,
+      alreadyCompleted: false,
+      skippedElsewhere: true,
+      paymentId: payment.paymentId,
+      paymentDuplicate: payment.paymentDuplicate,
+    };
   }
 
-  const completedAt = new Date();
+  // Already done — idempotent replay: payment + sendInvoice + after hooks only.
+  if (job.status === 'completed') {
+    const payment = await recordOptionalPayment(supabase, {
+      tenantId: params.tenantId,
+      customerId: job.customer_id,
+      jobId: job.id,
+      payment: params.payment,
+      clientMutationId: params.clientMutationId,
+      userId,
+    });
+    if (!payment.ok) {
+      return { success: false, error: payment.error };
+    }
+    await afterVisitCompleted(supabase, {
+      tenantId: params.tenantId,
+      jobId: job.id,
+      customerId: job.customer_id,
+      sendInvoice: params.sendInvoice,
+    });
+    return {
+      success: true,
+      alreadyCompleted: true,
+      skippedElsewhere: false,
+      paymentId: payment.paymentId,
+      paymentDuplicate: payment.paymentDuplicate,
+    };
+  }
+
   const updates: Record<string, unknown> = {
     status: 'completed',
     completed_at: completedAt.toISOString(),
@@ -236,7 +356,36 @@ export async function completeVisitCore(
     }
   }
 
-  return { success: true };
+  const payment = await recordOptionalPayment(supabase, {
+    tenantId: params.tenantId,
+    customerId: job.customer_id,
+    jobId: job.id,
+    payment: params.payment,
+    clientMutationId: params.clientMutationId,
+    userId,
+  });
+  if (!payment.ok) {
+    return {
+      success: false,
+      error:
+        'Visit marked done, but the payment could not be saved. Try again.',
+    };
+  }
+
+  await afterVisitCompleted(supabase, {
+    tenantId: params.tenantId,
+    jobId: job.id,
+    customerId: job.customer_id,
+    sendInvoice: params.sendInvoice,
+  });
+
+  return {
+    success: true,
+    alreadyCompleted: false,
+    skippedElsewhere: false,
+    paymentId: payment.paymentId,
+    paymentDuplicate: payment.paymentDuplicate,
+  };
 }
 
 export async function skipVisitCore(
@@ -248,11 +397,18 @@ export async function skipVisitCore(
     note?: string | null;
     actor: Actor;
   },
-): Promise<TransitionResult> {
+): Promise<SkipVisitResult> {
   const job = await loadJob(supabase, params.tenantId, params.jobId);
   if (!job) return { success: false, error: 'Visit not found.' };
-  if (CLOSED_STATUSES.has(job.status)) {
-    return { success: false, error: 'This visit is already completed or skipped.' };
+  if (job.status === 'cancelled') {
+    return { success: true, alreadySkipped: true };
+  }
+  if (job.status === 'completed') {
+    return {
+      success: false,
+      error: 'This visit is already done.',
+      code: 'already_completed',
+    };
   }
 
   const note = params.note?.trim() ? params.note.trim() : null;
@@ -303,7 +459,7 @@ export async function skipVisitCore(
     }
   }
 
-  return { success: true };
+  return { success: true, alreadySkipped: false };
 }
 
 async function applyScheduleMove(
@@ -395,7 +551,9 @@ export async function moveRemainingCore(
 
   const { data, error } = await supabase
     .from('jobs')
-    .select('id, status, scheduled_date, scheduled_time, service_agreement_id, route_position')
+    .select(
+      'id, status, scheduled_date, scheduled_time, service_agreement_id, route_position, customer_id',
+    )
     .eq('tenant_id', params.tenantId)
     .eq('scheduled_date', params.fromDate)
     .in('status', [...RESCHEDULE_STATUSES]);
@@ -406,25 +564,19 @@ export async function moveRemainingCore(
 
   const jobs: JobRow[] = [];
   for (const raw of data ?? []) {
-    const id = typeof (raw as { id?: unknown }).id === 'string' ? (raw as { id: string }).id : null;
-    const status =
-      typeof (raw as { status?: unknown }).status === 'string'
-        ? (raw as { status: string }).status
-        : null;
+    const row = raw as unknown as Record<string, unknown>;
+    const id = typeof row.id === 'string' ? row.id : null;
+    const status = typeof row.status === 'string' ? row.status : null;
     if (!id || !status) continue;
     jobs.push({
       id,
       status,
-      scheduled_date: asYmd((raw as { scheduled_date?: unknown }).scheduled_date),
-      scheduled_time:
-        typeof (raw as { scheduled_time?: unknown }).scheduled_time === 'string'
-          ? (raw as { scheduled_time: string }).scheduled_time
-          : null,
+      scheduled_date: asYmd(row.scheduled_date),
+      scheduled_time: typeof row.scheduled_time === 'string' ? row.scheduled_time : null,
       service_agreement_id:
-        typeof (raw as { service_agreement_id?: unknown }).service_agreement_id === 'string'
-          ? (raw as { service_agreement_id: string }).service_agreement_id
-          : null,
-      route_position: asFiniteNumber((raw as { route_position?: unknown }).route_position),
+        typeof row.service_agreement_id === 'string' ? row.service_agreement_id : null,
+      route_position: asFiniteNumber(row.route_position),
+      customer_id: typeof row.customer_id === 'string' ? row.customer_id : null,
     });
   }
 

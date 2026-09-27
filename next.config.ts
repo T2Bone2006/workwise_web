@@ -1,6 +1,16 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { NextConfig } from 'next';
 
+// Cursor opens the monorepo parent (/workwise). Without this, Turbopack
+// resolves CSS imports like `tailwindcss` from that parent (no node_modules).
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
+
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['@react-pdf/renderer'],
+  turbopack: {
+    root: appRoot,
+  },
   async redirects() {
     return [
       // Old product-prefixed dashboard URLs → neutral paths (entitlement picks the UI).

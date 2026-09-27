@@ -244,7 +244,8 @@
 
 /* ==========================================================================
    Animated gradient background (auth / hero)
-   Dark: subtle purple-to-blue, slow movement. Light: very subtle tint.
+   Dark: subtle purple-to-blue, slow movement.
+   Light: the same indigo and blue wash, light enough to sit behind a white card.
    ========================================================================== */
 .animated-gradient-bg {
   position: relative;
@@ -257,11 +258,11 @@
 :root .animated-gradient-bg {
   --animated-gradient-bg-value: linear-gradient(
     135deg,
-    #f8faff 0%,
-    #f0f4ff 25%,
-    #eef2ff 50%,
-    #f0f9ff 75%,
-    #f8faff 100%
+    #eef2ff 0%,
+    #e0e7ff 28%,
+    #f5f3ff 52%,
+    #e0f2fe 78%,
+    #eef2ff 100%
   );
 }
 
@@ -279,18 +280,30 @@
   );
 }
 
-/* Extra atmospheric glow layer (dark only) */
+/* Atmospheric glow. Light gets a few soft pools of colour; dark keeps its own wash below. */
 .animated-gradient-bg::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    ellipse 100% 80% at 50% -20%,
-    rgba(99 102 241 / 0.12) 0%,
-    rgba(59 130 246 / 0.08) 40%,
-    transparent 70%
-  );
+  z-index: 0;
   pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 100% 70% at 50% -15%,
+      rgba(99 102 241 / 0.34) 0%,
+      rgba(129 140 248 / 0.16) 36%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 55% 42% at 100% 100%,
+      rgba(56 189 248 / 0.22) 0%,
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 48% 40% at 0% 85%,
+      rgba(167 139 250 / 0.18) 0%,
+      transparent 62%
+    );
   animation: gradient-shift-slow 20s ease-in-out infinite;
 }
 

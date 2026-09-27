@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { getCustomerById } from '@/lib/data/customers';
+import { getAgreementsForCustomer } from '@/lib/data/rounds/agreements';
 import { getRoundsCustomerById } from '@/lib/data/rounds/customers';
 import { usesProCrm, usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
 import { CustomerForm } from '@/components/customers/customer-form';
@@ -25,10 +26,14 @@ export default async function CustomerEditPage({ params }: CustomerEditPageProps
   }
 
   if (usesRoundsCrm(products)) {
-    const { customer, error } = await getRoundsCustomerById(tenantId, customerId);
+    const [{ customer, error }, { agreements }] = await Promise.all([
+      getRoundsCustomerById(tenantId, customerId),
+      getAgreementsForCustomer(tenantId, customerId),
+    ]);
     if (error || !customer) {
       redirect(paths.customers);
     }
+    const houseAgreement = agreements.find((row) => row.address.trim() && row.postcode.trim());
 
     return (
       <div className="space-y-6">
@@ -53,6 +58,11 @@ export default async function CustomerEditPage({ params }: CustomerEditPageProps
           tenantId={tenantId}
           customer={customer}
           jobCount={customer.job_count ?? 0}
+          house={
+            houseAgreement
+              ? { address: houseAgreement.address, postcode: houseAgreement.postcode }
+              : null
+          }
         />
       </div>
     );

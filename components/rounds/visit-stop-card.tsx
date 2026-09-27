@@ -103,6 +103,45 @@ function VisitStatusBadge({ status }: { status: string }) {
   );
 }
 
+const PAYMENT_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  paid: {
+    label: 'Paid',
+    className:
+      'border-emerald-300/65 bg-gradient-to-br from-emerald-100/90 to-teal-50/70 text-emerald-950 dark:border-emerald-700/40 dark:from-emerald-950/40 dark:to-teal-950/20 dark:text-emerald-200',
+  },
+  partial: {
+    label: 'Part paid',
+    className:
+      'border-amber-300/65 bg-gradient-to-br from-amber-100/90 to-yellow-50/70 text-amber-950 dark:border-amber-700/40 dark:from-amber-950/40 dark:to-yellow-950/20 dark:text-amber-200',
+  },
+  unpaid: {
+    label: 'Unpaid',
+    className:
+      'border-rose-300/65 bg-gradient-to-br from-rose-100/90 to-red-50/70 text-rose-900 dark:border-rose-800/40 dark:from-rose-950/40 dark:to-red-950/20 dark:text-rose-200',
+  },
+  waived: {
+    label: 'Waived',
+    className:
+      'border-slate-300/65 bg-gradient-to-br from-slate-100/90 to-slate-50/70 text-slate-700 dark:border-slate-600/40 dark:from-slate-800/45 dark:to-slate-900/30 dark:text-slate-200',
+  },
+};
+
+function PaymentStatusBadge({ status }: { status: string | null }) {
+  if (!status) return null;
+  const meta = PAYMENT_STATUS_BADGE[status];
+  if (!meta) return null;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide backdrop-blur-sm',
+        meta.className
+      )}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 function skipLabel(reason: string | null): string | null {
   if (!reason) return null;
   if (reason in SKIP_REASON_LABELS) {
@@ -113,12 +152,15 @@ function skipLabel(reason: string | null): string | null {
 
 export function VisitStopCard({
   visit,
+  visits,
   orderIndex,
   leading,
   className,
   dimmed,
 }: {
   visit: VisitRow;
+  /** Other services at the same house on this day, including `visit`. */
+  visits?: VisitRow[];
   /** 1-based stop number when the day is ordered. */
   orderIndex?: number | null;
   /** Optional drag / reorder controls (day plan). */
@@ -126,9 +168,17 @@ export function VisitStopCard({
   className?: string;
   dimmed?: boolean;
 }) {
-  const amount = visit.final_amount ?? visit.quoted_amount;
+  const services = visits && visits.length > 0 ? visits : [visit];
+  const several = services.length > 1;
+  const amount = services.reduce((sum, row) => {
+    if (row.status === 'cancelled') return sum;
+    return sum + (row.final_amount ?? row.quoted_amount ?? 0);
+  }, 0);
   const accent = STATUS_ACCENT[visit.status] ?? FALLBACK_ACCENT;
-  const time = visit.scheduled_time?.slice(0, 5) ?? null;
+  const time = services
+    .map((row) => row.scheduled_time?.slice(0, 5))
+    .filter((value): value is string => Boolean(value))
+    .sort()[0] ?? null;
   const place = [visit.address, visit.postcode].filter(Boolean).join(', ');
   const skippedWhy = visit.status === 'cancelled' ? skipLabel(visit.skip_reason) : null;
   const position = orderIndex ?? visit.route_position;
@@ -181,6 +231,7 @@ export function VisitStopCard({
                 {visit.customer_name ?? 'Customer'}
               </p>
               <VisitStatusBadge status={visit.status} />
+              {several ? null : <PaymentStatusBadge status={visit.payment_status} />}
               {amount != null ? (
                 <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground">
                   {priceFormat.format(amount)}
@@ -188,7 +239,12 @@ export function VisitStopCard({
               ) : null}
             </div>
             <p className="text-sm leading-snug text-foreground/80">
-              {visit.job_description}
+              {several
+                ? services
+                    .map((row) => row.job_description)
+                    .filter(Boolean)
+                    .join(' · ')
+                : visit.job_description}
             </p>
             <div className="flex flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1">
               {time ? (
@@ -218,14 +274,29 @@ export function VisitStopCard({
           </div>
         </div>
 
-        <div className="w-full sm:w-auto sm:shrink-0 sm:pt-0.5">
-          <VisitActionButtons
-            jobId={visit.id}
-            status={visit.status}
-            quotedAmount={visit.quoted_amount}
-            scheduledDate={visit.scheduled_date}
-            scheduledTime={visit.scheduled_time}
-          />
+        <div className="w-full space-y-2 sm:w-auto sm:shrink-0 sm:pt-0.5">
+          {services.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-2">
+              {several ? (
+                <p className="min-w-0 text-sm text-foreground">
+                  {row.job_description}
+                  <span className="ml-2 tabular-nums text-muted-foreground">
+                    {priceFormat.format(row.final_amount ?? row.quoted_amount ?? 0)}
+                  </span>
+                </p>
+              ) : null}
+              {several ? <PaymentStatusBadge status={row.payment_status} /> : null}
+              <VisitActionButtons
+                jobId={row.id}
+                status={row.status}
+                quotedAmount={row.quoted_amount}
+                scheduledDate={row.scheduled_date}
+                scheduledTime={row.scheduled_time}
+                customerSendsInvoice={row.customer_sends_invoice}
+                customerHasEmail={row.customer_has_email}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </li>

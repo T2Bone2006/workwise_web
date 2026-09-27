@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import {
@@ -39,9 +39,13 @@ import { CustomerPlacesMapCard } from '@/components/rounds/customer-places-map';
 import { CustomerStatStrip } from '@/components/rounds/customer-stat-strip';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import type { RoundsSettings } from '@/lib/rounds/settings';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
+import { getCustomerLedger } from '@/lib/data/payments/ledger';
+import { CustomerMoneyCard } from '@/components/payments/customer-money-card';
+import { CustomerActivity } from '@/components/rounds/customer-activity';
 
 function formatVisitDay(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -112,12 +116,14 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       { visits: upcoming, error: upcomingError },
       { visits: recent, error: recentError },
       settings,
+      ledgerResult,
     ] = await Promise.all([
       getRoundsCustomerById(tenantId, customerId),
       getAgreementsForCustomer(tenantId, customerId),
       getUpcomingVisitsForCustomer(tenantId, customerId),
       getRecentVisitsForCustomer(tenantId, customerId),
       createClient().then((supabase) => getRoundsSettings(supabase, tenantId)),
+      createClient().then((supabase) => getCustomerLedger(supabase, tenantId, customerId)),
     ]);
 
     if (customerError || !customer) {
@@ -128,10 +134,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       formatUkPhoneDisplay(customer.phone_e164) ||
       customer.phone?.trim() ||
       null;
-    const paymentLabel =
-      customer.payment_terms === 'monthly_invoice'
-        ? 'Monthly invoice'
-        : 'On the day';
+    const sendsInvoice = customer.payment_terms === 'invoice';
     const forecast = forecastRowsForCustomer(agreements, upcoming, settings);
     const today = todayInLondon();
     const nextDate = [...upcoming, ...forecast]
@@ -159,14 +162,15 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
 
     return (
       <div className="space-y-6">
-        <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
-          <Link href={paths.customers}>
-            <ArrowLeft className="mr-2 size-4" />
-            Customers
-          </Link>
-        </Button>
+        <HistoryBackButton fallbackHref={paths.customers} />
         <PageGradientHeader
-          eyebrow={customer.is_active ? paymentLabel : 'Inactive'}
+          eyebrow={
+            customer.is_active
+              ? sendsInvoice
+                ? 'Sends invoice'
+                : undefined
+              : 'Inactive'
+          }
           title={customer.name}
           subtitle={
             [phone, customer.email, primary ? `${primary.address}, ${primary.postcode}` : null]
@@ -204,11 +208,19 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                 : String(live.length)
           }
           price={live.length === 0 ? '—' : priceFormat.format(roundValue)}
-          payment={paymentLabel}
+          payment={sendsInvoice ? 'Sends invoice' : '—'}
         />
 
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
+            <CustomerActivity
+              visits={recent}
+              payments={ledgerResult.ledger?.payments ?? []}
+              notes={customer.notes}
+            />
+            {ledgerResult.ledger ? (
+              <CustomerMoneyCard ledger={ledgerResult.ledger} payLinkAvailable />
+            ) : null}
             <AgreementsCard
               customerId={customerId}
               agreements={agreements}
@@ -290,11 +302,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" asChild aria-label="Back to customers">
-          <Link href={paths.customers}>
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
+        <HistoryBackButton fallbackHref={paths.customers} />
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground truncate">
             {customer.name}

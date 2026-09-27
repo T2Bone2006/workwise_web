@@ -9,6 +9,8 @@ import { Loader2, ArrowLeft, Building2, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { customerSchema, type CustomerFormInput } from '@/lib/validations/customer';
 import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
+import { setCustomerHouse } from '@/lib/actions/rounds/agreements';
+import { splitHouse } from '@/lib/rounds/house';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -42,8 +44,8 @@ import type { CustomerDetailRow } from '@/lib/data/customers';
 const NOTES_MAX = 500;
 
 const PAYMENT_TERM_OPTIONS = [
-  { value: 'on_the_day', label: 'On the day' },
-  { value: 'monthly_invoice', label: 'Monthly invoice' },
+  { value: 'on_the_day', label: 'No invoice' },
+  { value: 'invoice', label: 'Send an invoice after each visit' },
 ] as const;
 
 const CHANNEL_OPTIONS = [
@@ -59,6 +61,7 @@ interface CustomerFormProps {
   customer?: CustomerDetailRow | null;
   jobCount?: number;
   variant?: 'pro' | 'rounds';
+  house?: { address: string; postcode: string } | null;
 }
 
 export function CustomerForm({
@@ -67,6 +70,7 @@ export function CustomerForm({
   customer,
   jobCount = 0,
   variant = 'pro',
+  house = null,
 }: CustomerFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,6 +79,11 @@ export function CustomerForm({
   const isRounds = variant === 'rounds';
   const cancelHref = '/customers';
 
+  // The customer's own address wins; a service address is the fallback for
+  // customers saved before the address moved onto the customer.
+  const stored = splitHouse(customer?.address);
+  const home = stored.address ? stored : (house ?? { address: '', postcode: '' });
+
   const form = useForm<CustomerFormInput>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
@@ -82,9 +91,10 @@ export function CustomerForm({
       type: isRounds ? 'individual' : ((customer?.type as 'bulk_client' | 'individual') ?? 'individual'),
       email: customer?.email ?? '',
       phone: customer?.phone ?? '',
-      address: customer?.address ?? '',
+      address: isRounds ? home.address : (customer?.address ?? ''),
+      postcode: isRounds ? home.postcode : '',
       notes: customer?.notes ?? '',
-      payment_terms: customer?.payment_terms ?? 'on_the_day',
+      payment_terms: customer?.payment_terms === 'invoice' ? 'invoice' : 'on_the_day',
       access_notes: customer?.access_notes ?? '',
       preferred_channel: customer?.preferred_channel ?? undefined,
     },
@@ -102,7 +112,20 @@ export function CustomerForm({
       formData.set('type', isRounds ? 'individual' : values.type);
       formData.set('email', values.email ?? '');
       formData.set('phone', values.phone ?? '');
-      formData.set('address', isRounds ? '' : (values.address ?? ''));
+      formData.set('address', values.address ?? '');
+      if (isRounds) {
+        const address = (values.address ?? '').trim();
+        const postcode = (values.postcode ?? '').trim();
+        if (address.length < 5) {
+          toast.error('Enter the address.');
+          return;
+        }
+        if (postcode.length < 5) {
+          toast.error('Enter a UK postcode.');
+          return;
+        }
+        formData.set('postcode', postcode);
+      }
       formData.set('notes', values.notes ?? '');
       if (isRounds) {
         formData.set('payment_terms', values.payment_terms ?? 'on_the_day');
@@ -125,8 +148,22 @@ export function CustomerForm({
       }
       toast.success(mode === 'create' ? 'Customer created' : 'Customer updated');
       if (isRounds) {
+        const address = (values.address ?? '').trim();
+        const postcode = (values.postcode ?? '').trim();
+        if (mode === 'edit' && customer?.id) {
+          const houseResult = await setCustomerHouse(customer.id, address, postcode);
+          if (!houseResult.success) {
+            toast.error(houseResult.error);
+            return;
+          }
+        }
         if (mode === 'create' && 'id' in result && typeof result.id === 'string') {
-          router.push(`/customers/${result.id}/agreements/new?first=1`);
+          const params = new URLSearchParams({
+            first: '1',
+            address,
+            postcode,
+          });
+          router.push(`/customers/${result.id}/agreements/new?${params.toString()}`);
         } else if (customer?.id) {
           router.push(`/customers/${customer.id}`);
         } else {
@@ -303,10 +340,47 @@ export function CustomerForm({
                 <>
                   <FormField
                     control={form.control}
+                    name="address"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Address</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="12 Elm Road"
+                            {...field}
+                            value={field.value ?? ''}
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="postcode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Postcode</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="SW1A 1AA"
+                            {...field}
+                            value={field.value ?? ''}
+                            disabled={isSubmitting}
+                            className="uppercase"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="payment_terms"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Payment terms</FormLabel>
+                        <FormLabel>Invoices</FormLabel>
                         <FormControl>
                           <div className="grid grid-cols-2 gap-2">
                             {PAYMENT_TERM_OPTIONS.map((opt) => (

@@ -42,7 +42,7 @@ export default async function NewCustomerPage() {
               Add customer
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Name and contact first — you&apos;ll add their service on the next screen.
+              Name, phone, and address — you&apos;ll add their service on the next screen.
             </p>
           </div>
         </div>

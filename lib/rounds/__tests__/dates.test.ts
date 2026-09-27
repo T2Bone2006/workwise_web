@@ -6,6 +6,7 @@ import {
   endOfMonth,
   isoWeekday,
   isValidYmd,
+  londonDayBoundsUtc,
   startOfMonth,
   todayInLondon,
   ymdFromDate,
@@ -36,6 +37,22 @@ describe('todayInLondon', () => {
 
   it('stays on the UTC day in winter when London is GMT', () => {
     expect(todayInLondon(new Date('2026-01-15T23:30:00.000Z'))).toBe('2026-01-15');
+  });
+});
+
+describe('londonDayBoundsUtc', () => {
+  it('uses BST offset in summer (day starts at 23:00 previous UTC)', () => {
+    expect(londonDayBoundsUtc('2026-06-15')).toEqual({
+      startIso: '2026-06-14T23:00:00.000Z',
+      endIso: '2026-06-15T23:00:00.000Z',
+    });
+  });
+
+  it('uses GMT in winter (day starts at midnight UTC)', () => {
+    expect(londonDayBoundsUtc('2026-01-15')).toEqual({
+      startIso: '2026-01-15T00:00:00.000Z',
+      endIso: '2026-01-16T00:00:00.000Z',
+    });
   });
 });
 

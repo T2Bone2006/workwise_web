@@ -75,17 +75,6 @@ const WEEKDAY_OPTIONS = [
   { value: '7', label: 'Sunday' },
 ] as const;
 
-const PAYMENT_METHOD_OPTIONS = [
-  { value: 'none', label: 'Not set' },
-  { value: 'cash', label: 'Cash' },
-  { value: 'bank_transfer', label: 'Bank transfer' },
-  { value: 'card', label: 'Card' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'other', label: 'Other' },
-] as const;
-
-type PaymentMethod = 'cash' | 'bank_transfer' | 'card' | 'cheque' | 'other';
-
 function toYmd(date: Date): Ymd {
   return format(date, 'yyyy-MM-dd');
 }
@@ -108,6 +97,7 @@ export function AgreementForm({
   today,
   agreement = null,
   showFirstBanner = false,
+  house = null,
 }: {
   mode: 'create' | 'edit';
   customerId: string;
@@ -116,6 +106,8 @@ export function AgreementForm({
   today: Ymd;
   agreement?: AgreementListRow | null;
   showFirstBanner?: boolean;
+  /** When set, the service uses the customer's address and does not ask again. */
+  house?: { address: string; postcode: string } | null;
 }) {
   const router = useRouter();
   const cancelHref = `/customers/${customerId}`;
@@ -135,8 +127,8 @@ export function AgreementForm({
       customer_id: customerId,
       service_catalog_id: agreement?.service_catalog_id ?? null,
       title: agreement?.title ?? '',
-      address: agreement?.address ?? '',
-      postcode: agreement?.postcode ?? '',
+      address: house?.address ?? agreement?.address ?? '',
+      postcode: house?.postcode ?? agreement?.postcode ?? '',
       price: agreement?.price ?? 0,
       duration_minutes: agreement?.duration_minutes ?? 30,
       frequency_days: initialFrequency,
@@ -331,6 +323,12 @@ export function AgreementForm({
                 )}
               />
 
+              {house ? (
+                <p className="text-sm text-muted-foreground">
+                  {house.address}, {house.postcode}
+                </p>
+              ) : (
+              <>
               <FormField
                 control={form.control}
                 name="postcode"
@@ -376,6 +374,8 @@ export function AgreementForm({
                   </FormItem>
                 )}
               />
+              </>
+              )}
 
               <div className="grid gap-5 sm:grid-cols-2">
                 <FormField
@@ -476,7 +476,10 @@ export function AgreementForm({
                   </Select>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {frequencyLabel(form.watch('frequency_days') || 28)}. A month
+                  {frequencyLabel(
+                    Number(form.watch('frequency_days') ?? 28) || 28,
+                  )}
+                  . A month
                   here is 4 weeks, so 1 month and 2 weeks is every 6 weeks.
                 </p>
                 {form.formState.errors.frequency_days ? (
@@ -648,43 +651,6 @@ export function AgreementForm({
 
               <FormField
                 control={form.control}
-                name="default_payment_method"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Usual payment method</FormLabel>
-                    <Select
-                      value={field.value ?? 'none'}
-                      onValueChange={(v) =>
-                        field.onChange(
-                          v === 'none' ? null : (v as PaymentMethod),
-                        )
-                      }
-                      disabled={isSubmitting}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full sm:max-w-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {PAYMENT_METHOD_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      How they usually pay on the day. Logging payments lands in
-                      Phase 2.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="reminder_enabled"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border/80 px-4 py-3">
@@ -824,8 +790,7 @@ export function AgreementForm({
                 ? `${afterCreateGenerated} visit${afterCreateGenerated === 1 ? '' : 's'} planned on the calendar.`
                 : 'Agreement is on the customer.'}{' '}
               Each agreement is one service with its own price and schedule. Add
-              another if they also need something else (e.g. gutters) or a
-              second address.
+              another if they also need something else (e.g. gutters).
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

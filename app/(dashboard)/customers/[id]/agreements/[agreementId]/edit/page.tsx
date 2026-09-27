@@ -78,6 +78,7 @@ export default async function EditAgreementPage({
         services={services}
         today={todayInLondon()}
         agreement={agreement}
+        house={{ address: agreement.address, postcode: agreement.postcode }}
       />
     </div>
   );

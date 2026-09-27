@@ -260,6 +260,7 @@ function job(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'job-1',
     tenant_id: TENANT,
+    customer_id: CUSTOMER,
     service_agreement_id: AGREEMENT,
     agreement_occurrence_date: TODAY,
     scheduled_date: TODAY,
@@ -311,14 +312,20 @@ describe('completeVisitCore', () => {
     vi.useRealTimers();
   });
 
-  it('refuses an already completed visit', async () => {
+  it('treats an already completed visit as an idempotent success', async () => {
     const db = emptyDb({ jobs: [job({ status: 'completed' })] });
     const result = await completeVisitCore(createFakeSupabase(db), {
       tenantId: TENANT,
       jobId: 'job-1',
       actor: ACTOR,
     });
-    expect(result.success).toBe(false);
+    expect(result).toEqual({
+      success: true,
+      alreadyCompleted: true,
+      skippedElsewhere: false,
+      paymentId: null,
+      paymentDuplicate: false,
+    });
   });
 
   it('marks the visit done and does not generate for a fixed agreement', async () => {
@@ -330,7 +337,13 @@ describe('completeVisitCore', () => {
       notes: 'Paid cash',
       actor: ACTOR,
     });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({
+      success: true,
+      alreadyCompleted: false,
+      skippedElsewhere: false,
+      paymentId: null,
+      paymentDuplicate: false,
+    });
     expect(db.jobs[0]?.status).toBe('completed');
     expect(db.jobs[0]?.final_amount).toBe(15);
     expect(db.jobs[0]?.completion_notes).toBe('Paid cash');
@@ -349,7 +362,13 @@ describe('completeVisitCore', () => {
       jobId: 'job-1',
       actor: ACTOR,
     });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({
+      success: true,
+      alreadyCompleted: false,
+      skippedElsewhere: false,
+      paymentId: null,
+      paymentDuplicate: false,
+    });
     expect(db.jobs.some((row) => row.agreement_occurrence_date === '2026-09-22')).toBe(true);
     expect(db.agreements[0]?.next_due_date).toBe('2026-09-29');
   });
@@ -373,7 +392,7 @@ describe('skipVisitCore', () => {
       note: 'Gate locked',
       actor: ACTOR,
     });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, alreadySkipped: false });
     expect(db.jobs[0]?.status).toBe('cancelled');
     expect(db.jobs[0]?.skip_reason).toBe('no_access');
     expect(db.jobs[0]?.completion_notes).toBe('Gate locked');

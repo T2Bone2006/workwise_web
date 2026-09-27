@@ -28,6 +28,9 @@ const UNPROTECTED_PATHS = [
   // Self-serve signup: the user has no users row until the Stripe webhook
   // provisions them, so these must never bounce to /dashboard or /login.
   '/signup',
+  // Public customer pages + Stripe return pages.
+  '/pay',
+  '/connect',
 ] as const;
 
 /** Paths workers may visit on the web (invite / password setup). */
