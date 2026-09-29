@@ -34,7 +34,11 @@ export async function POST(request: Request) {
     completedAt: parsed.data.completedAt,
   });
   if (!result.success) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    // 503 = temporary: the phone keeps the queued Done and retries by itself.
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.retryable ? 503 : 400 },
+    );
   }
 
   return NextResponse.json({

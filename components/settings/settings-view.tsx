@@ -8,6 +8,7 @@ import {
   User,
   AlertTriangle,
   CreditCard,
+  MessageSquare,
   Route,
   Wallet,
 } from 'lucide-react';
@@ -24,6 +25,10 @@ import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 import { SettingsBillingTab } from './settings-billing-tab';
 import { SettingsRoundsTab } from './settings-rounds-tab';
+import {
+  SettingsMessagesSection,
+  useMessagingSectionData,
+} from './settings-messages-section';
 
 interface SettingsViewProps {
   initialData: SettingsPageData;
@@ -55,10 +60,14 @@ export function SettingsView({
 }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
+  const messaging = useMessagingSectionData();
   const tabs = rounds
     ? [
         baseTabs[0],
         { value: 'rounds', label: 'Rounds', icon: Route },
+        ...(messaging
+          ? [{ value: 'messages', label: 'Customer messages', icon: MessageSquare }]
+          : []),
         ...(payments
           ? [{ value: 'payments', label: 'Payments', icon: Wallet }]
           : []),
@@ -86,15 +95,15 @@ export function SettingsView({
       onValueChange={onTabChange}
       orientation="vertical"
       className={cn(
-        'flex flex-col gap-6 md:flex-row md:gap-8',
+        'flex flex-col gap-6 md:flex-row md:items-start md:gap-8',
         'group/tabs'
       )}
     >
       <TabsList
         variant="default"
         className={cn(
-          'w-full flex flex-row flex-wrap gap-1 rounded-xl p-1.5 h-auto',
-          'md:w-56 md:flex-col md:flex-nowrap md:shrink-0',
+          'h-auto w-full shrink-0 flex-row flex-wrap gap-1 rounded-xl p-1.5',
+          'md:sticky md:top-0 md:h-fit md:w-56 md:flex-col md:flex-nowrap md:self-start',
           'bg-muted/80 dark:bg-muted/40',
           'border border-border/50'
         )}
@@ -104,7 +113,7 @@ export function SettingsView({
             key={value}
             value={value}
             className={cn(
-              'flex-1 md:flex-none gap-2 rounded-lg px-3 py-2.5 transition-all duration-200',
+              'h-auto flex-1 gap-2 whitespace-normal rounded-lg px-3 py-2.5 text-left transition-all duration-200 md:w-full md:flex-none',
               'data-[state=active]:bg-background data-[state=active]:shadow-sm',
               'data-[state=active]:ring-1 data-[state=active]:ring-brand-primary/30',
               'dark:data-[state=active]:bg-card dark:data-[state=active]:border dark:data-[state=active]:border-border',
@@ -117,7 +126,7 @@ export function SettingsView({
         ))}
       </TabsList>
 
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <TabsContent value="company" className="mt-0 outline-none">
           <SettingsCompanyTab
             data={initialData}
@@ -134,6 +143,16 @@ export function SettingsView({
             <SettingsRoundsTab
               settings={rounds.settings}
               onSaved={onSaved}
+              onDirtyChange={setFormDirty}
+            />
+          </TabsContent>
+        )}
+        {messaging && (
+          <TabsContent value="messages" className="mt-0 outline-none">
+            <SettingsMessagesSection
+              settings={messaging.settings}
+              companyPhone={messaging.companyPhone}
+              businessName={messaging.businessName}
               onDirtyChange={setFormDirty}
             />
           </TabsContent>

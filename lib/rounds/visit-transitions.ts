@@ -16,6 +16,7 @@ export type TransitionResult = { success: true } | { success: false; error: stri
 
 export type CompleteVisitPayment = { method: 'cash' | 'cheque'; amount: number };
 
+/** `retryable`: a database/server failure worth retrying (APIs answer 503), not a bad request. */
 export type CompleteVisitResult =
   | {
       success: true;
@@ -24,22 +25,20 @@ export type CompleteVisitResult =
       paymentId: string | null;
       paymentDuplicate: boolean;
     }
-  | { success: false; error: string };
+  | { success: false; error: string; retryable?: boolean };
 
 export type SkipVisitResult =
   | { success: true; alreadySkipped: boolean }
-  | { success: false; error: string; code?: 'already_completed' };
+  | { success: false; error: string; code?: 'already_completed'; retryable?: boolean };
+
+/** PostgREST filter for "still open": Done and Skip only ever move a visit out of these. */
+const CLOSED_STATUSES = '(completed,cancelled)';
 
 export const UNTOUCHED_STATUSES = ['assigned'] as const;
 
-export const RESCHEDULE_STATUSES = [
-  'assigned',
-  'accepted',
-  'en_route',
-  'arrived',
-  'in_progress',
-  'paused',
-] as const;
+import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-statuses';
+
+export { RESCHEDULE_STATUSES };
 
 export type Actor = { userId?: string; workerId?: string };
 
@@ -79,11 +78,12 @@ type JobRow = {
   customer_id: string | null;
 };
 
-async function loadJob(
+/** Like `loadJob`, but tells a database error (`ok: false`) apart from "no such visit". */
+async function loadJobChecked(
   supabase: SupabaseClient,
   tenantId: string,
   jobId: string,
-): Promise<JobRow | null> {
+): Promise<{ ok: true; job: JobRow | null } | { ok: false }> {
   const { data, error } = await supabase
     .from('jobs')
     .select(
@@ -93,20 +93,36 @@ async function loadJob(
     .eq('tenant_id', tenantId)
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    console.error('[visit-transitions] loadJob error:', error);
+    return { ok: false };
+  }
+  if (!data) return { ok: true, job: null };
   const id = typeof data.id === 'string' ? data.id : null;
   const status = typeof data.status === 'string' ? data.status : null;
-  if (!id || !status) return null;
+  if (!id || !status) return { ok: true, job: null };
   return {
-    id,
-    status,
-    scheduled_date: asYmd(data.scheduled_date),
-    scheduled_time: typeof data.scheduled_time === 'string' ? data.scheduled_time : null,
-    service_agreement_id:
-      typeof data.service_agreement_id === 'string' ? data.service_agreement_id : null,
-    route_position: asFiniteNumber(data.route_position),
-    customer_id: typeof data.customer_id === 'string' ? data.customer_id : null,
+    ok: true,
+    job: {
+      id,
+      status,
+      scheduled_date: asYmd(data.scheduled_date),
+      scheduled_time: typeof data.scheduled_time === 'string' ? data.scheduled_time : null,
+      service_agreement_id:
+        typeof data.service_agreement_id === 'string' ? data.service_agreement_id : null,
+      route_position: asFiniteNumber(data.route_position),
+      customer_id: typeof data.customer_id === 'string' ? data.customer_id : null,
+    },
   };
+}
+
+export async function loadJob(
+  supabase: SupabaseClient,
+  tenantId: string,
+  jobId: string,
+): Promise<JobRow | null> {
+  const loaded = await loadJobChecked(supabase, tenantId, jobId);
+  return loaded.ok ? loaded.job : null;
 }
 
 async function loadAgreement(
@@ -124,7 +140,7 @@ async function loadAgreement(
   return mapAgreementRow(data as unknown as Record<string, unknown>);
 }
 
-async function writeHistory(
+export async function writeHistory(
   supabase: SupabaseClient,
   row: {
     jobId: string;
@@ -198,13 +214,13 @@ async function recordOptionalPayment(
   },
 ): Promise<
   | { ok: true; paymentId: string | null; paymentDuplicate: boolean }
-  | { ok: false; error: string }
+  | { ok: false; error: string; retryable: boolean }
 > {
   if (!params.payment) {
     return { ok: true, paymentId: null, paymentDuplicate: false };
   }
   if (!params.customerId) {
-    return { ok: false, error: 'Could not record the payment.' };
+    return { ok: false, error: 'Could not record the payment.', retryable: false };
   }
   const result = await recordPaymentCore(supabase, {
     tenantId: params.tenantId,
@@ -216,7 +232,7 @@ async function recordOptionalPayment(
     userId: params.userId,
   });
   if (!result.success) {
-    return { ok: false, error: result.error };
+    return { ok: false, error: result.error, retryable: result.retryable === true };
   }
   return {
     ok: true,
@@ -225,75 +241,102 @@ async function recordOptionalPayment(
   };
 }
 
+type CompleteVisitParams = {
+  tenantId: string;
+  jobId: string;
+  finalAmount?: number | null;
+  notes?: string | null;
+  actor: Actor;
+  payment?: CompleteVisitPayment | null;
+  /** true/false = set the customer's "send invoice after each visit"; null/undefined = leave it. */
+  sendInvoice?: boolean | null;
+  clientMutationId?: string | null;
+  /** When the tap happened (phone, possibly offline). Clamped; default now. */
+  completedAt?: string | null;
+  /**
+   * What to do with `payment` when the visit was already done or skipped by
+   * someone else. `'record'` (default — the phone: the cash was really taken
+   * and a replay must never drop it). `'ignore'` (the dashboard: a stale page
+   * would otherwise record the phone's cash a second time; the trader is there
+   * to use Mark as paid instead).
+   */
+  alreadyDonePayment?: 'record' | 'ignore';
+};
+
+/** Done arrived for a visit that is already skipped: keep any cash as credit against this job id. */
+async function completeWhenSkipped(
+  supabase: SupabaseClient,
+  params: CompleteVisitParams,
+  job: JobRow,
+): Promise<CompleteVisitResult> {
+  const payment = await recordOptionalPayment(supabase, {
+    tenantId: params.tenantId,
+    customerId: job.customer_id,
+    jobId: job.id,
+    payment: params.alreadyDonePayment === 'ignore' ? null : params.payment,
+    clientMutationId: params.clientMutationId,
+    userId: params.actor.userId ?? null,
+  });
+  if (!payment.ok) {
+    return { success: false, error: payment.error, retryable: payment.retryable };
+  }
+  return {
+    success: true,
+    alreadyCompleted: false,
+    skippedElsewhere: true,
+    paymentId: payment.paymentId,
+    paymentDuplicate: payment.paymentDuplicate,
+  };
+}
+
+/** Done twice / replay: payment (idempotent via clientMutationId) + sendInvoice + after hooks only. */
+async function completeWhenAlreadyDone(
+  supabase: SupabaseClient,
+  params: CompleteVisitParams,
+  job: JobRow,
+): Promise<CompleteVisitResult> {
+  const payment = await recordOptionalPayment(supabase, {
+    tenantId: params.tenantId,
+    customerId: job.customer_id,
+    jobId: job.id,
+    payment: params.alreadyDonePayment === 'ignore' ? null : params.payment,
+    clientMutationId: params.clientMutationId,
+    userId: params.actor.userId ?? null,
+  });
+  if (!payment.ok) {
+    return { success: false, error: payment.error, retryable: payment.retryable };
+  }
+  await afterVisitCompleted(supabase, {
+    tenantId: params.tenantId,
+    jobId: job.id,
+    customerId: job.customer_id,
+    sendInvoice: params.sendInvoice,
+  });
+  return {
+    success: true,
+    alreadyCompleted: true,
+    skippedElsewhere: false,
+    paymentId: payment.paymentId,
+    paymentDuplicate: payment.paymentDuplicate,
+  };
+}
+
 export async function completeVisitCore(
   supabase: SupabaseClient,
-  params: {
-    tenantId: string;
-    jobId: string;
-    finalAmount?: number | null;
-    notes?: string | null;
-    actor: Actor;
-    payment?: CompleteVisitPayment | null;
-    sendInvoice?: boolean | null;
-    clientMutationId?: string | null;
-    completedAt?: string | null;
-  },
+  params: CompleteVisitParams,
 ): Promise<CompleteVisitResult> {
-  const job = await loadJob(supabase, params.tenantId, params.jobId);
+  const loaded = await loadJobChecked(supabase, params.tenantId, params.jobId);
+  if (!loaded.ok) {
+    return { success: false, error: 'Could not load the visit. Try again.', retryable: true };
+  }
+  const job = loaded.job;
   if (!job) return { success: false, error: 'Visit not found.' };
 
   const completedAt = clampCompletedAt(params.completedAt);
   const userId = params.actor.userId ?? null;
 
-  // Skipped elsewhere — keep any cash as credit against this job id.
-  if (job.status === 'cancelled') {
-    const payment = await recordOptionalPayment(supabase, {
-      tenantId: params.tenantId,
-      customerId: job.customer_id,
-      jobId: job.id,
-      payment: params.payment,
-      clientMutationId: params.clientMutationId,
-      userId,
-    });
-    if (!payment.ok) {
-      return { success: false, error: payment.error };
-    }
-    return {
-      success: true,
-      alreadyCompleted: false,
-      skippedElsewhere: true,
-      paymentId: payment.paymentId,
-      paymentDuplicate: payment.paymentDuplicate,
-    };
-  }
-
-  // Already done — idempotent replay: payment + sendInvoice + after hooks only.
-  if (job.status === 'completed') {
-    const payment = await recordOptionalPayment(supabase, {
-      tenantId: params.tenantId,
-      customerId: job.customer_id,
-      jobId: job.id,
-      payment: params.payment,
-      clientMutationId: params.clientMutationId,
-      userId,
-    });
-    if (!payment.ok) {
-      return { success: false, error: payment.error };
-    }
-    await afterVisitCompleted(supabase, {
-      tenantId: params.tenantId,
-      jobId: job.id,
-      customerId: job.customer_id,
-      sendInvoice: params.sendInvoice,
-    });
-    return {
-      success: true,
-      alreadyCompleted: true,
-      skippedElsewhere: false,
-      paymentId: payment.paymentId,
-      paymentDuplicate: payment.paymentDuplicate,
-    };
-  }
+  if (job.status === 'cancelled') return completeWhenSkipped(supabase, params, job);
+  if (job.status === 'completed') return completeWhenAlreadyDone(supabase, params, job);
 
   const updates: Record<string, unknown> = {
     status: 'completed',
@@ -306,13 +349,31 @@ export async function completeVisitCore(
     updates.completion_notes = params.notes.trim();
   }
 
-  const { error } = await supabase
+  // Conditional on the visit still being open, so a Skip or another Done that
+  // landed since loadJob can't be overwritten (and can't be completed twice).
+  const { data: updated, error } = await supabase
     .from('jobs')
     .update(updates)
     .eq('id', job.id)
-    .eq('tenant_id', params.tenantId);
+    .eq('tenant_id', params.tenantId)
+    .not('status', 'in', CLOSED_STATUSES)
+    .select('id');
   if (error) {
-    return { success: false, error: error.message ?? 'Failed to complete visit.' };
+    console.error('[completeVisitCore] update error:', error);
+    return { success: false, error: 'Failed to complete visit. Try again.', retryable: true };
+  }
+  if (!Array.isArray(updated) || updated.length === 0) {
+    const again = await loadJobChecked(supabase, params.tenantId, job.id);
+    if (!again.ok) {
+      return { success: false, error: 'Could not load the visit. Try again.', retryable: true };
+    }
+    if (again.job?.status === 'completed') {
+      return completeWhenAlreadyDone(supabase, params, again.job);
+    }
+    if (again.job?.status === 'cancelled') {
+      return completeWhenSkipped(supabase, params, again.job);
+    }
+    return { success: false, error: 'Could not mark this visit done.' };
   }
 
   await writeHistory(supabase, {
@@ -368,7 +429,12 @@ export async function completeVisitCore(
     return {
       success: false,
       error:
-        'Visit marked done, but the payment could not be saved. Try again.',
+        params.alreadyDonePayment === 'ignore'
+          ? "Visit marked done, but the payment could not be saved. Record it with Mark as paid on the customer's page."
+          : 'Visit marked done, but the payment could not be saved. Try again.',
+      // Only a retry that can actually record it is worth repeating (the
+      // replay lands in completeWhenAlreadyDone with the same clientMutationId).
+      retryable: payment.retryable && params.alreadyDonePayment !== 'ignore',
     };
   }
 
@@ -388,6 +454,18 @@ export async function completeVisitCore(
   };
 }
 
+function skipResultForClosed(status: string | null): SkipVisitResult | null {
+  if (status === 'cancelled') return { success: true, alreadySkipped: true };
+  if (status === 'completed') {
+    return {
+      success: false,
+      error: 'This visit is already done.',
+      code: 'already_completed',
+    };
+  }
+  return null;
+}
+
 export async function skipVisitCore(
   supabase: SupabaseClient,
   params: {
@@ -398,21 +476,19 @@ export async function skipVisitCore(
     actor: Actor;
   },
 ): Promise<SkipVisitResult> {
-  const job = await loadJob(supabase, params.tenantId, params.jobId);
+  const loaded = await loadJobChecked(supabase, params.tenantId, params.jobId);
+  if (!loaded.ok) {
+    return { success: false, error: 'Could not load the visit. Try again.', retryable: true };
+  }
+  const job = loaded.job;
   if (!job) return { success: false, error: 'Visit not found.' };
-  if (job.status === 'cancelled') {
-    return { success: true, alreadySkipped: true };
-  }
-  if (job.status === 'completed') {
-    return {
-      success: false,
-      error: 'This visit is already done.',
-      code: 'already_completed',
-    };
-  }
+  const closed = skipResultForClosed(job.status);
+  if (closed) return closed;
 
   const note = params.note?.trim() ? params.note.trim() : null;
-  const { error } = await supabase
+  // Conditional on the visit still being open: Done beats Skip, so a Done that
+  // landed since loadJob must never be turned back into a skip.
+  const { data: updated, error } = await supabase
     .from('jobs')
     .update({
       status: 'cancelled',
@@ -421,9 +497,24 @@ export async function skipVisitCore(
       route_position: null,
     })
     .eq('id', job.id)
-    .eq('tenant_id', params.tenantId);
+    .eq('tenant_id', params.tenantId)
+    .not('status', 'in', CLOSED_STATUSES)
+    .select('id');
   if (error) {
-    return { success: false, error: error.message ?? 'Failed to skip visit.' };
+    console.error('[skipVisitCore] update error:', error);
+    return { success: false, error: 'Failed to skip visit. Try again.', retryable: true };
+  }
+  if (!Array.isArray(updated) || updated.length === 0) {
+    const again = await loadJobChecked(supabase, params.tenantId, job.id);
+    if (!again.ok) {
+      return { success: false, error: 'Could not load the visit. Try again.', retryable: true };
+    }
+    return (
+      skipResultForClosed(again.job?.status ?? null) ?? {
+        success: false,
+        error: 'Could not skip this visit.',
+      }
+    );
   }
 
   await writeHistory(supabase, {

@@ -102,10 +102,19 @@ interface SidebarProps {
   isAdmin?: boolean;
   /** When > 0, shows a dot next to Network (or on the icon when sidebar is collapsed). */
   networkBadge?: number;
+  /** When > 0, shows a dot next to Messages, the same way as Network. */
+  messagesBadge?: number;
   features: TenantFeatures;
 }
 
-export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBadge, features }: SidebarProps) {
+export function Sidebar({
+  mobileOpen,
+  onMobileClose,
+  isAdmin = false,
+  networkBadge,
+  messagesBadge,
+  features,
+}: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -132,11 +141,16 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
   };
 
   const linkContent = (item: NavItem, isMobile = false) => {
-    const showNetworkDot =
-      item.href === '/network' && networkBadge != null && networkBadge > 0;
+    const badgeCount =
+      item.href === '/network'
+        ? networkBadge
+        : item.href === '/messages'
+          ? messagesBadge
+          : undefined;
+    const showDot = badgeCount != null && badgeCount > 0;
     const labelVisible = !collapsed || isMobile;
-    const dotOnIcon = showNetworkDot && !labelVisible;
-    const dotAfterLabel = showNetworkDot && labelVisible;
+    const dotOnIcon = showDot && !labelVisible;
+    const dotAfterLabel = showDot && labelVisible;
     const dotStyleClass =
       'size-[8px] animate-pulse rounded-full [background-image:radial-gradient(circle_at_center,#a78bfa,#6366f1)] [box-shadow:0_0_6px_1px_rgba(139,92,246,0.7)]';
 
@@ -296,7 +310,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
       {/* Desktop: fixed sidebar */}
       <aside
         className={cn(
-          'hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl',
+          'hidden md:flex md:h-full md:min-h-0 md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl',
           'transition-[width] duration-[250ms] ease-[cubic-bezier(0.32,0.72,0,1)]'
         )}
         style={{

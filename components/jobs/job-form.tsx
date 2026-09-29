@@ -271,23 +271,25 @@ export function JobForm({
 
             <FormField
               control={form.control}
-              name="postcode"
+              name="address"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                    Postcode
+                    Address
                   </FormLabel>
                   <FormControl>
                     <AddressAutocompleteInput
                       value={field.value}
                       onValueChange={field.onChange}
                       onAddressSelect={({ address, postcode }) => {
-                        if (postcode) field.onChange(postcode);
-                        form.setValue('address', address, { shouldValidate: true });
+                        field.onChange(address);
+                        if (postcode) {
+                          form.setValue('postcode', postcode, { shouldValidate: true });
+                        }
                       }}
                       placeholder="Start typing a postcode or address…"
                       className={cn(
-                        'bg-white/80 dark:bg-white/5 dark:border-white/10 uppercase',
+                        'bg-white/80 dark:bg-white/5 dark:border-white/10',
                         'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
                       )}
                     />
@@ -299,17 +301,17 @@ export function JobForm({
 
             <FormField
               control={form.control}
-              name="address"
+              name="postcode"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                    Address
+                    Postcode
                   </FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Filled in automatically, or type manually"
+                      placeholder="Filled in when you pick an address"
                       className={cn(
-                        'bg-white/80 dark:bg-white/5 dark:border-white/10',
+                        'bg-white/80 dark:bg-white/5 dark:border-white/10 uppercase',
                         'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
                       )}
                       {...field}

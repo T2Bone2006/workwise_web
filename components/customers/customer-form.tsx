@@ -7,10 +7,16 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, Building2, User } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  CONTACT_CHOICE_LABELS,
+  contactChoiceFromColumn,
+  type ContactChoice,
+} from '@/lib/messaging/channel';
 import { customerSchema, type CustomerFormInput } from '@/lib/validations/customer';
 import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
 import { setCustomerHouse } from '@/lib/actions/rounds/agreements';
 import { splitHouse } from '@/lib/rounds/house';
+import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,6 +25,7 @@ import {
   FormControl,
   FormField,
   FormItem,
+  FormDescription,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
@@ -48,12 +55,7 @@ const PAYMENT_TERM_OPTIONS = [
   { value: 'invoice', label: 'Send an invoice after each visit' },
 ] as const;
 
-const CHANNEL_OPTIONS = [
-  { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'sms', label: 'SMS' },
-  { value: 'email', label: 'Email' },
-  { value: 'none', label: 'None' },
-] as const;
+const CONTACT_BY_OPTIONS: ContactChoice[] = ['default', 'sms', 'email', 'none'];
 
 interface CustomerFormProps {
   mode: 'create' | 'edit';
@@ -96,7 +98,9 @@ export function CustomerForm({
       notes: customer?.notes ?? '',
       payment_terms: customer?.payment_terms === 'invoice' ? 'invoice' : 'on_the_day',
       access_notes: customer?.access_notes ?? '',
-      preferred_channel: customer?.preferred_channel ?? undefined,
+      preferred_channel: isRounds
+        ? contactChoiceFromColumn(customer?.preferred_channel)
+        : undefined,
     },
   });
 
@@ -130,9 +134,9 @@ export function CustomerForm({
       if (isRounds) {
         formData.set('payment_terms', values.payment_terms ?? 'on_the_day');
         formData.set('access_notes', values.access_notes ?? '');
-        if (values.preferred_channel) {
-          formData.set('preferred_channel', values.preferred_channel);
-        }
+        const contactBy =
+          values.preferred_channel === 'whatsapp' ? 'sms' : (values.preferred_channel ?? 'default');
+        formData.set('preferred_channel', contactBy);
       }
 
       const result =
@@ -345,10 +349,16 @@ export function CustomerForm({
                       <FormItem>
                         <FormLabel>Address</FormLabel>
                         <FormControl>
-                          <Input
-                            placeholder="12 Elm Road"
-                            {...field}
+                          <AddressAutocompleteInput
                             value={field.value ?? ''}
+                            onValueChange={field.onChange}
+                            onAddressSelect={({ address, postcode }) => {
+                              field.onChange(address);
+                              if (postcode) {
+                                form.setValue('postcode', postcode, { shouldValidate: true });
+                              }
+                            }}
+                            placeholder="Start typing a postcode or address…"
                             disabled={isSubmitting}
                           />
                         </FormControl>
@@ -433,25 +443,28 @@ export function CustomerForm({
                     name="preferred_channel"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Preferred contact</FormLabel>
+                        <FormLabel>Contact by</FormLabel>
                         <Select
-                          value={field.value}
+                          value={field.value === 'whatsapp' ? 'sms' : (field.value ?? 'default')}
                           onValueChange={field.onChange}
                           disabled={isSubmitting}
                         >
                           <FormControl>
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Not set" />
+                              <SelectValue />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {CHANNEL_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
+                            {CONTACT_BY_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {CONTACT_CHOICE_LABELS[value]}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
+                        <FormDescription>
+                          Business default follows Settings → Rounds → Customer messages.
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}

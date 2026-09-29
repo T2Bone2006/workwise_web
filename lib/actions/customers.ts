@@ -11,6 +11,7 @@ import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
+import { contactChoiceToColumn } from '@/lib/messaging/channel';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { joinHouse } from '@/lib/rounds/house';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -48,14 +49,14 @@ function extraCustomerFields(validated: {
   postcode?: string;
   payment_terms?: 'on_the_day' | 'invoice';
   access_notes?: string;
-  preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
+  preferred_channel?: 'default' | 'whatsapp' | 'sms' | 'email' | 'none';
 }) {
   const extra: {
     phone_e164: string | null;
     billing_address?: string | null;
     payment_terms?: 'on_the_day' | 'invoice';
     access_notes?: string | null;
-    preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none';
+    preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none' | null;
   } = {
     phone_e164: normalizeUkPhoneE164(validated.phone || null),
   };
@@ -67,7 +68,13 @@ function extraCustomerFields(validated: {
   if (validated.access_notes !== undefined) {
     extra.access_notes = validated.access_notes.trim() || null;
   }
-  if (validated.preferred_channel) extra.preferred_channel = validated.preferred_channel;
+  if (validated.preferred_channel !== undefined) {
+    // 'default' is the form's business-default choice and stores NULL.
+    extra.preferred_channel =
+      validated.preferred_channel === 'whatsapp'
+        ? 'whatsapp'
+        : contactChoiceToColumn(validated.preferred_channel);
+  }
   return extra;
 }
 

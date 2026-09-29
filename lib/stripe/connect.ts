@@ -249,13 +249,15 @@ export async function getPayoutSummary(p: {
 }
 
 /** Looks up the tenant that owns a connected account id (admin client). */
+/** Null only when no business has this account. Throws on a database error, so a webhook retries instead of ignoring the event. */
 export async function tenantIdForAccount(accountId: string): Promise<string | null> {
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from('tenants')
     .select('id')
     .eq('stripe_connect_account_id', accountId)
     .maybeSingle();
+  if (error) throw error;
   const id = (data as { id?: string } | null)?.id;
   return typeof id === 'string' ? id : null;
 }

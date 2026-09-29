@@ -21,8 +21,8 @@ Pro's jobs, workers, or phone tabs, that is a bug, not a feature.
 **Being built: Rounds + Lite + self-serve signup.** Eight phases, ~12 weeks,
 one person plus agents. Phases 1–2 code is on branch `rounds-foundations` and is
 **not deployed**. Phase 2 (payments) is **code complete** — see the Phase 2
-section below; spec `../docs/specs/phase-2.md`. Next build is Phase 3 (messaging);
-there is no `docs/specs/phase-3.md` yet. Do not push, deploy, or OTA until the
+section below; spec `../docs/specs/phase-2.md`. Next build is Phase 3 (messaging):
+spec folder `../docs/specs/phase-3/`. Do not push, deploy, or OTA until the
 owner asks — they want every phase finished, and to be happy with it, before
 anything goes live.
 
@@ -42,7 +42,7 @@ anything goes live.
 | `../docs/ROUNDS-PLAN.md` | The 12-week engineering plan and cross-repo technical design. |
 | `../docs/specs/phase-1.md` | Phase 1 (done). §9 is its step list. |
 | `../docs/specs/phase-2.md` | Phase 2 payments (done). §6.0 is the step index. |
-| `../docs/specs/phase-3.md` | Not written yet (messaging). |
+| `../docs/specs/phase-3/` | Phase 3 messaging. `README.md` is the step index; one card per step. |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
 
@@ -75,10 +75,44 @@ So, as you work:
 A new build chat reads only the two lines under IN PROGRESS, then that one step
 card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
 
-## Next — Phase 3 Messaging
+## IN PROGRESS
 
-- Phase 2 payments is code-complete and not deployed (section below).
-- Next: write `docs/specs/phase-3.md` (visit-done texts / WhatsApp, reminders).
+- Phase 3 steps 3–30a built. Step 31 skipped at the owner's request (mobile tsc, tests, and expo export not run).
+- Step 32 in progress: web checks passed except 5 pre-existing Pro lint errors in `components/customers/customers-table.tsx`. The 19-row walkthrough below is not ticked. Next: the owner walks those rows, then step 33.
+
+---
+
+## Phase 3 — Messaging — walkthrough not finished
+
+Spec folder: `../docs/specs/phase-3/`. Step 33 writes the full section. No push, deploy, or OTA.
+
+Web checks (Cursor, 2026-09-29): `tsc` clean. `npm test` 439 passed. `npm run build` succeeded. `check-cards.mjs` all 36 cards pass. Eslint on the step 32 paths: 5 errors, all pre-existing in Pro `components/customers/customers-table.tsx` (setState in an effect, SortIcon created during render). Not fixed. Pro must not change.
+
+**Phase 3 verified** (step 32 — owner walkthrough, not started)
+
+| # | Result | Note |
+|---|---|---|
+| 1 | | Not walked |
+| 2 | | Not walked |
+| 3 | | Not walked |
+| 4 | | Not walked |
+| 5 | | Not walked |
+| 6 | | Not walked |
+| 7 | | Not walked |
+| 8 | | Not walked |
+| 9 | | Not walked |
+| 10 | | Not walked |
+| 11 | | Not walked |
+| 12 | | Not walked |
+| 13 | | Not walked |
+| 14 | | Not walked |
+| 15 | | Not walked |
+| 16 | | Not walked. SQL is in the step 32 chat. Test tenants only. |
+| 17 | | Not walked |
+| 18 | | Not walked. SQL is in the step 32 chat. Test tenants only. |
+| 19 | | Not walked |
+
+`.env.local` is still `MESSAGING_TRANSPORT=puresms` and `PURESMS_SENDER=WorkWise`. Set the sender to the virtual number before real replies, and set transport back to `log` after the walkthrough.
 
 ---
 

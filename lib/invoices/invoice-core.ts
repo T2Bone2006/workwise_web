@@ -8,6 +8,8 @@ export async function createInvoiceCore(
     customerId: string;
     scope: 'visit' | 'balance';
     jobId?: string | null;
+    /** A visit invoice for a whole stop (several services at one house). */
+    jobIds?: string[];
   },
 ): Promise<
   | { success: true; invoiceId: string; number: string; existing: boolean }
@@ -37,7 +39,7 @@ export async function createInvoiceCore(
         existing: true,
       };
     }
-    jobIds = [jobId];
+    jobIds = p.jobIds && p.jobIds.length > 0 ? [...new Set([jobId, ...p.jobIds])] : [jobId];
   } else {
     const { data, error } = await supabase
       .from('jobs')

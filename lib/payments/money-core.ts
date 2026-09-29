@@ -16,9 +16,10 @@ export type PaymentMethod =
   | 'card'
   | 'other';
 
+/** `retryable`: a database/server failure worth retrying (phone APIs answer 503), not a bad request. */
 export type MoneyResult<T = object> =
   | ({ success: true } & T)
-  | { success: false; error: string };
+  | { success: false; error: string; retryable?: boolean };
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 const FOUR_HUNDRED_DAYS_MS = 400 * 24 * 60 * 60 * 1000;
@@ -36,6 +37,12 @@ function clampReceivedAt(raw: string | null | undefined, now: Date): string {
 
 function isUniqueViolation(error: { code?: string; message?: string }): boolean {
   return error.code === '23505';
+}
+
+/** Data (22…) and constraint (23…) errors won't change on a retry; anything else might. */
+function isRetryableDbError(error: { code?: string }): boolean {
+  const code = error.code ?? '';
+  return !code.startsWith('22') && !code.startsWith('23');
 }
 
 export async function recordPaymentCore(
@@ -60,7 +67,11 @@ export async function recordPaymentCore(
     .eq('tenant_id', p.tenantId)
     .maybeSingle();
 
-  if (customerError || !customer) {
+  if (customerError) {
+    console.error('recordPaymentCore customer lookup failed', customerError);
+    return { success: false, error: 'Could not record the payment.', retryable: true };
+  }
+  if (!customer) {
     return { success: false, error: 'Customer not found.' };
   }
 
@@ -71,8 +82,11 @@ export async function recordPaymentCore(
       .eq('id', p.appliesToJobId)
       .eq('tenant_id', p.tenantId)
       .maybeSingle();
+    if (jobError) {
+      console.error('recordPaymentCore job lookup failed', jobError);
+      return { success: false, error: 'Could not record the payment.', retryable: true };
+    }
     if (
-      jobError ||
       !job ||
       (job as { customer_id?: string | null }).customer_id !== p.customerId
     ) {
@@ -124,16 +138,22 @@ export async function recordPaymentCore(
           duplicate: true,
         };
       }
+      // The row exists but the lookup missed it — a retry will find it.
+      return { success: false, error: 'Could not record the payment.', retryable: true };
     }
     console.error('recordPaymentCore insert failed', error);
-    return { success: false, error: 'Could not record the payment.' };
+    return {
+      success: false,
+      error: 'Could not record the payment.',
+      retryable: isRetryableDbError(error),
+    };
   }
 
   const id = data && typeof (data as { id?: unknown }).id === 'string'
     ? (data as { id: string }).id
     : null;
   if (!id) {
-    return { success: false, error: 'Could not record the payment.' };
+    return { success: false, error: 'Could not record the payment.', retryable: true };
   }
   return { success: true, paymentId: id, duplicate: false };
 }

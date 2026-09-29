@@ -25,6 +25,9 @@ export type VisitRow = {
   skip_reason: string | null;
   route_position: number | null;
   completed_at: string | null;
+  customer_confirmation_status: string | null;
+  customer_requested_date: string | null;
+  customer_reply_at: string | null;
   customer_sends_invoice: boolean;
   customer_has_email: boolean;
 };
@@ -58,6 +61,9 @@ const VISIT_SELECT = [
   'skip_reason',
   'route_position',
   'completed_at',
+  'customer_confirmation_status',
+  'customer_requested_date',
+  'customer_reply_at',
   'created_at',
   'customers ( name, email, payment_terms )',
 ].join(', ');
@@ -134,6 +140,9 @@ export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
     skip_reason: asString(raw.skip_reason),
     route_position: asFiniteNumber(raw.route_position),
     completed_at: asString(raw.completed_at),
+    customer_confirmation_status: asString(raw.customer_confirmation_status),
+    customer_requested_date: asString(raw.customer_requested_date),
+    customer_reply_at: asString(raw.customer_reply_at),
   };
 }
 

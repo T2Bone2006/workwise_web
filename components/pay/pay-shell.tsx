@@ -41,24 +41,42 @@ export function PayShell(props: {
             <p className="text-center text-xl font-semibold tracking-tight">{business.name}</p>
           )}
         </CardHeader>
-        <CardContent className="space-y-6">{children}</CardContent>
-        <CardFooter className="flex-col gap-1 border-t text-center text-sm text-muted-foreground">
+        <CardContent className="space-y-6">
+          {children}
           {phone || email ? (
-            <p>
-              Questions?{' '}
-              {phone ? (
-                <a className="text-primary underline-offset-4 hover:underline" href={`tel:${phone}`}>
-                  {phone}
-                </a>
-              ) : null}
-              {phone && email ? ' · ' : null}
-              {email ? (
-                <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${email}`}>
-                  {email}
-                </a>
-              ) : null}
-            </p>
+            <div className="rounded-xl border border-border/80 bg-card/60 p-4 text-sm">
+              <p className="font-medium">Questions, or already paid?</p>
+              <p className="mt-1 text-muted-foreground">
+                Contact {business.name} directly
+                {phone ? (
+                  <>
+                    {' on '}
+                    <a
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      href={`tel:${phone.replace(/\s+/g, '')}`}
+                    >
+                      {phone}
+                    </a>
+                  </>
+                ) : null}
+                {phone && email ? ' or ' : null}
+                {email ? (
+                  <>
+                    {phone ? null : ' at '}
+                    <a
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      href={`mailto:${email}`}
+                    >
+                      {email}
+                    </a>
+                  </>
+                ) : null}
+                .
+              </p>
+            </div>
           ) : null}
+        </CardContent>
+        <CardFooter className="flex-col gap-1 border-t text-center text-sm text-muted-foreground">
           <p>Payments go directly to {business.name}.</p>
           <p className="text-xs text-muted-foreground/80">Powered by WorkWise</p>
         </CardFooter>

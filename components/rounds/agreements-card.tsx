@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format, parseISO } from 'date-fns';
-import { CalendarIcon, Loader2, Plus } from 'lucide-react';
+import { CalendarIcon, ChevronDown, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   endAgreement,
@@ -101,6 +101,9 @@ export function AgreementsCard({
   const [pauseCalendarOpen, setPauseCalendarOpen] = useState(false);
   const [endTarget, setEndTarget] = useState<AgreementListRow | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [endedOpen, setEndedOpen] = useState(false);
+  const live = agreements.filter((agreement) => agreement.status !== 'ended');
+  const ended = agreements.filter((agreement) => agreement.status === 'ended');
 
   const runAction = async (
     id: string,
@@ -142,6 +145,90 @@ export function AgreementsCard({
     await runAction(id, () => endAgreement(id), 'Agreement ended');
   };
 
+  const agreementRow = (agreement: AgreementListRow) => {
+    const busy = pendingId === agreement.id;
+    const canEdit = agreement.status !== 'ended';
+    return (
+      <li
+        key={agreement.id}
+        className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
+      >
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-foreground">{agreement.title}</p>
+            {statusBadge(agreement.status)}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {[agreement.address, agreement.postcode].filter(Boolean).join(', ')}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {priceFormat.format(agreement.price)} · {scheduleLabel(agreement)}
+            {agreement.service_name ? ` · ${agreement.service_name}` : null}
+          </p>
+          {agreement.status === 'paused' && agreement.paused_until ? (
+            <p className="text-xs text-muted-foreground">
+              Until {formatYmdDisplay(agreement.paused_until)}
+            </p>
+          ) : null}
+          {agreement.status === 'ended' && agreement.ended_at ? (
+            <p className="text-xs text-muted-foreground">
+              Ended {format(parseISO(agreement.ended_at), 'd MMM yyyy')}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {canEdit ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/customers/${customerId}/agreements/${agreement.id}/edit`}>
+                Edit
+              </Link>
+            </Button>
+          ) : null}
+          {agreement.status === 'active' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setPauseUntil(undefined);
+                setPauseTarget(agreement);
+              }}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : 'Pause'}
+            </Button>
+          ) : null}
+          {agreement.status === 'paused' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                runAction(
+                  agreement.id,
+                  () => resumeAgreement(agreement.id),
+                  'Agreement resumed',
+                )
+              }
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : 'Resume'}
+            </Button>
+          ) : null}
+          {canEdit ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy}
+              onClick={() => setEndTarget(agreement)}
+            >
+              End
+            </Button>
+          ) : null}
+        </div>
+      </li>
+    );
+  };
+
   return (
     <>
       <Card className="glass-card border-border/80">
@@ -172,95 +259,31 @@ export function AgreementsCard({
               </Button>
             </div>
           ) : (
-            <ul className="divide-y divide-border/60">
-              {agreements.map((agreement) => {
-                const busy = pendingId === agreement.id;
-                const canEdit = agreement.status !== 'ended';
-                return (
-                  <li
-                    key={agreement.id}
-                    className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
+            <>
+              {live.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No current agreements.</p>
+              ) : (
+                <ul className="divide-y divide-border/60">{live.map(agreementRow)}</ul>
+              )}
+              {ended.length > 0 ? (
+                <div className="border-t border-border/60 pt-2">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 py-1 text-left text-sm text-muted-foreground"
+                    onClick={() => setEndedOpen((open) => !open)}
+                    aria-expanded={endedOpen}
                   >
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium text-foreground">{agreement.title}</p>
-                        {statusBadge(agreement.status)}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {[agreement.address, agreement.postcode].filter(Boolean).join(', ')}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {priceFormat.format(agreement.price)} · {scheduleLabel(agreement)}
-                        {agreement.service_name
-                          ? ` · ${agreement.service_name}`
-                          : null}
-                      </p>
-                      {agreement.status === 'paused' && agreement.paused_until ? (
-                        <p className="text-xs text-muted-foreground">
-                          Until {formatYmdDisplay(agreement.paused_until)}
-                        </p>
-                      ) : null}
-                      {agreement.status === 'ended' && agreement.ended_at ? (
-                        <p className="text-xs text-muted-foreground">
-                          Ended {format(parseISO(agreement.ended_at), 'd MMM yyyy')}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      {canEdit ? (
-                        <Button variant="outline" size="sm" asChild>
-                          <Link
-                            href={`/customers/${customerId}/agreements/${agreement.id}/edit`}
-                          >
-                            Edit
-                          </Link>
-                        </Button>
-                      ) : null}
-                      {agreement.status === 'active' ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => {
-                            setPauseUntil(undefined);
-                            setPauseTarget(agreement);
-                          }}
-                        >
-                          {busy ? <Loader2 className="size-4 animate-spin" /> : 'Pause'}
-                        </Button>
-                      ) : null}
-                      {agreement.status === 'paused' ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() =>
-                            runAction(
-                              agreement.id,
-                              () => resumeAgreement(agreement.id),
-                              'Agreement resumed',
-                            )
-                          }
-                        >
-                          {busy ? <Loader2 className="size-4 animate-spin" /> : 'Resume'}
-                        </Button>
-                      ) : null}
-                      {canEdit ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          disabled={busy}
-                          onClick={() => setEndTarget(agreement)}
-                        >
-                          End
-                        </Button>
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                    <ChevronDown
+                      className={cn('size-4 transition-transform', endedOpen && 'rotate-180')}
+                    />
+                    Ended ({ended.length})
+                  </button>
+                  {endedOpen ? (
+                    <ul className="divide-y divide-border/60">{ended.map(agreementRow)}</ul>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           )}
         </CardContent>
       </Card>

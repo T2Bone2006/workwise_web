@@ -116,25 +116,7 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
         />
       ) : null}
       {showContact ? (
-        <p className="text-sm text-muted-foreground">
-          Contact {page.business.name} to pay.
-          {page.business.phone || page.business.email ? (
-            <>
-              {' '}
-              {page.business.phone ? (
-                <a className="text-primary underline-offset-4 hover:underline" href={`tel:${page.business.phone}`}>
-                  {page.business.phone}
-                </a>
-              ) : null}
-              {page.business.phone && page.business.email ? ' · ' : null}
-              {page.business.email ? (
-                <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${page.business.email}`}>
-                  {page.business.email}
-                </a>
-              ) : null}
-            </>
-          ) : null}
-        </p>
+        <p className="text-sm text-muted-foreground">Contact {page.business.name} to pay.</p>
       ) : null}
     </PayShell>
   );

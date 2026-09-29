@@ -1,3 +1,4 @@
+import { visitDoneSms } from '@/lib/messaging/templates';
 import { formatGbp } from '@/lib/money/pence';
 import { formatSortCode } from '@/lib/payments/bank-format';
 
@@ -194,6 +195,81 @@ export function composeVisitDoneMessage(
   };
 }
 
+/** The text version of the visit-done message. Same facts as composeVisitDoneMessage. null when waived. */
+export function composeVisitDoneSms(
+  input: VisitDoneMessageInput,
+  extra: {
+    services: string[];
+    visitDate: string;
+    today: string;
+    invoiceUrl: string | null;
+    contactPhone: string | null;
+  },
+): string | null {
+  if (input.visitStatus === 'waived') return null;
+
+  const dayLabel =
+    extra.visitDate === extra.today ? null : formatVisitDay(extra.visitDate);
+  const brand = {
+    businessName: input.businessName,
+    contactPhone: extra.contactPhone,
+  };
+  const base = {
+    brand,
+    services: extra.services,
+    address: input.address,
+    dayLabel,
+  };
+
+  if (input.invoiceNumber && extra.invoiceUrl) {
+    const amount =
+      input.visitOutstanding > 0 ? input.visitOutstanding : input.visitDue;
+    return visitDoneSms({
+      ...base,
+      outcome: {
+        kind: 'invoice',
+        number: input.invoiceNumber,
+        amount,
+        invoiceUrl: extra.invoiceUrl,
+      },
+    });
+  }
+
+  if (input.paidNow) {
+    return visitDoneSms({
+      ...base,
+      outcome: {
+        kind: 'paid_now',
+        amount: input.paidNow.amount,
+        method: input.paidNow.method,
+        creditLeft: input.customerCredit,
+      },
+    });
+  }
+
+  if (input.visitStatus === 'paid') {
+    return visitDoneSms({
+      ...base,
+      outcome: { kind: 'paid_by_credit', creditLeft: input.customerCredit },
+    });
+  }
+
+  if (input.payUrl === null) {
+    throw new Error(
+      'composeVisitDoneSms: payUrl required when something is owed',
+    );
+  }
+
+  return visitDoneSms({
+    ...base,
+    outcome: {
+      kind: 'to_pay',
+      amount: input.visitOutstanding,
+      payUrl: input.payUrl,
+    },
+  });
+}
+
 export function paymentMethodLabel(method: PaymentMethodLabel): string {
   switch (method) {
     case 'bank_transfer':
@@ -248,6 +324,48 @@ export function composePaymentReceivedMessage(input: {
 
   return {
     subject: `Thanks for your payment — ${input.businessName}`,
+    greeting,
+    paragraphs,
+    payUrl,
+    bankLine,
+    signOff,
+    text: buildText({ greeting, paragraphs, payUrl, bankLine, signOff }),
+  };
+}
+
+/** Friendly payment reminder (stage 1) or nudge (stage 2). Always includes pay link. */
+export function composeChaserMessage(input: {
+  businessName: string;
+  customerName: string;
+  owed: number;
+  stage: 1 | 2;
+  payUrl: string;
+  bank: VisitDoneMessageInput['bank'];
+  reference: string | null;
+}): ComposedMessage {
+  const greeting = greetingLine(input.customerName);
+  const money = formatGbp(input.owed);
+  const paragraphs: string[] =
+    input.stage === 1
+      ? [
+          `Just a friendly reminder that there's ${money} to pay for your recent visits.`,
+          replyPrompt(),
+        ]
+      : [
+          `Just a nudge: ${money} is still to pay for your recent visits. If you've already paid, thank you, and please ignore this.`,
+          replyPrompt(),
+        ];
+
+  const payUrl = input.payUrl;
+  const bankLine = buildBankLine(input.bank, input.reference);
+  const signOff = `Thanks,\n${input.businessName}`;
+  const subject =
+    input.stage === 1
+      ? `${input.businessName}: a friendly payment reminder`
+      : `${input.businessName}: payment reminder`;
+
+  return {
+    subject,
     greeting,
     paragraphs,
     payUrl,

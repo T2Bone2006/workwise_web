@@ -5,7 +5,8 @@ export type HouseFields = {
   postcode: string;
 };
 
-function houseKey(visit: HouseFields): string {
+/** Same customer at the same address (case and spacing ignored). */
+export function houseKey(visit: HouseFields): string {
   const address = visit.address.trim().toLowerCase().replace(/\s+/g, ' ');
   const postcode = visit.postcode.trim().toLowerCase().replace(/\s+/g, '');
   if (!visit.customer_id) return `job:${visit.id}`;

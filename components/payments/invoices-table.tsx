@@ -7,6 +7,7 @@ import {
   PaymentsListFilters,
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
+import { MoneyRow, MONEY_ACCENT, type MoneyAccent } from '@/components/payments/money-row';
 import { Card, CardContent } from '@/components/ui/card';
 import type { InvoiceRecord } from '@/lib/data/payments/invoices';
 import { formatGbp } from '@/lib/money/pence';
@@ -28,30 +29,12 @@ export function invoiceStatus(invoice: InvoiceRecord): 'Paid' | 'Overdue' | 'Unp
   return 'Unpaid';
 }
 
-const PILL =
-  'inline-flex shrink-0 rounded-full border px-2.5 py-0.5 text-sm font-semibold tabular-nums';
-
-function amountPill(status: ReturnType<typeof invoiceStatus>, amount: string) {
-  if (status === 'Paid') {
-    return (
-      <span className={`${PILL} border-emerald-300/70 bg-emerald-50 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200`}>
-        {amount}
-      </span>
-    );
-  }
-  if (status === 'Cancelled') {
-    return (
-      <span className={`${PILL} border-border bg-muted text-muted-foreground line-through`}>
-        {amount}
-      </span>
-    );
-  }
-  return (
-    <span className={`${PILL} border-rose-300/70 bg-rose-50 text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-200`}>
-      {amount}
-    </span>
-  );
-}
+const INVOICE_ACCENT: Record<ReturnType<typeof invoiceStatus>, MoneyAccent> = {
+  Paid: MONEY_ACCENT.received,
+  Overdue: MONEY_ACCENT.overdue,
+  Unpaid: MONEY_ACCENT.unpaid,
+  Cancelled: MONEY_ACCENT.quiet,
+};
 
 export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
   const router = useRouter();
@@ -128,11 +111,6 @@ export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
     );
   }
 
-  const openBalance = filtered.reduce(
-    (sum, invoice) => (invoice.status === 'void' ? sum : sum + invoice.balanceDue),
-    0,
-  );
-
   return (
     <div className="space-y-3">
       {filters}
@@ -143,61 +121,24 @@ export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
           </CardContent>
         </Card>
       ) : (
-    <Card className="glass-card overflow-hidden border-border/80">
-      <CardContent className="divide-y divide-border/70 p-0">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold">Invoices</h2>
-            <p className="text-xs text-muted-foreground">
-              {filtered.length === 1 ? '1 invoice' : `${filtered.length} invoices`}
-            </p>
-          </div>
-          <span
-            className={
-              openBalance > 0
-                ? 'text-lg font-semibold tabular-nums text-rose-700 dark:text-rose-300'
-                : 'text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-300'
-            }
-          >
-            {formatGbp(openBalance)}
-          </span>
-        </div>
-        {filtered.map((invoice) => {
-          const status = invoiceStatus(invoice);
-          const owed = invoice.status !== 'void' && invoice.balanceDue > 0;
-          const iconClass = owed
-            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300'
-            : status === 'Paid'
-              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
-              : 'bg-muted text-muted-foreground';
-          return (
-            <button
-              key={invoice.id}
-              type="button"
-              className="group flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/70 dark:hover:bg-accent/40"
-              onClick={() => router.push(`/payments/invoices/${invoice.id}`)}
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className={`flex size-9 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
-                  <FileText className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-medium group-hover:underline">{invoice.billTo.name}</span>
-                  <span className="mt-0.5 block truncate text-sm text-muted-foreground">
-                    {invoice.number}
-                    {' · '}
-                    {formatDay(invoice.issueDate)}
-                    {' · '}
-                    {status}
-                  </span>
-                </span>
-              </span>
-              {amountPill(status, formatGbp(owed ? invoice.balanceDue : invoice.total))}
-            </button>
-          );
-        })}
-      </CardContent>
-    </Card>
+        <ul className="space-y-3">
+          {filtered.map((invoice) => {
+            const status = invoiceStatus(invoice);
+            const owed = invoice.status !== 'void' && invoice.balanceDue > 0;
+            return (
+              <MoneyRow
+                key={invoice.id}
+                accent={INVOICE_ACCENT[status]}
+                icon={FileText}
+                title={invoice.billTo.name}
+                detail={`${invoice.number} · ${formatDay(invoice.issueDate)}`}
+                amount={formatGbp(owed ? invoice.balanceDue : invoice.total)}
+                status={status}
+                onClick={() => router.push(`/payments/invoices/${invoice.id}`)}
+              />
+            );
+          })}
+        </ul>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -137,11 +137,16 @@ export function AgreementForm({
       preferred_weekday: agreement?.preferred_weekday ?? null,
       preferred_time: agreement?.preferred_time?.slice(0, 5) ?? '',
       default_payment_method: agreement?.default_payment_method ?? null,
+      // The customer Messages card owns reminders. Keep the stored value on save.
       reminder_enabled: agreement?.reminder_enabled ?? true,
       access_notes: agreement?.access_notes ?? '',
       notes: agreement?.notes ?? '',
     },
   });
+
+  useEffect(() => {
+    form.register('reminder_enabled');
+  }, [form]);
 
   const [frequencyMonths, setFrequencyMonths] = useState(initialParts.months);
   const [frequencyWeeks, setFrequencyWeeks] = useState(initialParts.weeks);
@@ -331,25 +336,24 @@ export function AgreementForm({
               <>
               <FormField
                 control={form.control}
-                name="postcode"
+                name="address"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Postcode</FormLabel>
+                    <FormLabel>Address</FormLabel>
                     <FormControl>
                       <AddressAutocompleteInput
                         value={field.value}
                         onValueChange={field.onChange}
                         onAddressSelect={({ address, postcode }) => {
+                          field.onChange(address);
                           if (postcode) {
-                            field.onChange(postcode);
+                            form.setValue('postcode', postcode, {
+                              shouldValidate: true,
+                            });
                           }
-                          form.setValue('address', address, {
-                            shouldValidate: true,
-                          });
                         }}
                         placeholder="Start typing a postcode or address…"
                         disabled={isSubmitting}
-                        className="uppercase"
                       />
                     </FormControl>
                     <FormMessage />
@@ -359,15 +363,16 @@ export function AgreementForm({
 
               <FormField
                 control={form.control}
-                name="address"
+                name="postcode"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Address</FormLabel>
+                    <FormLabel>Postcode</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Filled in automatically, or type manually"
+                        placeholder="Filled in when you pick an address"
                         {...field}
                         disabled={isSubmitting}
+                        className="uppercase"
                       />
                     </FormControl>
                     <FormMessage />
@@ -648,29 +653,6 @@ export function AgreementForm({
                   )}
                 />
               </div>
-
-              <FormField
-                control={form.control}
-                name="reminder_enabled"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between gap-4 rounded-xl border border-border/80 px-4 py-3">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">Reminders</FormLabel>
-                      <FormDescription>
-                        On by default. Phase 3 will send “we&apos;re coming —
-                        reply NO if that&apos;s a problem.” Silence means go.
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        disabled={isSubmitting}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
 
               <FormField
                 control={form.control}

@@ -64,14 +64,12 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
   const [blackouts, setBlackouts] = useState<Ymd[]>(settings.blackouts);
   const [shiftOff, setShiftOff] = useState(settings.shift_off_non_working_days);
   const [horizonWeeks, setHorizonWeeks] = useState(settings.horizon_weeks);
-  const [reminderDays, setReminderDays] = useState(settings.reminder_days_before);
   const [startPostcode, setStartPostcode] = useState(settings.start_postcode ?? '');
   const [baseline, setBaseline] = useState({
     workingDays: settings.working_days,
     blackouts: settings.blackouts,
     shiftOff: settings.shift_off_non_working_days,
     horizonWeeks: settings.horizon_weeks,
-    reminderDays: settings.reminder_days_before,
     startPostcode: settings.start_postcode ?? '',
   });
   const dirty =
@@ -79,7 +77,6 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
     blackouts.join() !== baseline.blackouts.join() ||
     shiftOff !== baseline.shiftOff ||
     horizonWeeks !== baseline.horizonWeeks ||
-    reminderDays !== baseline.reminderDays ||
     startPostcode !== baseline.startPostcode;
 
   useEffect(() => {
@@ -117,7 +114,7 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
       blackouts,
       shift_off_non_working_days: shiftOff,
       horizon_weeks: horizonWeeks,
-      reminder_days_before: reminderDays,
+      reminder_days_before: settings.reminder_days_before,
       start_postcode: startPostcode.trim() === '' ? null : startPostcode.trim(),
     });
     setSaving(false);
@@ -127,7 +124,6 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
         blackouts,
         shiftOff,
         horizonWeeks,
-        reminderDays,
         startPostcode,
       });
       setSavedAt(Date.now());
@@ -250,20 +246,6 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
             />
             <p className="text-xs text-muted-foreground">
               How far ahead to plan visits that keep to the calendar.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="reminder-days">Reminder days before</Label>
-            <Input
-              id="reminder-days"
-              type="number"
-              min={0}
-              max={14}
-              value={reminderDays}
-              onChange={(e) => setReminderDays(Number(e.target.value))}
-            />
-            <p className="text-xs text-muted-foreground">
-              Used later for opt-out visit notices. Nothing is sent yet.
             </p>
           </div>
           <div className="space-y-2 sm:col-span-2">

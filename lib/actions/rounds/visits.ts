@@ -5,31 +5,45 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { isValidYmd, type Ymd } from '@/lib/rounds/dates';
-import { oneOffReferenceNumber } from '@/lib/rounds/recurrence';
-import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
+import { createOneOffVisitCore } from '@/lib/rounds/one-off';
+import { sendVisitDoneAfterSkip } from '@/lib/payments/notify';
+import {
+  notifyVisitChange,
+  notifyVisitChangeUndone,
+  type NoticeCounts,
+} from '@/lib/messaging/visit-change-notices';
 import { optimiseDayCore } from '@/lib/rounds/optimise-day';
 import {
+  latestUndoableChange,
+  moveRemainingWithLog,
+  rescheduleVisitWithLog,
+  skipRemainingCore,
+  skipVisitWithLog,
+  undoVisitChangeCore,
+  type VisitChangeSummary,
+} from '@/lib/rounds/visit-changes';
+import {
   completeVisitCore,
-  moveRemainingCore,
   reorderDayCore,
-  rescheduleVisitCore,
-  skipVisitCore,
   type Actor,
 } from '@/lib/rounds/visit-transitions';
-import { resolveJobCoordinates } from '@/lib/utils/geocoding';
 import {
   completeVisitSchema,
   moveRemainingSchema,
   oneOffVisitSchema,
   reorderDaySchema,
   rescheduleVisitSchema,
+  skipRemainingSchema,
   skipVisitSchema,
+  undoVisitChangeSchema,
   type CompleteVisitInput,
   type MoveRemainingInput,
   type OneOffVisitInput,
   type ReorderDayInput,
   type RescheduleVisitInput,
+  type SkipRemainingInput,
   type SkipVisitInput,
+  type UndoVisitChangeInput,
 } from '@/lib/validations/rounds/visit';
 
 export type ActionResult = { success: true } | { success: false; error: string };
@@ -67,13 +81,30 @@ async function requireActor(): Promise<
   return { success: true, tenantId, actor: { userId: user?.id } };
 }
 
-function random4hex(): string {
-  return crypto.randomUUID().replace(/-/g, '').slice(0, 4);
+async function noticeForChange(
+  tenantId: string,
+  changeId: string | null | undefined,
+  asked: boolean,
+): Promise<NoticeCounts | undefined> {
+  if (!changeId || !asked) return undefined;
+  try {
+    return await notifyVisitChange({ tenantId, changeId });
+  } catch (err) {
+    console.error('[visits] notifyVisitChange', err instanceof Error ? err.message : 'failed');
+    return undefined;
+  }
 }
 
 export async function completeVisit(
   input: CompleteVisitInput,
-): Promise<ActionResult & { alreadyCompleted?: boolean }> {
+): Promise<
+  ActionResult & {
+    alreadyCompleted?: boolean;
+    skippedElsewhere?: boolean;
+    /** False when a payment was sent but not recorded (the visit was already done or skipped). */
+    paymentRecorded?: boolean;
+  }
+> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
 
@@ -91,8 +122,10 @@ export async function completeVisit(
     sendInvoice: parsed.data.sendInvoice,
     clientMutationId: parsed.data.clientMutationId,
     completedAt: parsed.data.completedAt,
+    // A stale page must not record the phone's cash a second time.
+    alreadyDonePayment: 'ignore',
   });
-  if (!result.success) return result;
+  if (!result.success) return { success: false, error: result.error };
 
   const { data: job } = await supabase
     .from('jobs')
@@ -106,72 +139,199 @@ export async function completeVisit(
       : null;
 
   revalidateVisits(customerId);
-  return { success: true, alreadyCompleted: result.alreadyCompleted };
+  return {
+    success: true,
+    alreadyCompleted: result.alreadyCompleted,
+    skippedElsewhere: result.skippedElsewhere,
+    paymentRecorded: result.paymentId != null,
+  };
 }
 
-export async function skipVisit(input: SkipVisitInput): Promise<ActionResult> {
+export async function skipVisit(
+  input: SkipVisitInput,
+): Promise<ActionResult & { changeId?: string | null; notified?: NoticeCounts }> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
 
   const parsed = skipVisitSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
 
+  const notify = parsed.data.notifyCustomer ?? false;
   const supabase = await createClient();
-  const result = await skipVisitCore(supabase, {
+  const result = await skipVisitWithLog(supabase, {
     tenantId: ctx.tenantId,
     jobId: parsed.data.jobId,
     reason: parsed.data.reason,
     note: emptyToNull(parsed.data.note),
     actor: ctx.actor,
+    notifyCustomer: notify,
   });
   if (!result.success) return { success: false, error: result.error };
 
+  const notified = await noticeForChange(ctx.tenantId, result.changeId, notify);
+  // Skipping the last service left at a house sends the stop's visit-done message.
+  await sendVisitDoneAfterSkip(supabase, { tenantId: ctx.tenantId, jobId: parsed.data.jobId });
   revalidateVisits();
-  return { success: true };
+  return {
+    success: true,
+    changeId: result.changeId ?? null,
+    ...(notified ? { notified } : {}),
+  };
 }
 
-export async function rescheduleVisit(input: RescheduleVisitInput): Promise<ActionResult> {
+export async function rescheduleVisit(
+  input: RescheduleVisitInput,
+): Promise<ActionResult & { changeId?: string | null; notified?: NoticeCounts }> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
 
   const parsed = rescheduleVisitSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
 
+  const notify = parsed.data.notifyCustomer ?? false;
   const supabase = await createClient();
-  const result = await rescheduleVisitCore(supabase, {
+  const result = await rescheduleVisitWithLog(supabase, {
     tenantId: ctx.tenantId,
     jobId: parsed.data.jobId,
     scheduledDate: parsed.data.scheduledDate,
     scheduledTime: emptyToNull(parsed.data.scheduledTime),
     actor: ctx.actor,
+    notifyCustomer: notify,
   });
   if (!result.success) return result;
 
+  const notified = await noticeForChange(ctx.tenantId, result.changeId, notify);
   revalidateVisits();
-  return { success: true };
+  return {
+    success: true,
+    changeId: result.changeId ?? null,
+    ...(notified ? { notified } : {}),
+  };
 }
 
 export async function moveRemaining(
   input: MoveRemainingInput,
-): Promise<{ success: true; moved: number } | { success: false; error: string }> {
+): Promise<
+  | { success: true; moved: number; changeId: string | null; notified?: NoticeCounts }
+  | { success: false; error: string }
+> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
 
   const parsed = moveRemainingSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
 
+  const notify = parsed.data.notifyCustomers ?? false;
   const supabase = await createClient();
-  const result = await moveRemainingCore(supabase, {
+  const result = await moveRemainingWithLog(supabase, {
     tenantId: ctx.tenantId,
     fromDate: parsed.data.fromDate,
     toDate: parsed.data.toDate,
     scheduledTime: emptyToNull(parsed.data.scheduledTime),
     actor: ctx.actor,
+    notifyCustomers: notify,
   });
   if (!result.success) return result;
 
+  const notified = await noticeForChange(ctx.tenantId, result.changeId, notify);
   revalidateVisits();
-  return result;
+  return {
+    success: true,
+    moved: result.moved,
+    changeId: result.changeId,
+    ...(notified ? { notified } : {}),
+  };
+}
+
+export async function skipRemaining(
+  input: SkipRemainingInput,
+): Promise<
+  | { success: true; skipped: number; changeId: string | null; notified?: NoticeCounts }
+  | { success: false; error: string }
+> {
+  const ctx = await requireActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = skipRemainingSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const notify = parsed.data.notifyCustomers ?? false;
+  const supabase = await createClient();
+  const result = await skipRemainingCore(supabase, {
+    tenantId: ctx.tenantId,
+    date: parsed.data.date,
+    actor: ctx.actor,
+    notifyCustomers: notify,
+  });
+  if (!result.success) return result;
+
+  const notified = await noticeForChange(ctx.tenantId, result.changeId, notify);
+  revalidateVisits();
+  return {
+    success: true,
+    skipped: result.skipped,
+    changeId: result.changeId,
+    ...(notified ? { notified } : {}),
+  };
+}
+
+export async function undoVisitChange(
+  input: UndoVisitChangeInput,
+): Promise<
+  | { success: true; restored: number; leftAlone: number; notified?: NoticeCounts }
+  | { success: false; error: string }
+> {
+  const ctx = await requireActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = undoVisitChangeSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  const result = await undoVisitChangeCore(supabase, {
+    tenantId: ctx.tenantId,
+    changeId: parsed.data.changeId,
+    actor: ctx.actor,
+  });
+  if (!result.success) return { success: false, error: result.error };
+
+  let notified: NoticeCounts | undefined;
+  if (result.change.notifiedAt && parsed.data.notifyCustomers !== false) {
+    try {
+      notified = await notifyVisitChangeUndone({
+        tenantId: ctx.tenantId,
+        changeId: result.change.id,
+        restoredJobIds: result.restoredJobIds,
+      });
+    } catch (err) {
+      console.error(
+        '[visits] notifyVisitChangeUndone',
+        err instanceof Error ? err.message : 'failed',
+      );
+    }
+  }
+
+  revalidateVisits();
+  return {
+    success: true,
+    restored: result.restored,
+    leftAlone: result.leftAlone,
+    ...(notified ? { notified } : {}),
+  };
+}
+
+export async function getLatestUndoableChange(
+  date?: string,
+): Promise<VisitChangeSummary | null> {
+  const ctx = await requireActor();
+  if (!ctx.success) return null;
+  if (date != null && date !== '' && !isValidYmd(date)) return null;
+
+  const supabase = await createClient();
+  if (date != null && date !== '' && isValidYmd(date)) {
+    return latestUndoableChange(supabase, ctx.tenantId, { date });
+  }
+  return latestUndoableChange(supabase, ctx.tenantId);
 }
 
 export async function reorderDay(input: ReorderDayInput): Promise<ActionResult> {
@@ -224,84 +384,15 @@ export async function createOneOffVisit(
 
   const parsed = oneOffVisitSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
-  const values = parsed.data;
 
   const supabase = await createClient();
-  const { data: customer, error: customerError } = await supabase
-    .from('customers')
-    .select('id')
-    .eq('id', values.customer_id)
-    .eq('tenant_id', ctx.tenantId)
-    .maybeSingle();
-  if (customerError) return { success: false, error: customerError.message };
-  if (!customer) return { success: false, error: 'Customer not found' };
-
-  const [coords, solo] = await Promise.all([
-    resolveJobCoordinates({
-      postcode: values.postcode,
-      fullAddress: `${values.address}, ${values.postcode}`,
-    }),
-    getSoloWorkerForTenant(supabase, ctx.tenantId),
-  ]);
-
-  const scheduledTime = emptyToNull(values.scheduled_time);
-  const accessNotes = emptyToNull(values.access_notes);
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .insert({
-      tenant_id: ctx.tenantId,
-      reference_number: oneOffReferenceNumber(values.scheduled_date, random4hex()),
-      customer_id: values.customer_id,
-      assigned_worker_id: solo?.id ?? null,
-      service_agreement_id: null,
-      agreement_occurrence_date: null,
-      address: values.address,
-      postcode: values.postcode,
-      lat: coords?.lat ?? null,
-      lng: coords?.lng ?? null,
-      job_description: values.title,
-      status: 'assigned',
-      priority: 'normal',
-      scheduled_date: values.scheduled_date,
-      scheduled_time: scheduledTime,
-      estimated_duration_minutes: values.duration_minutes,
-      quoted_amount: values.price,
-      payment_status: 'unpaid',
-      customer_confirmation_status: null,
-      route_position: null,
-      required_skills: [],
-      industry_data: {},
-      custom_fields: {
-        rounds: {
-          agreement_id: null,
-          service_name: null,
-          access_notes: accessNotes,
-        },
-      },
-    })
-    .select('id')
-    .single();
-
-  if (error || typeof data?.id !== 'string') {
-    console.error('[createOneOffVisit]', error);
-    return { success: false, error: error?.message ?? 'Failed to create job' };
-  }
-
-  const { error: historyError } = await supabase.from('job_status_history').insert({
-    job_id: data.id,
-    from_status: null,
-    to_status: 'assigned',
-    created_at: new Date().toISOString(),
-    changed_by_user_id: ctx.actor.userId ?? null,
-    changed_by_worker_id: ctx.actor.workerId ?? null,
-    notes: 'One-off visit',
-    metadata: {},
+  const result = await createOneOffVisitCore(supabase, {
+    tenantId: ctx.tenantId,
+    actor: ctx.actor,
+    values: parsed.data,
   });
-  if (historyError) {
-    console.error('[createOneOffVisit] job_status_history', historyError);
-  }
+  if (!result.success) return result;
 
-  revalidateVisits(values.customer_id);
-  return { success: true, jobId: data.id };
+  revalidateVisits(parsed.data.customer_id);
+  return result;
 }

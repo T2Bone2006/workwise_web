@@ -167,6 +167,8 @@ export interface TenantSettings {
     payments?: boolean;
   };
   rounds?: Partial<RoundsSettings>;
+  /** Phase 3 messaging. Always read through parseMessagingSettings. */
+  messaging?: unknown;
 }
 
 export interface TenantForSettings {

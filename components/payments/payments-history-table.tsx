@@ -7,7 +7,7 @@ import {
   PaymentsListFilters,
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
-import { Card, CardContent } from '@/components/ui/card';
+import { MoneyRow, MONEY_ACCENT } from '@/components/payments/money-row';
 import type { PaymentHistoryRow } from '@/lib/data/payments/history';
 import { formatGbp } from '@/lib/money/pence';
 import type { PaymentMethod } from '@/lib/payments/money-core';
@@ -80,7 +80,6 @@ export function PaymentsHistoryTable({
     label: name,
   }));
   const whereActive = wheres.some((where) => where.field && where.value);
-  const total = shown.reduce((sum, row) => sum + row.amount, 0);
 
   const pushDates = (dateFrom?: string, dateTo?: string) => {
     const params = new URLSearchParams();
@@ -124,66 +123,30 @@ export function PaymentsHistoryTable({
       ) : null}
 
       {shown.length === 0 ? (
-        <Card className="glass-card border-border/80">
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            {compact
-              ? 'Nothing has come in lately.'
-              : needle
-                ? 'Nothing matches.'
-                : 'Nothing has come in for these dates.'}
-          </CardContent>
-        </Card>
+        <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
+          {compact
+            ? 'Nothing has come in lately.'
+            : needle
+              ? 'Nothing matches.'
+              : 'Nothing has come in for these dates.'}
+        </div>
       ) : (
-        <Card className="glass-card overflow-hidden border-border/80">
-          <CardContent className="divide-y divide-border/70 p-0">
-            {compact ? null : (
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div>
-                  <h2 className="text-sm font-semibold">Came in</h2>
-                  <p className="text-xs text-muted-foreground">
-                    {shown.length === 1 ? '1 payment' : `${shown.length} payments`}
-                  </p>
-                </div>
-                <span className="text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                  {formatGbp(total)}
-                </span>
-              </div>
-            )}
-            {shown.map((row) => {
-              const Icon = METHOD_ICON[row.method] ?? Wallet;
-              return (
-                <div
-                  key={row.id}
-                  role="link"
-                  tabIndex={0}
-                  className="group flex cursor-pointer items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent/70 dark:hover:bg-accent/40"
-                  onClick={() => router.push(`/customers/${row.customerId}`)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      router.push(`/customers/${row.customerId}`);
-                    }
-                  }}
-                >
-                  <span className="flex min-w-0 items-center gap-3 text-left">
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
-                      <Icon className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium group-hover:underline">{row.customerName}</span>
-                      <span className="mt-0.5 block text-sm text-muted-foreground">
-                        {formatReceived(row.receivedAt)} · {METHOD_LABEL[row.method]}
-                      </span>
-                    </span>
-                  </span>
-                  <span className="inline-flex shrink-0 rounded-full border border-emerald-300/70 bg-emerald-50 px-2.5 py-0.5 text-sm font-semibold tabular-nums text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200">
-                    {formatGbp(row.amount)}
-                  </span>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+        <ul className="space-y-3">
+          {shown.map((row) => {
+            const Icon = METHOD_ICON[row.method] ?? Wallet;
+            return (
+              <MoneyRow
+                key={row.id}
+                accent={MONEY_ACCENT.received}
+                icon={Icon}
+                title={row.customerName}
+                detail={`${formatReceived(row.receivedAt)} · ${METHOD_LABEL[row.method]}`}
+                amount={formatGbp(row.amount)}
+                onClick={() => router.push(`/customers/${row.customerId}`)}
+              />
+            );
+          })}
+        </ul>
       )}
       {!compact && rows.length >= HISTORY_LIMIT ? (
         <p className="text-sm text-muted-foreground">Showing the latest 200</p>

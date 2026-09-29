@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe/client';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { creditTextPackFromSession } from '@/lib/messaging/text-packs';
 import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
 import { syncSubscription } from '@/lib/stripe/sync-subscription';
 
 export const runtime = 'nodejs';
 
 /**
- * Stripe webhook for the platform account (subscriptions).
+ * Stripe webhook for the platform account (subscriptions and text-pack payments).
  *
  * Idempotency: the event id is inserted into stripe_events before any work; a
  * redelivery hits the primary key and is acknowledged immediately. Any
@@ -73,6 +74,8 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const session = event.data.object;
       if (session.mode === 'subscription') {
         await provisionFromCheckoutSession(session);
+      } else if (session.mode === 'payment' && session.metadata?.kind === 'text_pack') {
+        await creditTextPackFromSession(session);
       }
       return;
     }

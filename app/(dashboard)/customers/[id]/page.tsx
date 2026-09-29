@@ -1,6 +1,4 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Pencil } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import {
@@ -40,12 +38,17 @@ import { CustomerStatStrip } from '@/components/rounds/customer-stat-strip';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import { HistoryBackButton } from '@/components/layout/history-back-button';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { CustomerDetailsCard } from '@/components/rounds/customer-details-card';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 import { getCustomerLedger } from '@/lib/data/payments/ledger';
 import { CustomerMoneyCard } from '@/components/payments/customer-money-card';
 import { CustomerActivity } from '@/components/rounds/customer-activity';
+import { CustomerMessagesCard } from '@/components/messaging/customer-messages-card';
+import { getCustomerRecentMessages } from '@/lib/data/messaging/threads';
+import { getMessagingSettings } from '@/lib/data/messaging/settings';
+import { contactChoiceFromColumn } from '@/lib/messaging/channel';
+import { splitHouse } from '@/lib/rounds/house';
 
 function formatVisitDay(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -117,6 +120,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       { visits: recent, error: recentError },
       settings,
       ledgerResult,
+      messaging,
     ] = await Promise.all([
       getRoundsCustomerById(tenantId, customerId),
       getAgreementsForCustomer(tenantId, customerId),
@@ -124,6 +128,20 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       getRecentVisitsForCustomer(tenantId, customerId),
       createClient().then((supabase) => getRoundsSettings(supabase, tenantId)),
       createClient().then((supabase) => getCustomerLedger(supabase, tenantId, customerId)),
+      createClient().then(async (supabase) => {
+        const [messagingSettings, recentMessages, flags] = await Promise.all([
+          getMessagingSettings(supabase, tenantId),
+          getCustomerRecentMessages(supabase, tenantId, customerId),
+          supabase
+            .from('customers')
+            .select('visit_reminders, payment_chasers, payment_thanks, messaging_opt_out_at')
+            .eq('tenant_id', tenantId)
+            .eq('id', customerId)
+            .maybeSingle(),
+        ]);
+        if (flags.error) console.error('[customer messages]', flags.error);
+        return { messagingSettings, recentMessages, flags: flags.data };
+      }),
     ]);
 
     if (customerError || !customer) {
@@ -179,12 +197,6 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           }
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link href={paths.customerEdit(customerId)}>
-                  <Pencil className="mr-2 size-4" />
-                  Edit
-                </Link>
-              </Button>
               {customer.is_active ? (
                 <CustomerDeleteButton
                   customerId={customerId}
@@ -213,14 +225,38 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
 
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
-            <CustomerActivity
-              visits={recent}
-              payments={ledgerResult.ledger?.payments ?? []}
-              notes={customer.notes}
+            <CustomerDetailsCard
+              customer={customer}
+              house={
+                customer.address
+                  ? splitHouse(customer.address)
+                  : primary
+                    ? { address: primary.address, postcode: primary.postcode }
+                    : { address: null, postcode: null }
+              }
+              messaging={{
+                contactChoice: contactChoiceFromColumn(customer.preferred_channel),
+                visitReminders: messaging.flags?.visit_reminders === true,
+                paymentChasers: messaging.flags?.payment_chasers !== false,
+                paymentThanks: messaging.flags?.payment_thanks !== false,
+                remindersEnabled: messaging.messagingSettings.reminders_enabled,
+                chasersEnabled: messaging.messagingSettings.chasers_enabled,
+                thanksEnabled: messaging.messagingSettings.payment_thanks_enabled,
+                reminderDaysBefore: messaging.messagingSettings.reminder_days_before,
+              }}
             />
             {ledgerResult.ledger ? (
               <CustomerMoneyCard ledger={ledgerResult.ledger} payLinkAvailable />
             ) : null}
+            <CustomerMessagesCard
+              name={customer.name}
+              phoneE164={customer.phone_e164}
+              optedOut={
+                typeof messaging.flags?.messaging_opt_out_at === 'string' &&
+                messaging.flags.messaging_opt_out_at.trim() !== ''
+              }
+              recent={messaging.recentMessages}
+            />
             <AgreementsCard
               customerId={customerId}
               agreements={agreements}
@@ -245,30 +281,11 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                 </CardContent>
               </Card>
             ) : null}
-            {customer.access_notes ? (
-              <Card className="glass-card border-border/80">
-                <CardHeader className="pb-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Access notes</h2>
-                </CardHeader>
-                <CardContent>
-                  <p className="whitespace-pre-wrap text-sm text-foreground">
-                    {customer.access_notes}
-                  </p>
-                </CardContent>
-              </Card>
-            ) : null}
-            {customer.notes ? (
-              <Card className="glass-card border-border/80">
-                <CardHeader className="pb-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Notes</h2>
-                </CardHeader>
-                <CardContent>
-                  <p className="whitespace-pre-wrap text-sm text-foreground">
-                    {customer.notes}
-                  </p>
-                </CardContent>
-              </Card>
-            ) : null}
+            <CustomerActivity
+              visits={recent}
+              payments={ledgerResult.ledger?.payments ?? []}
+              notes={customer.notes}
+            />
           </div>
         </div>
       </div>

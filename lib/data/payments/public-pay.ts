@@ -7,6 +7,7 @@ import {
   type ConnectMirror,
 } from '@/lib/payments/connect-status';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 
 export type PublicBusiness = {
   tenantId: string;
@@ -112,13 +113,20 @@ function companyFromSettings(settings: unknown): {
   }
   const company = settings.company;
   if (!isPlainObject(company)) {
-    return { phone: null, email: null, logoUrl: null };
+    return { phone: messagingContactPhone(settings), email: null, logoUrl: null };
   }
   return {
-    phone: asString(company.phone),
+    phone: messagingContactPhone(settings) ?? asString(company.phone),
     email: asString(company.email),
     logoUrl: asString(company.logo_url),
   };
+}
+
+/** The number the texts say to call (settings.messaging.contact_phone), so the page and the text match. */
+function messagingContactPhone(settings: Record<string, unknown>): string | null {
+  const messaging = settings.messaging;
+  if (!isPlainObject(messaging)) return null;
+  return formatUkPhoneDisplay(asString(messaging.contact_phone)) || null;
 }
 
 function bankFromRow(row: Record<string, unknown> | null): PublicBank {

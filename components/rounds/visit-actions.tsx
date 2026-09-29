@@ -12,6 +12,10 @@ import {
   rescheduleVisit,
   skipVisit,
 } from '@/lib/actions/rounds/visits';
+import { dayMovedSms, daySkippedSms, type SmsBrand } from '@/lib/messaging/templates';
+import { formatVisitDay } from '@/lib/payments/messages';
+import { isValidYmd } from '@/lib/rounds/dates';
+import { ChangePreview } from '@/components/messaging/change-preview';
 import {
   SKIP_REASON_LABELS,
   USER_SKIP_REASONS,
@@ -53,6 +57,20 @@ function formatYmdDisplay(ymd: string): string {
   } catch {
     return ymd;
   }
+}
+
+function smsDay(ymd: string): string {
+  return isValidYmd(ymd) ? formatVisitDay(ymd) : ymd;
+}
+
+function toldLine(
+  notify: boolean,
+  notified?: { texted: number; emailed: number; held: number },
+): string {
+  if (!notify || !notified) return 'not told';
+  const told = notified.texted + notified.emailed + notified.held;
+  if (told < 1) return 'not told';
+  return `told ${told} customer${told === 1 ? '' : 's'}`;
 }
 
 export function CompleteVisitButton({
@@ -157,8 +175,15 @@ export function CompleteVisitDialog({
     });
     setPending(false);
     if (result.success) {
-      if (result.alreadyCompleted) {
-        toast.success('Already done');
+      const notRecorded =
+        payment && !result.paymentRecorded
+          ? ` ${formatGbp(payment.amount)} was not recorded — if you took it, use Mark as paid on the customer's page.`
+          : '';
+      if (result.skippedElsewhere) {
+        toast.warning(`This visit was skipped, so it wasn't marked done.${notRecorded}`);
+      } else if (result.alreadyCompleted) {
+        if (notRecorded) toast.warning(`Already done.${notRecorded}`);
+        else toast.success('Already done');
       } else if (payment) {
         toast.success(`Marked done · ${formatGbp(payment.amount)} ${payment.method} recorded`);
       } else {
@@ -233,7 +258,7 @@ export function CompleteVisitDialog({
           </div>
           {customerHasEmail ? null : (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              No email for this customer — they won&apos;t get the visit-done message.
+              No email — they&apos;ll get a text instead if they have a mobile and texts are left.
             </p>
           )}
         </div>
@@ -253,26 +278,33 @@ export function CompleteVisitDialog({
 
 export function SkipVisitDialog({
   jobId,
+  scheduledDate,
+  brand,
   open,
   onOpenChange,
 }: {
   jobId: string;
+  scheduledDate?: string | null;
+  brand: SmsBrand;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [reason, setReason] = useState<(typeof USER_SKIP_REASONS)[number]>('no_access');
   const [note, setNote] = useState('');
+  const [notify, setNotify] = useState(false);
   const [pending, setPending] = useState(false);
+  const day = scheduledDate ? smsDay(scheduledDate) : 'that day';
 
   const handle = async () => {
     setPending(true);
-    const result = await skipVisit({ jobId, reason, note });
+    const result = await skipVisit({ jobId, reason, note, notifyCustomer: notify });
     setPending(false);
     if (result.success) {
-      toast.success('Visit skipped');
+      toast.success(notify ? `Visit skipped · ${toldLine(true, result.notified)}` : 'Visit skipped');
       onOpenChange(false);
       setNote('');
+      setNotify(false);
       router.refresh();
     } else {
       toast.error(result.error);
@@ -280,7 +312,13 @@ export function SkipVisitDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setNotify(false);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Skip this visit</DialogTitle>
@@ -318,6 +356,18 @@ export function SkipVisitDialog({
               className="resize-none"
             />
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor={`skip-notify-${jobId}`}>Let the customer know</Label>
+            <Switch
+              id={`skip-notify-${jobId}`}
+              checked={notify}
+              onCheckedChange={setNotify}
+              disabled={pending}
+            />
+          </div>
+          {notify ? (
+            <ChangePreview text={daySkippedSms({ brand, day, nextDay: null })} />
+          ) : null}
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -337,12 +387,14 @@ export function RescheduleVisitDialog({
   jobId,
   initialDate,
   initialTime,
+  brand,
   open,
   onOpenChange,
 }: {
   jobId: string;
   initialDate?: string | null;
   initialTime?: string | null;
+  brand: SmsBrand;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -351,6 +403,7 @@ export function RescheduleVisitDialog({
     initialDate ? parseYmd(initialDate) : undefined,
   );
   const [time, setTime] = useState(initialTime?.slice(0, 5) ?? '');
+  const [notify, setNotify] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -364,10 +417,12 @@ export function RescheduleVisitDialog({
       jobId,
       scheduledDate: toYmd(date),
       scheduledTime: time || '',
+      notifyCustomer: notify,
     });
     setPending(false);
     if (result.success) {
-      toast.success('Visit moved');
+      toast.success(notify ? `Visit moved · ${toldLine(true, result.notified)}` : 'Visit moved');
+      setNotify(false);
       onOpenChange(false);
       router.refresh();
     } else {
@@ -376,7 +431,13 @@ export function RescheduleVisitDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setNotify(false);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Reschedule visit</DialogTitle>
@@ -422,6 +483,24 @@ export function RescheduleVisitDialog({
               onChange={(e) => setTime(e.target.value)}
             />
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor={`reschedule-notify-${jobId}`}>Let the customer know</Label>
+            <Switch
+              id={`reschedule-notify-${jobId}`}
+              checked={notify}
+              onCheckedChange={setNotify}
+              disabled={pending}
+            />
+          </div>
+          {notify && date && initialDate ? (
+            <ChangePreview
+              text={dayMovedSms({
+                brand,
+                fromDay: smsDay(initialDate),
+                toDay: smsDay(toYmd(date)),
+              })}
+            />
+          ) : null}
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -440,16 +519,19 @@ export function RescheduleVisitDialog({
 export function MoveRemainingDialog({
   fromDate,
   leftoverCount,
+  brand,
   open,
   onOpenChange,
 }: {
   fromDate: Ymd;
   leftoverCount: number;
+  brand: SmsBrand;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [toDate, setToDate] = useState<Date | undefined>(undefined);
+  const [notify, setNotify] = useState(true);
   const [calOpen, setCalOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -468,12 +550,11 @@ export function MoveRemainingDialog({
       fromDate,
       toDate: target,
       scheduledTime: '',
+      notifyCustomers: notify,
     });
     setPending(false);
     if (result.success) {
-      toast.success(
-        `${result.moved} stop${result.moved === 1 ? '' : 's'} moved to ${formatYmdDisplay(target)}`,
-      );
+      toast.success(`Moved ${result.moved} · ${toldLine(notify, result.notified)}`);
       onOpenChange(false);
       setToDate(undefined);
       router.refresh();
@@ -483,7 +564,13 @@ export function MoveRemainingDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setNotify(true);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Move remaining</DialogTitle>
@@ -521,6 +608,26 @@ export function MoveRemainingDialog({
             </PopoverContent>
           </Popover>
         </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="move-remaining-notify">Let customers know</Label>
+            <Switch
+              id="move-remaining-notify"
+              checked={notify}
+              onCheckedChange={setNotify}
+              disabled={pending}
+            />
+          </div>
+          {notify && toDate ? (
+            <ChangePreview
+              text={dayMovedSms({
+                brand,
+                fromDay: smsDay(fromDate),
+                toDay: smsDay(toYmd(toDate)),
+              })}
+            />
+          ) : null}
+        </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -544,6 +651,7 @@ export function VisitActionButtons({
   scheduledTime,
   customerSendsInvoice,
   customerHasEmail,
+  brand,
 }: {
   jobId: string;
   status: string;
@@ -552,6 +660,7 @@ export function VisitActionButtons({
   scheduledTime?: string | null;
   customerSendsInvoice: boolean;
   customerHasEmail: boolean;
+  brand: SmsBrand;
 }) {
   const [skipOpen, setSkipOpen] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -596,6 +705,8 @@ export function VisitActionButtons({
       </div>
       <SkipVisitDialog
         jobId={jobId}
+        scheduledDate={scheduledDate}
+        brand={brand}
         open={skipOpen}
         onOpenChange={setSkipOpen}
       />
@@ -603,6 +714,7 @@ export function VisitActionButtons({
         jobId={jobId}
         initialDate={scheduledDate}
         initialTime={scheduledTime}
+        brand={brand}
         open={rescheduleOpen}
         onOpenChange={setRescheduleOpen}
       />

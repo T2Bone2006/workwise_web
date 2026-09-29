@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
+import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -209,11 +210,13 @@ export function SettingsCompanyTab({
           </div>
           <div className="space-y-2">
             <Label htmlFor="company-address">Address</Label>
-            <Input
-              id="company-address"
+            <AddressAutocompleteInput
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="123 High Street, London"
+              onValueChange={setAddress}
+              onAddressSelect={({ address: line, postcode }) => {
+                setAddress([line, postcode].filter(Boolean).join(', '));
+              }}
+              placeholder="Start typing a postcode or address…"
             />
           </div>
         </CardContent>

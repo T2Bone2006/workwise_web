@@ -9,6 +9,7 @@ export const skipVisitSchema = z.object({
   reason: z.enum(USER_SKIP_REASONS),
   /** Phone outbox may send `null` when there is no note. */
   note: z.string().trim().max(300).nullable().optional().or(z.literal('')),
+  notifyCustomer: z.boolean().optional(),
 });
 
 export type SkipVisitInput = z.input<typeof skipVisitSchema>;
@@ -18,6 +19,7 @@ export const rescheduleVisitSchema = z.object({
   jobId: z.string().uuid('Invalid job'),
   scheduledDate: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   scheduledTime: hhmmTimeSchema,
+  notifyCustomer: z.boolean().optional(),
 });
 
 export type RescheduleVisitInput = z.input<typeof rescheduleVisitSchema>;
@@ -27,6 +29,7 @@ export const moveRemainingSchema = z.object({
   fromDate: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   toDate: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   scheduledTime: hhmmTimeSchema,
+  notifyCustomers: z.boolean().optional(),
 });
 
 export type MoveRemainingInput = z.input<typeof moveRemainingSchema>;
@@ -76,3 +79,20 @@ export const oneOffVisitSchema = agreementSchema
 
 export type OneOffVisitInput = z.input<typeof oneOffVisitSchema>;
 export type OneOffVisitValues = z.output<typeof oneOffVisitSchema>;
+
+export const skipRemainingSchema = z.object({
+  date: z.string().refine(isValidYmd, { message: 'Invalid date' }),
+  notifyCustomers: z.boolean().optional(),
+});
+
+export type SkipRemainingInput = z.input<typeof skipRemainingSchema>;
+export type SkipRemainingValues = z.output<typeof skipRemainingSchema>;
+
+export const undoVisitChangeSchema = z.object({
+  changeId: z.string().uuid('Invalid change'),
+  // default true for undo when the change was notified
+  notifyCustomers: z.boolean().optional(),
+});
+
+export type UndoVisitChangeInput = z.input<typeof undoVisitChangeSchema>;
+export type UndoVisitChangeValues = z.output<typeof undoVisitChangeSchema>;

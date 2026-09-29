@@ -2,13 +2,16 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
-import { getCustomersForTenant } from '@/lib/data/customers';
+import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import {
   getVisitCountsForMonth,
   getVisitsForDay,
 } from '@/lib/data/rounds/visits';
+import { getLatestUndoableChange } from '@/lib/actions/rounds/visits';
 import { isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
+import { listOneOffCustomerOptions } from '@/lib/rounds/one-off';
+import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { RoundsMonthGrid } from '@/components/rounds/rounds-month-grid';
 import { RoundsDayPlan } from '@/components/rounds/rounds-day-plan';
@@ -60,10 +63,16 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
   const settings = await getRoundsSettings(supabase, tenantId);
 
   if (view === 'day') {
-    const [{ visits, error }, { customers }] = await Promise.all([
+    const [{ visits, error }, { options: customers }, messaging, undoable] = await Promise.all([
       getVisitsForDay(tenantId, date),
-      getCustomersForTenant(tenantId),
+      listOneOffCustomerOptions(supabase, tenantId),
+      getMessagingSettings(supabase, tenantId),
+      getLatestUndoableChange(date),
     ]);
+    const brand = {
+      businessName: messaging.businessName,
+      contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
+    };
 
     return (
       <div className="space-y-6">
@@ -85,6 +94,8 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
           visits={visits}
           customers={customers}
           today={today}
+          brand={brand}
+          undoable={undoable}
         />
       </div>
     );

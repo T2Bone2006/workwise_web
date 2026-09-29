@@ -24,7 +24,11 @@ import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banne
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getMessagingSettings } from '@/lib/data/messaging/settings';
+import { getLatestUndoableChange } from '@/lib/actions/rounds/visits';
 import { getRoundsHomeData } from '@/lib/data/rounds/home';
+import { createClient } from '@/lib/supabase/server';
+import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { RoundsHome } from '@/components/rounds/rounds-home';
 import { NoProducts } from '@/components/dashboard/no-products';
 
@@ -143,8 +147,25 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   if (products.primary === 'rounds') {
     const rawParams = await searchParams;
     const day = parseDayParam(rawParams.date);
-    const data = await getRoundsHomeData(tenantId, day);
-    return <RoundsHome key={day} tenantName={tenantName} data={data} />;
+    const supabase = await createClient();
+    const [data, messaging, undoable] = await Promise.all([
+      getRoundsHomeData(tenantId, day),
+      getMessagingSettings(supabase, tenantId),
+      getLatestUndoableChange(day),
+    ]);
+    const brand = {
+      businessName: messaging.businessName,
+      contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
+    };
+    return (
+      <RoundsHome
+        key={day}
+        tenantName={tenantName}
+        data={data}
+        brand={brand}
+        undoable={undoable}
+      />
+    );
   }
   if (products.primary === 'lite') {
     redirect('/lite');

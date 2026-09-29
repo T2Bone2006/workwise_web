@@ -20,9 +20,11 @@ import {
   optimiseDay,
   reorderDay,
 } from '@/lib/actions/rounds/visits';
-import type { CustomerRow } from '@/lib/data/customers';
+import type { OneOffCustomerOption } from '@/lib/rounds/one-off';
 import type { VisitRow } from '@/lib/data/rounds/visits';
+import type { SmsBrand } from '@/lib/messaging/templates';
 import type { Ymd } from '@/lib/rounds/dates';
+import type { VisitChangeSummary } from '@/lib/rounds/visit-changes';
 import { groupHouseStops } from '@/lib/rounds/house-stops';
 import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
@@ -36,16 +38,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import {
   MoveRemainingDialog,
 } from '@/components/rounds/visit-actions';
+import { SkipRemainingDialog } from '@/components/rounds/skip-remaining-dialog';
+import { UndoChangeBar } from '@/components/rounds/undo-change-bar';
 import { VisitStopCard } from '@/components/rounds/visit-stop-card';
 
 function toYmd(date: Date): Ymd {
@@ -61,16 +59,24 @@ function isLeftover(status: string): boolean {
   ].includes(status);
 }
 
+function repliesToReview(visits: VisitRow[]): number {
+  return visits.filter((visit) => visit.customer_confirmation_status != null).length;
+}
+
 export function RoundsDayPlan({
   date,
   visits: initialVisits,
   customers,
   today,
+  brand,
+  undoable,
 }: {
   date: Ymd;
   visits: VisitRow[];
-  customers: CustomerRow[];
+  customers: OneOffCustomerOption[];
   today: Ymd;
+  brand: SmsBrand;
+  undoable: VisitChangeSummary | null;
 }) {
   const router = useRouter();
   const [order, setOrder] = useState(() => initialVisits.map((v) => v.id));
@@ -79,6 +85,7 @@ export function RoundsDayPlan({
   const [optimising, setOptimising] = useState(false);
   const [lastDistanceKm, setLastDistanceKm] = useState<number | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
   const [oneOffOpen, setOneOffOpen] = useState(false);
 
   const visitById = useMemo(() => {
@@ -97,6 +104,7 @@ export function RoundsDayPlan({
   }, [order, visitById, initialVisits]);
 
   const leftovers = orderedVisits.filter((v) => isLeftover(v.status));
+  const replyCount = repliesToReview(orderedVisits);
   const dayDate = parseISO(date);
   const prev = toYmd(subDays(dayDate, 1));
   const next = toYmd(addDays(dayDate, 1));
@@ -200,9 +208,14 @@ export function RoundsDayPlan({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {leftovers.length > 0 ? (
-            <Button variant="outline" size="sm" onClick={() => setMoveOpen(true)}>
-              Move remaining ({leftovers.length})
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={() => setMoveOpen(true)}>
+                Move remaining ({leftovers.length})
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setSkipOpen(true)}>
+                Skip remaining ({leftovers.length})
+              </Button>
+            </>
           ) : null}
           <Button
             variant="outline"
@@ -238,6 +251,17 @@ export function RoundsDayPlan({
         </p>
       ) : null}
 
+      {replyCount > 0 ? (
+        <Link
+          href="/messages"
+          className="block rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-foreground"
+        >
+          {replyCount} {replyCount === 1 ? 'reply' : 'replies'} about this day to review
+        </Link>
+      ) : null}
+
+      <UndoChangeBar change={undoable} brand={brand} />
+
       {orderedVisits.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/80 px-6 py-12 text-center">
           <p className="text-sm font-medium text-foreground">No visits this day</p>
@@ -262,6 +286,7 @@ export function RoundsDayPlan({
                 visits={group}
                 orderIndex={index + 1}
                 dimmed={group.some((visit) => dragId === visit.id)}
+                brand={brand}
                 leading={
                   <div className="flex flex-col items-center gap-1 pt-0.5">
                     <span
@@ -306,8 +331,16 @@ export function RoundsDayPlan({
       <MoveRemainingDialog
         fromDate={date}
         leftoverCount={leftovers.length}
+        brand={brand}
         open={moveOpen}
         onOpenChange={setMoveOpen}
+      />
+      <SkipRemainingDialog
+        open={skipOpen}
+        onOpenChange={setSkipOpen}
+        date={date}
+        remainingCount={leftovers.length}
+        brand={brand}
       />
 
       <OneOffVisitDialog
@@ -329,7 +362,7 @@ function OneOffVisitDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   date: Ymd;
-  customers: CustomerRow[];
+  customers: OneOffCustomerOption[];
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -341,6 +374,25 @@ function OneOffVisitDialog({
   const [duration, setDuration] = useState('30');
   const [time, setTime] = useState('');
   const [accessNotes, setAccessNotes] = useState('');
+
+  const customerOptions = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: c.id,
+        label: c.address ? `${c.name} · ${c.address}` : c.name,
+      })),
+    [customers],
+  );
+
+  /** Picking a customer fills in their address; the trader can still change it. */
+  const pickCustomer = (id: string) => {
+    setCustomerId(id);
+    const picked = customers.find((c) => c.id === id);
+    if (!picked) return;
+    setAddress(picked.address ?? '');
+    setPostcode(picked.postcode ?? '');
+    setAccessNotes(picked.accessNotes ?? '');
+  };
 
   const reset = () => {
     setCustomerId('');
@@ -396,39 +448,39 @@ function OneOffVisitDialog({
         <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
           <div className="space-y-1.5">
             <Label>Customer</Label>
-            <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              options={customerOptions}
+              value={customerId}
+              onValueChange={pickCustomer}
+              placeholder="Select customer"
+              searchPlaceholder="Search name or street…"
+              emptyText="No customer found."
+            />
           </div>
           <div className="space-y-1.5">
             <Label>Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label>Postcode</Label>
+            <Label>Address</Label>
             <AddressAutocompleteInput
-              value={postcode}
-              onValueChange={setPostcode}
+              value={address}
+              onValueChange={setAddress}
               onAddressSelect={({ address: a, postcode: p }) => {
-                if (p) setPostcode(p);
                 setAddress(a);
+                if (p) setPostcode(p);
               }}
-              placeholder="Start typing…"
-              className="uppercase"
+              placeholder="Start typing a postcode or address…"
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Address</Label>
-            <Input value={address} onChange={(e) => setAddress(e.target.value)} />
+            <Label>Postcode</Label>
+            <Input
+              value={postcode}
+              onChange={(e) => setPostcode(e.target.value)}
+              placeholder="Filled in when you pick an address"
+              className="uppercase"
+            />
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">

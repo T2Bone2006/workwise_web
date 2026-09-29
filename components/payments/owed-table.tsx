@@ -9,6 +9,7 @@ import {
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
+import { MoneyRow, MONEY_ACCENT } from '@/components/payments/money-row';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { OwedCustomerRow } from '@/lib/data/payments/owed';
@@ -121,60 +122,37 @@ export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: str
           </CardContent>
         </Card>
       ) : (
-      <Card className="glass-card border-border/80">
-        <CardContent className="divide-y divide-border/70 p-0">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <h2 className="text-sm font-semibold">Chase these</h2>
-              <p className="text-xs text-muted-foreground">Longest waiting first.</p>
-            </div>
-            <span className="text-lg font-semibold tabular-nums text-rose-700 dark:text-rose-300">
-              {formatGbp(owing.reduce((sum, row) => sum + row.owedAmount, 0))}
-            </span>
-          </div>
+        <ul className="space-y-3">
           {owing.map((row) => (
-            <div key={row.customerId} className="group flex flex-wrap items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent/70 dark:hover:bg-accent/40">
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
-                onClick={() => router.push(`/customers/${row.customerId}`)}
-              >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300">
-                  <CircleAlert className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-medium group-hover:underline">{row.name}</span>
-                  <span className="mt-0.5 block text-sm text-muted-foreground">
-                    {waitingLabel(row.oldestUnpaidDate, today)}
-                    {' · '}
-                    since {formatSince(row.oldestUnpaidDate)}
-                    {' · '}
-                    {row.unpaidVisitCount === 1 ? '1 visit' : `${row.unpaidVisitCount} visits`}
-                  </span>
-                </span>
-              </button>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex shrink-0 rounded-full border border-rose-300/70 bg-rose-50 px-2.5 py-0.5 text-sm font-semibold tabular-nums text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-200">
-                  {formatGbp(row.owedAmount)}
-                </span>
-                {row.phone ? (
-                  <a
-                    href={`tel:${row.phone}`}
-                    className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                  >
-                    <Phone className="size-3.5" />
-                    Call
-                  </a>
-                ) : null}
-                <Button variant="outline" size="sm" onClick={() => setPayingId(row.customerId)}>
-                  Mark as paid
-                </Button>
-                <CopyPayLinkButton customerId={row.customerId} available />
-              </div>
-            </div>
+            <MoneyRow
+              key={row.customerId}
+              accent={MONEY_ACCENT.overdue}
+              icon={CircleAlert}
+              title={row.name}
+              detail={`${waitingLabel(row.oldestUnpaidDate, today)} · since ${formatSince(row.oldestUnpaidDate)} · ${row.unpaidVisitCount === 1 ? '1 visit' : `${row.unpaidVisitCount} visits`}`}
+              amount={formatGbp(row.owedAmount)}
+              status={row.chaseStage === 2 ? 'Chase' : row.chaseStage === 1 ? 'Reminded' : undefined}
+              onClick={() => router.push(`/customers/${row.customerId}`)}
+              actions={
+                <>
+                  {row.phone ? (
+                    <a
+                      href={`tel:${row.phone}`}
+                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                    >
+                      <Phone className="size-3.5" />
+                      Call
+                    </a>
+                  ) : null}
+                  <Button variant="outline" size="sm" onClick={() => setPayingId(row.customerId)}>
+                    Mark as paid
+                  </Button>
+                  <CopyPayLinkButton customerId={row.customerId} available />
+                </>
+              }
+            />
           ))}
-        </CardContent>
-      </Card>
+        </ul>
       )}
       {paying ? (
         <RecordPaymentDialog

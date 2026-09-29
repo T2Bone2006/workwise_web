@@ -9,6 +9,7 @@ import {
 } from '@/lib/job-status-display';
 import { SKIP_REASON_LABELS, type SkipReason } from '@/lib/rounds/skip-reasons';
 import type { VisitRow } from '@/lib/data/rounds/visits';
+import type { SmsBrand } from '@/lib/messaging/templates';
 import { VisitActionButtons } from '@/components/rounds/visit-actions';
 
 const priceFormat = new Intl.NumberFormat('en-GB', {
@@ -126,8 +127,15 @@ const PAYMENT_STATUS_BADGE: Record<string, { label: string; className: string }>
   },
 };
 
-function PaymentStatusBadge({ status }: { status: string | null }) {
-  if (!status) return null;
+/** Only a done visit can be owed; on a planned one "Unpaid" read like the customer was behind. */
+function PaymentStatusBadge({
+  status,
+  visitStatus,
+}: {
+  status: string | null;
+  visitStatus: string;
+}) {
+  if (!status || visitStatus !== 'completed') return null;
   const meta = PAYMENT_STATUS_BADGE[status];
   if (!meta) return null;
   return (
@@ -157,6 +165,7 @@ export function VisitStopCard({
   leading,
   className,
   dimmed,
+  brand,
 }: {
   visit: VisitRow;
   /** Other services at the same house on this day, including `visit`. */
@@ -167,6 +176,7 @@ export function VisitStopCard({
   leading?: ReactNode;
   className?: string;
   dimmed?: boolean;
+  brand: SmsBrand;
 }) {
   const services = visits && visits.length > 0 ? visits : [visit];
   const several = services.length > 1;
@@ -193,9 +203,6 @@ export function VisitStopCard({
         dimmed && 'opacity-60',
         className
       )}
-      style={{
-        boxShadow: `0 0 0 1px ${accent.glow}18, var(--shadow-glass-value)`,
-      }}
     >
       <div
         className={cn('pointer-events-none absolute inset-y-0 left-0 w-1', accent.bar)}
@@ -216,8 +223,8 @@ export function VisitStopCard({
             <div
               className="flex size-8 shrink-0 items-center justify-center rounded-full border text-sm font-bold tabular-nums sm:size-9"
               style={{
-                borderColor: `${accent.glow}55`,
-                backgroundColor: `${accent.glow}18`,
+                borderColor: accent.glow.replace(')', ' / 0.45)'),
+                backgroundColor: accent.glow.replace(')', ' / 0.12)'),
                 color: accent.glow,
               }}
               aria-label={`Stop ${position}`}
@@ -231,7 +238,9 @@ export function VisitStopCard({
                 {visit.customer_name ?? 'Customer'}
               </p>
               <VisitStatusBadge status={visit.status} />
-              {several ? null : <PaymentStatusBadge status={visit.payment_status} />}
+              {several ? null : (
+                <PaymentStatusBadge status={visit.payment_status} visitStatus={visit.status} />
+              )}
               {amount != null ? (
                 <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground">
                   {priceFormat.format(amount)}
@@ -285,7 +294,9 @@ export function VisitStopCard({
                   </span>
                 </p>
               ) : null}
-              {several ? <PaymentStatusBadge status={row.payment_status} /> : null}
+              {several ? (
+                <PaymentStatusBadge status={row.payment_status} visitStatus={row.status} />
+              ) : null}
               <VisitActionButtons
                 jobId={row.id}
                 status={row.status}
@@ -294,6 +305,7 @@ export function VisitStopCard({
                 scheduledTime={row.scheduled_time}
                 customerSendsInvoice={row.customer_sends_invoice}
                 customerHasEmail={row.customer_has_email}
+                brand={brand}
               />
             </div>
           ))}

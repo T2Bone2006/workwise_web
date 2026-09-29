@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { Card, CardAction, CardContent, CardHeader } from '@/components/ui/card';
 import { CopyButton } from '@/components/jobs/copy-button';
+import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -195,10 +196,17 @@ export function JobDetailDetailsCard({
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="job-edit-address">Address</Label>
-              <Input
-                id="job-edit-address"
+              <AddressAutocompleteInput
                 value={draft.address}
-                onChange={(e) => setDraft((d) => ({ ...d, address: e.target.value }))}
+                onValueChange={(address) => setDraft((d) => ({ ...d, address }))}
+                onAddressSelect={({ address, postcode }) =>
+                  setDraft((d) => ({
+                    ...d,
+                    address,
+                    postcode: postcode || d.postcode,
+                  }))
+                }
+                placeholder="Start typing a postcode or address…"
                 disabled={isSaving}
               />
             </div>

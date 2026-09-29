@@ -2,6 +2,7 @@ import 'server-only';
 
 import type Stripe from 'stripe';
 import { formatGbp, fromPence } from '@/lib/money/pence';
+import { sendPaymentReceivedNotice } from '@/lib/payments/notify';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import { sendExpoPushMessages } from '@/lib/services/expo-push';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -109,7 +110,11 @@ type StoredPayment = {
   id: string;
   amount: number;
   customer_id: string;
+  dispute_status: string | null;
 };
+
+/** A dispute in one of these states is over; a late `charge.dispute.updated` must not reopen it. */
+const FINAL_DISPUTE_STATUSES = new Set(['won', 'lost', 'warning_closed']);
 
 async function paymentForIntent(
   tenantId: string,
@@ -137,18 +142,46 @@ async function findPaymentForIntent(
   const admin = createAdminClient();
   const { data, error } = await admin
     .from('payments')
-    .select('id, amount, customer_id')
+    .select('id, amount, customer_id, dispute_status')
     .eq('tenant_id', tenantId)
     .eq('stripe_payment_intent_id', intentId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const row = data as { id: string; amount: number | string; customer_id: string };
+  const row = data as {
+    id: string;
+    amount: number | string;
+    customer_id: string;
+    dispute_status: string | null;
+  };
   return {
     id: row.id,
     amount: Number(row.amount),
     customer_id: row.customer_id,
+    dispute_status: row.dispute_status,
   };
+}
+
+/**
+ * `refunded_amount` only ever goes up. Stripe does not promise event order, so
+ * an older partial-refund event can arrive after a newer one; and a lost
+ * dispute already counts as a full refund (decision 27). The conditional
+ * update makes "take the larger" atomic.
+ */
+async function raiseRefundedAmount(
+  tenantId: string,
+  paymentId: string,
+  refunded: number,
+): Promise<void> {
+  if (refunded <= 0) return;
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('payments')
+    .update({ refunded_amount: refunded })
+    .eq('id', paymentId)
+    .eq('tenant_id', tenantId)
+    .lt('refunded_amount', refunded);
+  if (error) throw error;
 }
 
 function disputePatchFromCharge(charge: Stripe.Charge): {
@@ -240,9 +273,6 @@ async function applyChargeStateToPayment(p: {
   const patch: Record<string, unknown> = {
     stripe_charge_id: p.charge.id,
   };
-  if (p.charge.amount_refunded > 0) {
-    patch.refunded_amount = refundedAmountFromCharge(p.charge, p.paymentAmount);
-  }
   const dispute = disputePatchFromCharge(p.charge);
   if (dispute) {
     patch.disputed_at = dispute.disputed_at;
@@ -259,6 +289,13 @@ async function applyChargeStateToPayment(p: {
     console.error('[connect-events] sync charge state', error);
     throw error;
   }
+
+  // A dispute already lost before this row existed counts as a full refund.
+  const refunded =
+    dispute?.dispute_status === 'lost'
+      ? p.paymentAmount
+      : refundedAmountFromCharge(p.charge, p.paymentAmount);
+  await raiseRefundedAmount(p.tenantId, p.paymentId, refunded);
   return { disputed: Boolean(dispute) };
 }
 
@@ -428,6 +465,15 @@ export async function handleConnectEvent(event: Stripe.Event): Promise<void> {
           );
         }
       }
+      if (paymentId) {
+        // Same "thanks for your payment" as Mark as paid, by the money channel
+        // order. Never throws: the payment is already stored.
+        try {
+          await sendPaymentReceivedNotice(admin, { tenantId, paymentId });
+        } catch (err) {
+          console.error('[connect-events] payment thanks', paymentId, err);
+        }
+      }
       const name = await customerName(tenantId, parsed.row.customer_id);
       await pushSoloWorker(
         tenantId,
@@ -448,13 +494,15 @@ export async function handleConnectEvent(event: Stripe.Event): Promise<void> {
       const admin = createAdminClient();
       const { error } = await admin
         .from('payments')
-        .update({
-          refunded_amount: refundedAmountFromCharge(charge, payment.amount),
-          stripe_charge_id: charge.id,
-        })
+        .update({ stripe_charge_id: charge.id })
         .eq('id', payment.id)
         .eq('tenant_id', tenantId);
       if (error) throw error;
+      await raiseRefundedAmount(
+        tenantId,
+        payment.id,
+        refundedAmountFromCharge(charge, payment.amount),
+      );
       return;
     }
     case 'charge.dispute.created': {
@@ -493,10 +541,13 @@ export async function handleConnectEvent(event: Stripe.Event): Promise<void> {
       const dispute = event.data.object as Stripe.Dispute;
       const payment = await findPaymentForIntent(tenantId, dispute.payment_intent);
       if (!payment) {
-        console.warn(
-          '[connect-events] dispute.updated before payment row',
-          paymentIntentId(dispute.payment_intent),
+        // Disputes are updated days after the payment: a missing row means the
+        // checkout event is still failing, so let Stripe retry this one too.
+        throw new Error(
+          `No payment for payment_intent ${paymentIntentId(dispute.payment_intent)}`,
         );
+      }
+      if (payment.dispute_status && FINAL_DISPUTE_STATUSES.has(payment.dispute_status)) {
         return;
       }
       const admin = createAdminClient();
@@ -512,25 +563,21 @@ export async function handleConnectEvent(event: Stripe.Event): Promise<void> {
       const dispute = event.data.object as Stripe.Dispute;
       const payment = await findPaymentForIntent(tenantId, dispute.payment_intent);
       if (!payment) {
-        console.warn(
-          '[connect-events] dispute.closed before payment row',
-          paymentIntentId(dispute.payment_intent),
+        throw new Error(
+          `No payment for payment_intent ${paymentIntentId(dispute.payment_intent)}`,
         );
-        return;
       }
       const admin = createAdminClient();
-      const patch: { dispute_status: string; refunded_amount?: number } = {
-        dispute_status: dispute.status ?? '',
-      };
-      if (dispute.status === 'lost') {
-        patch.refunded_amount = payment.amount;
-      }
       const { error } = await admin
         .from('payments')
-        .update(patch)
+        .update({ dispute_status: dispute.status ?? '' })
         .eq('id', payment.id)
         .eq('tenant_id', tenantId);
       if (error) throw error;
+      if (dispute.status === 'lost') {
+        // Decision 27: the money is gone, the visits go back to unpaid.
+        await raiseRefundedAmount(tenantId, payment.id, payment.amount);
+      }
       return;
     }
     default:

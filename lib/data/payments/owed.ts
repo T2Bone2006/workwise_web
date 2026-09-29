@@ -9,7 +9,22 @@ export type OwedCustomerRow = {
   unpaidVisitCount: number;
   oldestUnpaidDate: string | null;
   creditAmount: number;
+  chaseStage: 0 | 1 | 2; // highest chaser stage sent for the customer's CURRENT oldest unpaid date
 };
+
+function chaseStageFromDedupeKey(
+  dedupeKey: string | null,
+  customerId: string,
+  oldestUnpaidDate: string,
+): 0 | 1 | 2 {
+  if (!dedupeKey) return 0;
+  const prefix = `chaser:${customerId}:${oldestUnpaidDate}:`;
+  if (!dedupeKey.startsWith(prefix)) return 0;
+  const stageRaw = dedupeKey.slice(prefix.length);
+  if (stageRaw === '2') return 2;
+  if (stageRaw === '1') return 1;
+  return 0;
+}
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value : null;
@@ -73,6 +88,40 @@ export async function getOwedCustomers(
     }
   }
 
+  const oldestByCustomer = new Map<string, string>();
+  for (const row of balanceRows) {
+    const customerId = asString(row.customer_id);
+    const oldest = asString(row.oldest_unpaid_date)?.slice(0, 10);
+    if (customerId && oldest) oldestByCustomer.set(customerId, oldest);
+  }
+
+  const chaseStageByCustomer = new Map<string, 0 | 1 | 2>();
+  if (customerIds.length > 0) {
+    const { data: chaserMsgs, error: chaserError } = await supabase
+      .from('messages')
+      .select('customer_id, dedupe_key, status')
+      .eq('tenant_id', tenantId)
+      .eq('kind', 'chaser')
+      .in('customer_id', customerIds)
+      .in('status', ['sent', 'delivered', 'held']);
+    if (chaserError) {
+      console.error('getOwedCustomers chasers failed', chaserError);
+    } else {
+      for (const msg of chaserMsgs ?? []) {
+        const record = msg as unknown as Record<string, unknown>;
+        const customerId = asString(record.customer_id);
+        const dedupeKey = asString(record.dedupe_key);
+        if (!customerId || !dedupeKey) continue;
+        const oldest = oldestByCustomer.get(customerId);
+        if (!oldest) continue;
+        const stage = chaseStageFromDedupeKey(dedupeKey, customerId, oldest);
+        if (stage === 0) continue;
+        const current = chaseStageByCustomer.get(customerId) ?? 0;
+        if (stage > current) chaseStageByCustomer.set(customerId, stage);
+      }
+    }
+  }
+
   const rows: OwedCustomerRow[] = [];
   for (const row of balanceRows) {
     const owed = asFiniteNumber(row.owed_amount) ?? 0;
@@ -93,6 +142,7 @@ export async function getOwedCustomers(
       unpaidVisitCount: asFiniteNumber(row.unpaid_visit_count) ?? 0,
       oldestUnpaidDate: asString(row.oldest_unpaid_date)?.slice(0, 10) ?? null,
       creditAmount: credit,
+      chaseStage: chaseStageByCustomer.get(customerId) ?? 0,
     });
   }
 

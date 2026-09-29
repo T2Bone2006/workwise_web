@@ -25,7 +25,7 @@ export const customerSchema = z.object({
   notes: z.string().max(500).optional().or(z.literal('')),
   payment_terms: z.enum(['on_the_day', 'invoice']).optional(),
   access_notes: z.string().max(500).optional().or(z.literal('')),
-  preferred_channel: z.enum(['whatsapp', 'sms', 'email', 'none']).optional(),
+  preferred_channel: z.enum(['default', 'whatsapp', 'sms', 'email', 'none']).optional(),
 });
 
 export type CustomerFormInput = z.input<typeof customerSchema>;

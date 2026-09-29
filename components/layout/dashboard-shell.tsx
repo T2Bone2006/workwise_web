@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DashboardScroll } from './dashboard-scroll';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
@@ -14,6 +14,8 @@ interface DashboardShellProps {
   isAdmin?: boolean;
   /** Sum of pending network notifications; sidebar shows a dot when > 0. */
   networkBadge?: number;
+  /** Replies that need the trader; sidebar shows a dot on Messages when > 0. */
+  messagesBadge?: number;
   features: TenantFeatures;
   /** When set, platform admin is viewing another tenant's dashboard. */
   viewAsTenantName?: string | null;
@@ -28,18 +30,35 @@ export function DashboardShell({
   userEmail,
   isAdmin = false,
   networkBadge,
+  messagesBadge,
   features,
   viewAsTenantName = null,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previous = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+    };
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = previous.htmlOverflow;
+      body.style.overflow = previous.bodyOverflow;
+    };
+  }, []);
+
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="fixed inset-0 flex overflow-clip">
       <Sidebar
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
         isAdmin={isAdmin}
         networkBadge={networkBadge}
+        messagesBadge={messagesBadge}
         features={features}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

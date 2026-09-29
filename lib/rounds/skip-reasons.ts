@@ -9,6 +9,7 @@ export const USER_SKIP_REASONS = [
 export const SYSTEM_SKIP_REASONS = [
   'agreement_paused',
   'agreement_ended',
+  'trader_unavailable',
 ] as const;
 
 export type SkipReason =
@@ -23,4 +24,5 @@ export const SKIP_REASON_LABELS: Record<SkipReason, string> = {
   other: 'Other',
   agreement_paused: 'Agreement paused',
   agreement_ended: 'Agreement ended',
+  trader_unavailable: 'Couldn\'t make it',
 };

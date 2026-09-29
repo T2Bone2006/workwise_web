@@ -53,6 +53,10 @@ function matches(row: Record<string, unknown>, filters: Filter[]): boolean {
     if (filter.kind === 'not' && filter.op === 'is' && filter.val === null && value == null) {
       return false;
     }
+    if (filter.kind === 'not' && filter.op === 'in') {
+      const list = String(filter.val).replace(/^\(|\)$/g, '').split(',');
+      if (list.includes(String(value))) return false;
+    }
   }
   return true;
 }
@@ -175,10 +179,14 @@ function createFakeSupabase(db: FakeDb): SupabaseClient {
         }
         if (op === 'update') {
           const patch = payload as Record<string, unknown>;
+          const updated: { id: unknown }[] = [];
           for (const row of db.jobs) {
-            if (matches(row, filters)) Object.assign(row, patch);
+            if (matches(row, filters)) {
+              Object.assign(row, patch);
+              updated.push({ id: row.id });
+            }
           }
-          return { data: null, error: null };
+          return { data: updated, error: null };
         }
         if (op === 'delete') {
           const remaining = db.jobs.filter((row) => !matches(row, filters));

@@ -19,6 +19,9 @@ import {
 import { toast } from 'sonner';
 import { optimiseDay } from '@/lib/actions/rounds/visits';
 import type { RoundsHomeData } from '@/lib/data/rounds/home';
+import type { VisitRow } from '@/lib/data/rounds/visits';
+import type { SmsBrand } from '@/lib/messaging/templates';
+import type { VisitChangeSummary } from '@/lib/rounds/visit-changes';
 import { formatGbp } from '@/lib/money/pence';
 import { groupHouseStops } from '@/lib/rounds/house-stops';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
@@ -29,6 +32,8 @@ import {
   type SummaryStripItem,
 } from '@/components/jobs/status-summary-strip';
 import { MoveRemainingDialog } from '@/components/rounds/visit-actions';
+import { SkipRemainingDialog } from '@/components/rounds/skip-remaining-dialog';
+import { UndoChangeBar } from '@/components/rounds/undo-change-bar';
 import { VisitStopCard } from '@/components/rounds/visit-stop-card';
 
 const priceFormat = new Intl.NumberFormat('en-GB', {
@@ -43,19 +48,29 @@ function isLeftover(status: string): boolean {
   return !['completed', 'cancelled', 'declined', 'incomplete'].includes(status);
 }
 
+function repliesToReview(visits: VisitRow[]): number {
+  return visits.filter((visit) => visit.customer_confirmation_status != null).length;
+}
+
 export function RoundsHome({
   tenantName,
   data,
+  brand,
+  undoable,
 }: {
   tenantName: string;
   data: RoundsHomeData;
+  brand: SmsBrand;
+  undoable: VisitChangeSummary | null;
 }) {
   const router = useRouter();
   const [optimising, setOptimising] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
   const [listFilter, setListFilter] = useState<HomeFilter | null>(null);
 
   const leftovers = data.todayVisits.filter((v) => isLeftover(v.status));
+  const replyCount = repliesToReview(data.todayVisits);
   const skippedCount = data.todayVisits.filter((v) => v.status === 'cancelled').length;
   const dayLabelLong = format(parseISO(data.today), 'EEEE d MMMM yyyy');
   const dayLabelShort = format(parseISO(data.today), 'EEE d MMM');
@@ -179,17 +194,30 @@ export function RoundsHome({
                 </Link>
               </Button>
               {leftovers.length > 0 ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-w-0"
-                  onClick={() => setMoveOpen(true)}
-                >
-                  <span className="sm:hidden">Move ({leftovers.length})</span>
-                  <span className="hidden sm:inline">
-                    Move remaining ({leftovers.length})
-                  </span>
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-w-0"
+                    onClick={() => setMoveOpen(true)}
+                  >
+                    <span className="sm:hidden">Move ({leftovers.length})</span>
+                    <span className="hidden sm:inline">
+                      Move remaining ({leftovers.length})
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-w-0"
+                    onClick={() => setSkipOpen(true)}
+                  >
+                    <span className="sm:hidden">Skip ({leftovers.length})</span>
+                    <span className="hidden sm:inline">
+                      Skip remaining ({leftovers.length})
+                    </span>
+                  </Button>
+                </>
               ) : null}
               {data.unorderedToday ? (
                 <Button
@@ -264,6 +292,15 @@ export function RoundsHome({
             </Link>
           </Button>
         </div>
+        {replyCount > 0 ? (
+          <Link
+            href="/messages"
+            className="block rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-foreground"
+          >
+            {replyCount} {replyCount === 1 ? 'reply' : 'replies'} about this day to review
+          </Link>
+        ) : null}
+        <UndoChangeBar change={undoable} brand={brand} />
         {data.todayVisits.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
             Nothing planned for today. Open the calendar to check another day.
@@ -280,6 +317,7 @@ export function RoundsHome({
                 visit={group[0]!}
                 visits={group}
                 orderIndex={group[0]!.route_position ?? index + 1}
+                brand={brand}
               />
             ))}
           </ul>
@@ -289,8 +327,16 @@ export function RoundsHome({
       <MoveRemainingDialog
         fromDate={data.today}
         leftoverCount={leftovers.length}
+        brand={brand}
         open={moveOpen}
         onOpenChange={setMoveOpen}
+      />
+      <SkipRemainingDialog
+        open={skipOpen}
+        onOpenChange={setSkipOpen}
+        date={data.today}
+        remainingCount={leftovers.length}
+        brand={brand}
       />
     </div>
   );

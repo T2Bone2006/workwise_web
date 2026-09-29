@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import { DashboardShell } from '@/components/layout/dashboard-shell';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { getTenantFeatures } from '@/lib/data/tenant-features';
+import { getUnreadThreadCount } from '@/lib/data/messaging/threads';
 import { getNetworkNotificationCounts } from '@/lib/data/network';
+import { getTenantProducts } from '@/lib/data/tenant-products';
 import { WORKER_WEB_LOGIN_ERROR_PARAM } from '@/lib/auth/worker-web-access';
 import { isAdmin } from '@/lib/utils/admin';
 import { getViewAsState, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
@@ -39,17 +41,23 @@ export default async function DashboardLayout({
 
   await recoverAbandonedViewAsIfNeeded();
 
-  const [tenantName, admin, tenantId, features, viewAs] = await Promise.all([
+  const [tenantName, admin, tenantId, features, viewAs, products] = await Promise.all([
     getTenantNameForCurrentUser(),
     isAdmin(),
     getTenantIdForCurrentUser(),
     getTenantFeatures(),
     getViewAsState(),
+    getTenantProducts(),
   ]);
 
   // TODO: route protection — add per-page checks instead (layout has no pathname access in this codebase)
 
-  const networkCounts = tenantId ? await getNetworkNotificationCounts(tenantId) : null;
+  const [networkCounts, messagesBadge] = await Promise.all([
+    tenantId ? getNetworkNotificationCounts(tenantId) : Promise.resolve(null),
+    tenantId && products.hasRounds
+      ? getUnreadThreadCount(supabase, tenantId)
+      : Promise.resolve(undefined),
+  ]);
   const networkBadge = networkCounts
     ? networkCounts.pendingConnections + networkCounts.inboxJobs
     : undefined;
@@ -60,6 +68,7 @@ export default async function DashboardLayout({
       userEmail={user.email ?? undefined}
       isAdmin={admin}
       networkBadge={networkBadge}
+      messagesBadge={messagesBadge}
       features={features}
       viewAsTenantName={viewAs.active ? viewAs.tenantName : null}
     >

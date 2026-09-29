@@ -34,7 +34,10 @@ export async function POST(request: Request) {
     userId: auth.ctx.userId,
   });
   if (!result.success) {
-    return roundsJson({ error: result.error }, moneyErrorStatus(result.error));
+    return roundsJson(
+      { error: result.error },
+      result.retryable ? 503 : moneyErrorStatus(result.error),
+    );
   }
 
   await afterManualPayment(auth.ctx.supabase, {
