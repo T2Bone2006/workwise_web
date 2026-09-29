@@ -19,12 +19,13 @@ routes. Nothing may change how Pro behaves or looks. If a change would touch
 Pro's jobs, workers, or phone tabs, that is a bug, not a feature.
 
 **Being built: Rounds + Lite + self-serve signup.** Eight phases, ~12 weeks,
-one person plus agents. Phases 1–2 code is on branch `rounds-foundations` and is
-**not deployed**. Phase 2 (payments) is **code complete** — see the Phase 2
-section below; spec `../docs/specs/phase-2.md`. Next build is Phase 3 (messaging):
-spec folder `../docs/specs/phase-3/`. Do not push, deploy, or OTA until the
-owner asks — they want every phase finished, and to be happy with it, before
-anything goes live.
+one person plus agents. Phases 1–3 code is on branch `rounds-foundations`
+(pushed to GitHub 2026-09-29 so nothing is lost) and is **not deployed**.
+Phase 2 (payments) is done; Phase 3 (messaging) is **code complete, walkthrough
+not finished** — see the Phase 3 section below. Next spec is Phase 4 (open
+banking): `../docs/specs/phase-4/`, not written yet. Do not deploy, OTA, or merge
+to `main` until the owner asks — they want every phase finished, and to be happy
+with it, before anything goes live. Pushing the branch is fine when they ask.
 
 **Two rules that apply to every phase:**
 - Deploy order is always **paste migrations → deploy web → mobile OTA**. An OTA
@@ -42,7 +43,8 @@ anything goes live.
 | `../docs/ROUNDS-PLAN.md` | The 12-week engineering plan and cross-repo technical design. |
 | `../docs/specs/phase-1.md` | Phase 1 (done). §9 is its step list. |
 | `../docs/specs/phase-2.md` | Phase 2 payments (done). §6.0 is the step index. |
-| `../docs/specs/phase-3/` | Phase 3 messaging. `README.md` is the step index; one card per step. |
+| `../docs/specs/phase-3/` | Phase 3 messaging (code complete). `README.md` is the step index; one card per step. |
+| `../docs/specs/phase-4/` | Phase 4 open banking. Not written yet. |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
 
@@ -77,42 +79,102 @@ card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
 
 ## IN PROGRESS
 
-- Phase 3 steps 3–30a built. Step 31 skipped at the owner's request (mobile tsc, tests, and expo export not run).
-- Step 32 in progress: web checks passed except 5 pre-existing Pro lint errors in `components/customers/customers-table.tsx`. The 19-row walkthrough below is not ticked. Next: the owner walks those rows, then step 33.
+- Phase 3 code complete (steps 3–31 done; step 31 phone checks run 2026-09-29: tsc clean, 75 tests pass, iOS export OK). Step 33 paperwork done. Branch pushed.
+- Next: the owner finishes the step 32 walkthrough (19 rows in the Phase 3 section below; `../docs/specs/phase-3/32-walkthrough.md`), then the Phase 4 spec (`../docs/specs/phase-4/`, phase-spec skill).
 
 ---
 
-## Phase 3 — Messaging — walkthrough not finished
+## Phase 3 — Messaging (branch `rounds-foundations`) — CODE COMPLETE, walkthrough not finished, not deployed
 
-Spec folder: `../docs/specs/phase-3/`. Step 33 writes the full section. No push, deploy, or OTA.
+Spec folder: `../docs/specs/phase-3/` (`README.md` is the step index). Steps 3–31
+and 33 **DONE**; step 32 web checks done, owner walkthrough still to tick.
+Owner decision: **no deploy or OTA until asked** (branch pushed 2026-09-29).
 
-Web checks (Cursor, 2026-09-29): `tsc` clean. `npm test` 439 passed. `npm run build` succeeded. `check-cards.mjs` all 36 cards pass. Eslint on the step 32 paths: 5 errors, all pre-existing in Pro `components/customers/customers-table.tsx` (setState in an effect, SortIcon created during render). Not fixed. Pro must not change.
+**SQL — already pasted by the owner, in this order** (`supabase/migrations/`):
+1. `20260929100000_messaging.sql`
+2. `20260929100100_text_credits.sql`
+3. `20260929100200_visit_changes.sql`
+4. `20260929120000_payment_thanks.sql` (added during the walkthrough; pasted 2026-09-29)
 
-**Phase 3 verified** (step 32 — owner walkthrough, not started)
+**Owner follow-ups still outstanding**
+- Refresh `supabase/schema_current.sql` from the live schema (owner's file).
+- Regenerate `workwise-mobile/src/types/supabase.ts` when convenient.
 
+**Env vars to add at deploy:** `PURESMS_API_KEY`, `PURESMS_SENDER` (the virtual
+number in E.164 with `+`, e.g. `+447903581020`, not "WorkWise", or replies can't
+come back), `PURESMS_WEBHOOK_SECRET`, `MESSAGING_TRANSPORT=puresms`,
+`STRIPE_PRICE_TEXTS_250`, `STRIPE_PRICE_TEXTS_1000`. Already expected:
+`CRON_SECRET`, `ANTHROPIC_API_KEY`.
+
+**At deploy:** set the PureSMS webhook URL to
+`https://app.joinworkwise.com/api/messaging/webhook` (re-enable it if PureSMS
+disabled it during testing). Confirm the two new crons are listed in the hosting
+dashboard: `/api/cron/visit-reminders` (17:00 UTC) and
+`/api/cron/send-held-messages` (07:00 UTC). After the walkthrough, set local
+`MESSAGING_TRANSPORT` back to `log`.
+
+**Phase 7 launch checklist additions**
+- Stripe **live** text-pack products + their env ids.
+- PureSMS account on a paid plan with enough credit (virtual number ~£15/month).
+- Privacy policy mentions texts via PureSMS and the shared number.
+- Decide whether WhatsApp is added (Twilio behind `lib/messaging/provider.ts`).
+
+**Changed during the walkthrough (owner, 2026-09-29) — in the code, not in the cards**
+- One visit-done message per **stop** (all services at one house that day). It
+  waits while a service at the stop is still open; the evening cron sweeps stops
+  left part-done (`sendWaitingVisitDoneNotices`).
+- **Payment thank-yous** switch: business-wide (`settings.messaging.payment_thanks_enabled`)
+  and per customer (`customers.payment_thanks`). Card payments and Mark as paid send it.
+- Money texts always end "Questions? Call …" (may be 2 texts); pay page has a
+  "Questions, or already paid?" box.
+- Failed texts are retried twice by the 07:00 cron (`retryFailedTexts`), then the
+  thread goes to Needs attention.
+- Replies to a money message (visit done / chaser / thanks) are sorted as "Says
+  they've paid" or "About a payment" (`classifyPaymentReply`); review offers Mark
+  paid / Done with this, never Skip/Move. Chasers skip customers whose thread needs attention.
+- One-off visits from the phone (+ next to Start day); searchable one-off picker on the dashboard.
+
+**Verified** (step 32 — owner walkthrough, test mode). Fill in as rows are walked.
 | # | Result | Note |
 |---|---|---|
-| 1 | | Not walked |
-| 2 | | Not walked |
-| 3 | | Not walked |
-| 4 | | Not walked |
-| 5 | | Not walked |
-| 6 | | Not walked |
-| 7 | | Not walked |
-| 8 | | Not walked |
-| 9 | | Not walked |
-| 10 | | Not walked |
-| 11 | | Not walked |
-| 12 | | Not walked |
-| 13 | | Not walked |
-| 14 | | Not walked |
-| 15 | | Not walked |
-| 16 | | Not walked. SQL is in the step 32 chat. Test tenants only. |
-| 17 | | Not walked |
-| 18 | | Not walked. SQL is in the step 32 chat. Test tenants only. |
-| 19 | | Not walked |
+| 1 | | Reminders cron: one text per stop |
+| 2 | | Run again: no duplicates |
+| 3 | | "no thanks" → review + push, visit not skipped |
+| 4 | | Accept skip with Let them know |
+| 5 | | Unreviewed reply → Start day asks first |
+| 6 | | Dashboard Undo on a move |
+| 7 | | Move remaining tells customers; Undo says "after all" |
+| 8 | | After 21:00 → held until 07:00 cron |
+| 9 | | Done → email vs text per channel order |
+| 10 | | No-email customer → visit-done text with pay link |
+| 11 | | STOP / START across businesses |
+| 12 | | "cancel" = said no, not unsubscribe |
+| 13 | | Reply routed to the business that texted last |
+| 14 | | Unknown number → one auto-reply |
+| 15 | | 10+ texts in 24h → blocked |
+| 16 | | Out of texts → reminders pause, Done falls back to email |
+| 17 | | Buy 250 texts (test card); webhook replay adds nothing |
+| 18 | | Chaser at 8 days; Owed shows "Reminded" |
+| 19 | | RS Locksmiths unchanged |
 
-`.env.local` is still `MESSAGING_TRANSPORT=puresms` and `PURESMS_SENDER=WorkWise`. Set the sender to the virtual number before real replies, and set transport back to `log` after the walkthrough.
+Web checks (Cursor, 2026-09-29): `tsc` clean, `npm test` 439 passed, `npm run
+build` OK, all 36 cards pass `check-cards.mjs`. Eslint: 5 pre-existing errors in
+Pro `components/customers/customers-table.tsx` — not fixed, Pro must not change.
+Phone checks (step 31, 2026-09-29): `tsc` clean, 75 tests pass, `expo export
+--platform ios` OK, Phase 3 added no dependencies and didn't touch `app.json`.
+`expo install --check` suggests patch updates (expo 54.0.37 etc.) unrelated to
+Phase 3 — not applied.
+
+**Not verified**
+- Whatever rows above stay blank.
+- Push notifications for replies on a real device token.
+
+**Known gaps (by design or later)**
+- WhatsApp → later.
+- No typed messages from WorkWise (D9): the Text button opens the trader's own app.
+- No auto top-up of texts.
+- No phone single-house Reschedule (dashboard has it).
+- One shared number for every business (per-business numbers later if routing bites).
 
 ---
 
