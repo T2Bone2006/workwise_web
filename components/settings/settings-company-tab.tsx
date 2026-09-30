@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -209,8 +212,9 @@ export function SettingsCompanyTab({
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="company-address">Address</Label>
+            <Label htmlFor="company-line">{unhookChromeAddressFill('Address')}</Label>
             <AddressAutocompleteInput
+              id="company-line"
               value={address}
               onValueChange={setAddress}
               onAddressSelect={({ address: line, postcode }) => {

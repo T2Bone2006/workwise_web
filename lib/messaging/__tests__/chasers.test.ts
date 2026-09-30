@@ -161,14 +161,34 @@ describe('planChasers', () => {
     expect(ok[0].customerId).toBe('old');
   });
 
-  it('returns nothing when business chasers_enabled is false', () => {
+  it('skips the business default when chasers are off, and still chases an explicit yes', () => {
     expect(
       planChasers(
-        [candidate({ customerId: 'c' })],
+        [candidate({ customerId: 'c', paymentChasers: null })],
         { ...settings, chasers_enabled: false },
         { today, invoiceDueDays: 14, now },
       ),
     ).toEqual([]);
+    expect(
+      planChasers(
+        [candidate({ customerId: 'c', paymentChasers: true })],
+        { ...settings, chasers_enabled: false },
+        { today, invoiceDueDays: 14, now },
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('never chases a customer whose Direct Debit is working', () => {
+    const plans = planChasers(
+      [
+        candidate({ customerId: 'dd', directDebitWorking: true }),
+        candidate({ customerId: 'not-dd', directDebitWorking: false }),
+        candidate({ customerId: 'plain' }),
+      ],
+      settings,
+      { today, invoiceDueDays: 14, now },
+    );
+    expect(plans.map((p) => p.customerId).sort()).toEqual(['not-dd', 'plain']);
   });
 
   it('builds stable dedupe keys that differ by stage', () => {

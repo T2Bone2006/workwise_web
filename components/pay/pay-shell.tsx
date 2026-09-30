@@ -15,6 +15,26 @@ export function PayPageFrame(props: { children: ReactNode }): JSX.Element {
   );
 }
 
+/** A short notice at the top of a pay page (a return from GoCardless, a refused start). */
+export function PayBanner(props: {
+  tone: 'good' | 'info' | 'warn';
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <p
+      className={
+        props.tone === 'good'
+          ? 'rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300'
+          : props.tone === 'warn'
+            ? 'rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100'
+            : 'rounded-lg border border-border/80 bg-card/60 px-3 py-2 text-sm text-muted-foreground'
+      }
+    >
+      {props.children}
+    </p>
+  );
+}
+
 export function PayShell(props: {
   business: PublicBusiness;
   children: ReactNode;

@@ -3,6 +3,7 @@ import 'server-only';
 import type Stripe from 'stripe';
 import { formatGbp, fromPence } from '@/lib/money/pence';
 import { sendPaymentReceivedNotice } from '@/lib/payments/notify';
+import { sendOrHoldOwnerPush } from '@/lib/push/owner-push';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import { sendExpoPushMessages } from '@/lib/services/expo-push';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -475,11 +476,18 @@ export async function handleConnectEvent(event: Stripe.Event): Promise<void> {
         }
       }
       const name = await customerName(tenantId, parsed.row.customer_id);
-      await pushSoloWorker(
-        tenantId,
-        'Card payment received',
-        `${formatGbp(parsed.row.amount)} from ${name}`,
-      );
+      // D14: waits until 07:00 when it arrives 21:00–07:00 London. Never throws.
+      await sendOrHoldOwnerPush(createAdminClient(), tenantId, {
+        kind: 'card_payment',
+        title: 'Card payment received',
+        body: `${formatGbp(parsed.row.amount)} from ${name}`,
+        data: {
+          type: 'card_payment',
+          amount: parsed.row.amount,
+          customerId: parsed.row.customer_id,
+          customerName: name,
+        },
+      });
       return;
     }
     case 'charge.refunded': {

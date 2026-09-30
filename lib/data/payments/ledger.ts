@@ -14,12 +14,24 @@ export type LedgerVisit = {
   paymentStatus: 'unpaid' | 'partial' | 'paid' | 'waived';
 };
 
+/** Phase 4 (D12): an "other amount owed", paid by the engine like a visit. */
+export type LedgerCharge = {
+  chargeId: string;
+  kind: 'starting_balance' | 'other';
+  description: string;
+  date: string;
+  amount: number;
+  allocated: number;
+  outstanding: number;
+  status: 'active' | 'void';
+};
+
 export type LedgerPayment = {
   id: string;
   amount: number;
   refundedAmount: number;
   method: PaymentMethod;
-  source: 'manual' | 'stripe' | 'open_banking';
+  source: 'manual' | 'stripe' | 'open_banking' | 'gocardless';
   status: 'active' | 'void';
   receivedAt: string;
   note: string | null;
@@ -47,7 +59,10 @@ export type CustomerLedger = {
     unpaidVisitCount: number;
     oldestUnpaidDate: string | null;
     creditAmount: number;
+    otherOwedAmount: number;
   };
+  /** Active charges, newest date first. */
+  charges: LedgerCharge[];
   unpaidVisits: LedgerVisit[];
   recentVisits: LedgerVisit[];
   payments: LedgerPayment[];
@@ -115,6 +130,33 @@ function mapVisit(
     allocated,
     outstanding,
     paymentStatus: status as LedgerVisit['paymentStatus'],
+  };
+}
+
+function mapCharge(
+  raw: Record<string, unknown>,
+  allocatedByCharge: Map<string, number>,
+): LedgerCharge | null {
+  const chargeId = asString(raw.id);
+  const kind = asString(raw.kind);
+  const description = asString(raw.description);
+  const date = asString(raw.charge_date)?.slice(0, 10) ?? null;
+  const status = asString(raw.status);
+  const amount = asFiniteNumber(raw.amount);
+  if (!chargeId || !description || !date || amount == null) return null;
+  if (kind !== 'starting_balance' && kind !== 'other') return null;
+  if (status !== 'active' && status !== 'void') return null;
+
+  const allocated = allocatedByCharge.get(chargeId) ?? 0;
+  return {
+    chargeId,
+    kind,
+    description,
+    date,
+    amount,
+    allocated,
+    outstanding: Math.max(0, Math.round((amount - allocated) * 100) / 100),
+    status,
   };
 }
 
@@ -194,6 +236,7 @@ export async function getCustomerLedger(
     { data: visitsData, error: visitsError },
     { data: paymentsData, error: paymentsError },
     { data: allocData },
+    { data: chargesData, error: chargesError },
   ] = await Promise.all([
     getCustomerBalance(supabase, tenantId, customerId),
     supabase
@@ -245,9 +288,18 @@ export async function getCustomerLedger(
       .limit(50),
     supabase
       .from('payment_allocations')
-      .select('job_id, amount, payments!inner ( customer_id )')
+      .select('job_id, charge_id, amount, payments!inner ( customer_id )')
       .eq('tenant_id', tenantId)
       .eq('payments.customer_id', customerId),
+    supabase
+      .from('customer_charges')
+      .select('id, kind, description, amount, charge_date, status, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('customer_id', customerId)
+      .eq('status', 'active')
+      .order('charge_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(50),
   ]);
 
   if (visitsError) {
@@ -256,14 +308,31 @@ export async function getCustomerLedger(
   if (paymentsError) {
     return { ledger: null, error: paymentsError.message };
   }
+  if (chargesError) {
+    return { ledger: null, error: chargesError.message };
+  }
 
   const allocatedByJob = new Map<string, number>();
+  const allocatedByCharge = new Map<string, number>();
   for (const raw of allocData ?? []) {
     const row = raw as unknown as Record<string, unknown>;
     const jobId = asString(row.job_id);
+    const chargeId = asString(row.charge_id);
     const amount = asFiniteNumber(row.amount) ?? 0;
-    if (!jobId) continue;
-    allocatedByJob.set(jobId, (allocatedByJob.get(jobId) ?? 0) + amount);
+    if (jobId) {
+      allocatedByJob.set(jobId, (allocatedByJob.get(jobId) ?? 0) + amount);
+    } else if (chargeId) {
+      allocatedByCharge.set(chargeId, (allocatedByCharge.get(chargeId) ?? 0) + amount);
+    }
+  }
+
+  const charges: LedgerCharge[] = [];
+  for (const raw of chargesData ?? []) {
+    const charge = mapCharge(
+      raw as unknown as Record<string, unknown>,
+      allocatedByCharge,
+    );
+    if (charge) charges.push(charge);
   }
 
   const allVisits: LedgerVisit[] = [];
@@ -311,6 +380,7 @@ export async function getCustomerLedger(
         preferredChannel: asString(c.preferred_channel),
       },
       balance,
+      charges,
       unpaidVisits,
       recentVisits,
       payments,

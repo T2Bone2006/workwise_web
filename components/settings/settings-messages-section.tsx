@@ -4,7 +4,6 @@ import { createContext, useContext, useEffect, useState, type FormEvent, type JS
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
-import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -12,14 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -30,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { turnOnRemindersForAll, updateMessagingSettings } from '@/lib/actions/messaging';
+import { updateMessagingSettings } from '@/lib/actions/messaging';
 import { countSegments } from '@/lib/messaging/gsm';
 import type { ChannelOrder } from '@/lib/messaging/channel';
 import type { MessagingSettings } from '@/lib/messaging/settings';
@@ -42,7 +33,6 @@ export type MessagingSectionData = {
   settings: MessagingSettings;
   companyPhone: string | null;
   businessName: string;
-  activeCustomerCount: number;
 };
 
 const MessagingSectionContext = createContext<MessagingSectionData | null>(null);
@@ -80,13 +70,9 @@ export function SettingsMessagesSection(props: {
   onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const { settings, companyPhone, businessName, onDirtyChange } = props;
-  const section = useMessagingSectionData();
-  const activeCustomerCount = section?.activeCustomerCount ?? 0;
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [turningOn, setTurningOn] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [chaseError, setChaseError] = useState<string | null>(null);
   const [remindersEnabled, setRemindersEnabled] = useState(settings.reminders_enabled);
@@ -200,19 +186,6 @@ export function SettingsMessagesSection(props: {
     router.refresh();
   }
 
-  async function confirmTurnOn() {
-    setTurningOn(true);
-    const result = await turnOnRemindersForAll();
-    setTurningOn(false);
-    if (!result.success) {
-      toast.error(result.error);
-      return;
-    }
-    setConfirmOpen(false);
-    toast.success(`Reminders on for ${result.updated} customers`);
-    router.refresh();
-  }
-
   return (
     <form onSubmit={(event) => void handleSubmit(event)} className="grid gap-6 xl:grid-cols-2">
       <h2 className="text-lg font-semibold xl:col-span-2">Customer messages</h2>
@@ -225,7 +198,7 @@ export function SettingsMessagesSection(props: {
             <div className="space-y-1">
               <Label htmlFor="send-reminders">Send reminders</Label>
               <p className="text-xs text-muted-foreground">
-                Texts them before a visit. Each reminder uses a text.
+                Default for each customer. They can choose Yes, No, or this. Each reminder uses a text.
               </p>
             </div>
             <Switch
@@ -258,9 +231,6 @@ export function SettingsMessagesSection(props: {
               Sample: 12 Elm Rd, window clean · {textCount} {textCount === 1 ? 'text' : 'texts'}
             </p>
           </div>
-          <Button type="button" variant="outline" onClick={() => setConfirmOpen(true)}>
-            Turn reminders on for all customers
-          </Button>
         </CardContent>
       </Card>
 
@@ -306,7 +276,12 @@ export function SettingsMessagesSection(props: {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-start justify-between gap-4">
-            <Label htmlFor="chasers-enabled">Send payment reminders</Label>
+            <div className="space-y-1">
+              <Label htmlFor="chasers-enabled">Send payment reminders</Label>
+              <p className="text-xs text-muted-foreground">
+                Default for each customer. They can choose Yes, No, or this.
+              </p>
+            </div>
             <Switch
               id="chasers-enabled"
               checked={chasersEnabled}
@@ -317,8 +292,8 @@ export function SettingsMessagesSection(props: {
             <div className="space-y-1">
               <Label htmlFor="thanks-enabled">Send payment thank-yous</Label>
               <p className="text-xs text-muted-foreground">
-                &ldquo;Thanks for your £X payment&rdquo; after they pay by card, bank or you mark it paid.
-                Visit-done messages still go.
+                Default for each customer. &ldquo;Thanks for your £X payment&rdquo; after they pay by
+                card, bank or you mark it paid. Visit-done messages still go.
               </p>
             </div>
             <Switch
@@ -401,30 +376,6 @@ export function SettingsMessagesSection(props: {
         <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
       </div>
 
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Turn reminders on for all customers</DialogTitle>
-            <DialogDescription>
-              This switches reminders on for all {activeCustomerCount} active customers. Each
-              reminder uses a text.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setConfirmOpen(false)}
-              disabled={turningOn}
-            >
-              Cancel
-            </Button>
-            <Button type="button" onClick={() => void confirmTurnOn()} disabled={turningOn}>
-              Turn on
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </form>
   );
 }

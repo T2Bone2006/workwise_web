@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { BankTransferCard } from '@/components/pay/bank-transfer-card';
 import { CardPayButton, payCheckoutErrorMessage } from '@/components/pay/card-pay-button';
-import { PayShell } from '@/components/pay/pay-shell';
+import { PayByBankButton, payByBankBanner } from '@/components/pay/pay-by-bank-button';
+import { PayBanner, PayShell } from '@/components/pay/pay-shell';
 import { loadInvoiceByToken } from '@/lib/data/payments/public-pay';
 import { toInvoiceViewModel } from '@/lib/invoices/view-model';
 import { cn } from '@/lib/utils';
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 type InvoicePayPageProps = {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ paid?: string; error?: string }>;
+  searchParams: Promise<{ paid?: string; error?: string; bank?: string }>;
 };
 
 function statusPill(stamp: 'PAID' | 'VOID' | 'OVERDUE' | null): {
@@ -45,13 +46,14 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
   const loaded = await loadInvoiceByToken(token);
   if (!loaded) notFound();
 
-  const { invoice, business, card } = loaded;
+  const { invoice, business, card, payByBank } = loaded;
   const vm = toInvoiceViewModel(invoice, { cardUrl: null });
   const pill = statusPill(vm.stamp);
   const issued = invoice.status === 'issued';
   const balance = invoice.balanceDue;
   const canPay = issued && balance > 0;
   const errorMessage = payCheckoutErrorMessage(query.error);
+  const bankBanner = payByBankBanner(query.bank);
 
   return (
     <PayShell business={business}>
@@ -60,6 +62,7 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
           Thanks — your payment went through. It can take a minute to show below.
         </p>
       ) : null}
+      {bankBanner ? <PayBanner tone={bankBanner.tone}>{bankBanner.text}</PayBanner> : null}
       {errorMessage ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
           {errorMessage}
@@ -113,6 +116,9 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
       >
         Download PDF
       </a>
+      {canPay && payByBank.available ? (
+        <PayByBankButton token={token} from="invoice" amount={balance} />
+      ) : null}
       {canPay && card.enabled ? (
         <CardPayButton token={token} kind="invoice" amount={balance} />
       ) : null}

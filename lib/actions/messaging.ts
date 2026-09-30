@@ -9,7 +9,6 @@ import { getTenantProducts } from '@/lib/data/tenant-products';
 import { actOnReplyCore, markThreadRead } from '@/lib/messaging/replies';
 import {
   saveMessagingSettingsCore,
-  turnOnRemindersForAllCore,
   updateCustomerMessagingCore,
 } from '@/lib/messaging/settings-core';
 import {
@@ -140,16 +139,3 @@ export async function updateCustomerMessaging(
   return { success: true };
 }
 
-export async function turnOnRemindersForAll(): Promise<
-  { success: true; updated: number } | { success: false; error: string }
-> {
-  const ctx = await requireRounds();
-  if (!ctx.success) return ctx;
-
-  const result = await turnOnRemindersForAllCore(ctx.supabase, ctx.tenantId);
-  if (!result.success) return result;
-
-  revalidatePath('/settings');
-  revalidatePath('/customers', 'layout');
-  return result;
-}

@@ -32,8 +32,9 @@ export const messagingSettingsSchema = z
 
 export const customerMessagingSchema = z.object({
   customerId: z.string().uuid(),
-  visitReminders: z.boolean().optional(),
-  paymentChasers: z.boolean().optional(),
-  paymentThanks: z.boolean().optional(),
+  // null = business default. true / false = this customer only.
+  visitReminders: z.boolean().nullable().optional(),
+  paymentChasers: z.boolean().nullable().optional(),
+  paymentThanks: z.boolean().nullable().optional(),
   contactChoice: z.enum(['default', 'sms', 'email', 'none']).optional(),
 });

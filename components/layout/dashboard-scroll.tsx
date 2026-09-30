@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
+import { BreadcrumbNamesProvider } from '@/components/layout/page-breadcrumb';
 
 const positions = new Map<string, number>();
 
@@ -67,7 +68,7 @@ export function DashboardScroll({ children }: { children: React.ReactNode }) {
       ref={mainRef}
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain p-4 sm:p-6"
     >
-      {children}
+      <BreadcrumbNamesProvider>{children}</BreadcrumbNamesProvider>
     </main>
   );
 }

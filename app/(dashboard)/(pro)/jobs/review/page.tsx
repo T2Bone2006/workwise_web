@@ -1,12 +1,10 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getUnassignedJobsForTenant } from '@/lib/data/jobs';
 import { getConnectionsForTenant } from '@/lib/data/network';
 import { getRankedWorkersForJob } from '@/lib/actions/jobs';
 import { JobsReviewFlow } from '@/components/jobs/jobs-review-flow';
-import { Button } from '@/components/ui/button';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 
 export default async function JobsReviewPage() {
   const tenantId = await getTenantIdForCurrentUser();
@@ -37,11 +35,7 @@ export default async function JobsReviewPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="shrink-0" asChild>
-          <Link href="/jobs" aria-label="Back to jobs">
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
+        <HistoryBackButton iconOnly className="shrink-0" label="Back to jobs" fallbackHref="/jobs" />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Jobs for review

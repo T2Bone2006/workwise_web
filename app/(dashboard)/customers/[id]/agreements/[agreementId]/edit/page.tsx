@@ -1,6 +1,4 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { getRoundsCustomerById } from '@/lib/data/rounds/customers';
@@ -9,7 +7,8 @@ import { getServiceCatalog } from '@/lib/data/rounds/service-catalog';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
 import { AgreementForm } from '@/components/rounds/agreement-form';
-import { Button } from '@/components/ui/button';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
+import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
 
 interface EditAgreementPageProps {
   params: Promise<{ id: string; agreementId: string }>;
@@ -50,17 +49,13 @@ export default async function EditAgreementPage({
 
   return (
     <div className="space-y-6">
+      <SetBreadcrumbName id={customerId} name={customer.name} />
       <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          asChild
-          aria-label="Back to customer"
-        >
-          <Link href={paths.customer(customerId)}>
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
+        <HistoryBackButton
+          iconOnly
+          label="Back to customer"
+          fallbackHref={paths.customer(customerId)}
+        />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Edit agreement

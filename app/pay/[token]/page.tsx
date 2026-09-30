@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { CircleCheck } from 'lucide-react';
 import { BankTransferCard } from '@/components/pay/bank-transfer-card';
 import { CardPayButton, payCheckoutErrorMessage } from '@/components/pay/card-pay-button';
-import { PayShell } from '@/components/pay/pay-shell';
+import { DirectDebitOffer } from '@/components/pay/direct-debit-offer';
+import { PayByBankButton, payByBankBanner } from '@/components/pay/pay-by-bank-button';
+import { PayBanner, PayShell } from '@/components/pay/pay-shell';
 import { loadCustomerPayPage } from '@/lib/data/payments/public-pay';
 import { formatGbp } from '@/lib/money/pence';
 import { formatVisitDay } from '@/lib/payments/messages';
@@ -12,7 +14,7 @@ export const dynamic = 'force-dynamic';
 
 type PayPageProps = {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ paid?: string; error?: string }>;
+  searchParams: Promise<{ paid?: string; error?: string; dd?: string; bank?: string }>;
 };
 
 export async function generateMetadata({ params }: PayPageProps): Promise<Metadata> {
@@ -22,6 +24,33 @@ export async function generateMetadata({ params }: PayPageProps): Promise<Metada
     title: page ? `Pay ${page.business.name}` : 'Payment link',
     robots: { index: false, follow: false },
   };
+}
+
+/** The banner for GoCardless's return (or a refused set-up). */
+function directDebitBanner(dd: string | undefined): { tone: 'good' | 'info' | 'warn'; text: string } | null {
+  switch (dd) {
+    case 'done':
+      return {
+        tone: 'good',
+        text: 'Thanks — your Direct Debit is set up. GoCardless will email you to confirm.',
+      };
+    case 'cancelled':
+      return {
+        tone: 'info',
+        text: 'No problem — nothing was set up. You can do it any time from this page.',
+      };
+    case 'already_set_up':
+      return { tone: 'info', text: "You're already set up for Direct Debit." };
+    case 'not_available':
+    case 'provider_error':
+    case 'customer_not_found':
+      return {
+        tone: 'warn',
+        text: "Direct Debit isn't available right now. You can still pay by card or bank transfer below.",
+      };
+    default:
+      return null;
+  }
 }
 
 function visitLabel(date: string | null, title: string): string {
@@ -39,9 +68,30 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
   const allPaid = owed <= 0;
   const shownVisits = page.unpaidVisits.slice(0, 5);
   const hiddenCount = page.unpaidVisits.length - shownVisits.length;
-  const showContact = !page.bank && !page.card.enabled && !allPaid;
+  const showPayByBank = page.payByBank.available;
+  const showContact = !page.bank && !page.card.enabled && !showPayByBank && !allPaid;
   const showCard = page.card.enabled && owed > 0;
   const errorMessage = payCheckoutErrorMessage(query.error);
+  const ddBanner = page.directDebit.available ? directDebitBanner(query.dd) : null;
+  const bankBanner = payByBankBanner(query.bank);
+  const dd = page.directDebit;
+  // Just back from GoCardless and not recorded yet: the banner is enough — don't offer it a second time.
+  const justSetUp = query.dd === 'done' && dd.status === 'none';
+  const invited = query.dd === '1';
+  const offer =
+    dd.available && !justSetUp ? (
+      <DirectDebitOffer
+        token={token}
+        businessName={page.business.name}
+        owedAmount={owed}
+        directDebit={dd}
+        highlighted={invited}
+        canPayNow={showPayByBank}
+      />
+    ) : null;
+  // Order: Direct Debit, Pay by bank, card, bank transfer. With an active Direct Debit the rest sit under "another way".
+  const otherWays =
+    dd.available && dd.status === 'active' && (showPayByBank || showCard || page.bank != null);
 
   return (
     <PayShell business={page.business}>
@@ -50,6 +100,8 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
           Thanks — your payment went through. It can take a minute to show below.
         </p>
       ) : null}
+      {ddBanner ? <PayBanner tone={ddBanner.tone}>{ddBanner.text}</PayBanner> : null}
+      {bankBanner ? <PayBanner tone={bankBanner.tone}>{bankBanner.text}</PayBanner> : null}
       {errorMessage ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
           {errorMessage}
@@ -79,8 +131,22 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
             <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-300">
               {formatGbp(owed)}
             </p>
-            {shownVisits.length > 0 ? (
+            {page.otherOwed.length > 0 || shownVisits.length > 0 ? (
               <ul className="mt-4 divide-y divide-border">
+                {page.otherOwed.map((item, index) => (
+                  <li
+                    key={`other-${item.date}-${index}`}
+                    className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm">{item.description}</p>
+                      <p className="text-sm text-muted-foreground">{formatVisitDay(item.date)}</p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold tabular-nums">
+                      {formatGbp(item.outstanding)}
+                    </p>
+                  </li>
+                ))}
                 {shownVisits.map((visit, index) => (
                   <li
                     key={`${visit.date ?? 'visit'}-${visit.title}-${index}`}
@@ -105,6 +171,9 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
           </>
         )}
       </section>
+      {offer}
+      {otherWays ? <p className="text-sm font-medium text-muted-foreground">Want to pay another way?</p> : null}
+      {showPayByBank ? <PayByBankButton token={token} from="customer" amount={owed} /> : null}
       {showCard ? <CardPayButton token={token} kind="customer" amount={owed} /> : null}
       {page.bank ? (
         <BankTransferCard

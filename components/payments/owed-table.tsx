@@ -131,6 +131,27 @@ export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: str
               title={row.name}
               detail={`${waitingLabel(row.oldestUnpaidDate, today)} · since ${formatSince(row.oldestUnpaidDate)} · ${row.unpaidVisitCount === 1 ? '1 visit' : `${row.unpaidVisitCount} visits`}`}
               amount={formatGbp(row.owedAmount)}
+              tags={
+                row.collectingAmount > 0 || row.hasDirectDebit || row.failedDirectDebits > 0 ? (
+                  <>
+                    {row.collectingAmount > 0 ? (
+                      <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
+                        Collecting {formatGbp(row.collectingAmount)}
+                      </span>
+                    ) : null}
+                    {row.hasDirectDebit ? (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        DD
+                      </span>
+                    ) : null}
+                    {row.failedDirectDebits > 0 ? (
+                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-300">
+                        DD failed
+                      </span>
+                    ) : null}
+                  </>
+                ) : undefined
+              }
               status={row.chaseStage === 2 ? 'Chase' : row.chaseStage === 1 ? 'Reminded' : undefined}
               onClick={() => router.push(`/customers/${row.customerId}`)}
               actions={

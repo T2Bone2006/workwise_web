@@ -1,6 +1,8 @@
 'use client';
 
 import { format, parseISO } from 'date-fns';
+import { CalendarDays } from 'lucide-react';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
 import type { VisitRow } from '@/lib/data/rounds/visits';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -146,7 +148,7 @@ export function CustomerVisitsCard({
   return (
     <Card className="glass-card border-border/80">
       <CardHeader className="pb-3">
-        <h2 className="text-lg font-semibold">Visits</h2>
+        <CustomerSectionTitle icon={CalendarDays} title="Visits" tone="sky" hint="Booked, and the ones still to come" />
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="upcoming" className="space-y-3">

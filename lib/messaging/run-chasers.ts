@@ -1,7 +1,9 @@
 import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadChaserMoney } from '@/lib/direct-debit/state';
 import { getTenantMessagingContext } from '@/lib/messaging/brand';
+import { asCustomerFlag } from '@/lib/messaging/customer-flag';
 import {
   planChasers,
   type ChaserCandidate,
@@ -67,7 +69,7 @@ export async function runChasersForTenant(
   const counts = emptyCounts();
   try {
     const ctx = await getTenantMessagingContext(admin, tenantId);
-    if (!ctx || !ctx.settings.chasers_enabled) return counts;
+    if (!ctx) return counts;
 
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86_400_000).toISOString();
 
@@ -75,7 +77,7 @@ export async function runChasersForTenant(
       await Promise.all([
         admin
           .from('customer_balances')
-          .select('customer_id, owed_amount, oldest_unpaid_date')
+          .select('customer_id, owed_amount, unpaid_visit_count, oldest_unpaid_date')
           .eq('tenant_id', tenantId)
           .gt('owed_amount', 0),
         getPaymentSettings(admin, tenantId),
@@ -148,6 +150,15 @@ export async function runChasersForTenant(
       if (id) customersById.set(id, record);
     }
 
+    // No unpaid visits but still owed = only other amounts owed (D12).
+    const visitsOwedByCustomer = new Map<string, boolean>();
+    for (const row of balanceRows) {
+      const customerId = asString(row.customer_id);
+      if (customerId) {
+        visitsOwedByCustomer.set(customerId, (asFiniteNumber(row.unpaid_visit_count) ?? 0) > 0);
+      }
+    }
+
     const lastChaserByCustomer = new Map<string, string>();
     for (const row of chaserMsgs ?? []) {
       const record = row as unknown as Record<string, unknown>;
@@ -159,6 +170,18 @@ export async function runChasersForTenant(
       }
     }
 
+    // Step 15: chase what Direct Debit isn't already covering. If we can't tell, chase nobody tonight.
+    const owedByCustomer = new Map<string, number>();
+    for (const row of balanceRows) {
+      const id = asString(row.customer_id);
+      if (id) owedByCustomer.set(id, asFiniteNumber(row.owed_amount) ?? 0);
+    }
+    const money = await loadChaserMoney(admin, tenantId, owedByCustomer, now);
+    if (!money) {
+      console.error('[runChasersForTenant] direct debit facts unavailable');
+      return counts;
+    }
+
     const candidates: ChaserCandidate[] = [];
     for (const row of balanceRows) {
       const customerId = asString(row.customer_id);
@@ -168,12 +191,14 @@ export async function runChasersForTenant(
       const oldestUnpaidDate = asString(row.oldest_unpaid_date)?.slice(0, 10);
       if (!oldestUnpaidDate) continue;
 
+      const facts = money.get(customerId);
       candidates.push({
         customerId,
-        owed: asFiniteNumber(row.owed_amount) ?? 0,
+        owed: facts?.chaseAmount ?? asFiniteNumber(row.owed_amount) ?? 0,
+        directDebitWorking: facts?.directDebitWorking ?? false,
         oldestUnpaidDate,
         paymentTerms: asString(customer.payment_terms),
-        paymentChasers: asBool(customer.payment_chasers, true),
+        paymentChasers: asCustomerFlag(customer.payment_chasers),
         isActive: asBool(customer.is_active, true),
         preferredChannel: asString(customer.preferred_channel),
         lastChaserAt: lastChaserByCustomer.get(customerId) ?? null,
@@ -217,6 +242,7 @@ export async function runChasersForTenant(
         const customerName = asString(customer.name) ?? 'there';
         const customerEmail = asString(customer.email);
         const reference = asString(customer.bank_reference_hint);
+        const forVisits = visitsOwedByCustomer.get(plan.customerId) ?? true;
         const msg = composeChaserMessage({
           businessName: ctx.businessName,
           customerName,
@@ -225,6 +251,7 @@ export async function runChasersForTenant(
           payUrl,
           bank,
           reference,
+          forVisits,
         });
         const brand = {
           businessName: ctx.businessName,
@@ -246,6 +273,7 @@ export async function runChasersForTenant(
               owed: plan.owed,
               payUrl,
               stage: plan.stage,
+              forVisits,
             }),
           email: customerEmail
             ? async () => {

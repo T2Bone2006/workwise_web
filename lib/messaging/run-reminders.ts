@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getTenantMessagingContext } from '@/lib/messaging/brand';
+import { asCustomerFlag } from '@/lib/messaging/customer-flag';
 import {
   planReminders,
   reminderTargetDate,
@@ -89,7 +90,7 @@ function mapCustomer(row: Record<string, unknown>): ReminderCustomer | null {
   return {
     id,
     is_active: asBool(row.is_active, true),
-    visit_reminders: asBool(row.visit_reminders, false),
+    visit_reminders: asCustomerFlag(row.visit_reminders),
     preferred_channel: asString(row.preferred_channel),
     phone_e164: asString(row.phone_e164),
   };
@@ -107,7 +108,7 @@ export async function runRemindersForTenant(
 ): Promise<ReminderCounts> {
   const counts = emptyCounts();
   const ctx = await getTenantMessagingContext(admin, tenantId);
-  if (!ctx || !ctx.settings.reminders_enabled) return counts;
+  if (!ctx) return counts;
 
   const targetDate = reminderTargetDate(
     todayInLondon(now),

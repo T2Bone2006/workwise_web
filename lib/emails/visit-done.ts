@@ -42,6 +42,8 @@ export function emailDocument(parts: {
   payLabel: string | null;
   bankLine: string | null;
   signOff: string;
+  /** Paragraphs shown under the button (the Direct Debit invite). */
+  afterButton?: string[];
 }): string {
   const { brand } = parts;
   const name = escapeHtml(brand.businessName);
@@ -56,12 +58,15 @@ export function emailDocument(parts: {
       </tr></table>`
     : `<p class="ww-onbrand" style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.02em;line-height:1.3;">${name}</p>`;
 
-  const paragraphs = parts.paragraphs
-    .map(
-      (paragraph) =>
-        `<p class="ww-text" style="margin:0 0 14px;color:#1e1b4b;font-size:15px;line-height:1.6;">${escapeHtml(paragraph)}</p>`,
-    )
-    .join('');
+  const renderParagraphs = (list: string[]) =>
+    list
+      .map(
+        (paragraph) =>
+          `<p class="ww-text" style="margin:0 0 14px;color:#1e1b4b;font-size:15px;line-height:1.6;">${escapeHtml(paragraph)}</p>`,
+      )
+      .join('');
+  const paragraphs = renderParagraphs(parts.paragraphs);
+  const afterButton = renderParagraphs(parts.afterButton ?? []);
 
   const button =
     parts.payUrl && parts.payLabel
@@ -123,6 +128,7 @@ export function emailDocument(parts: {
               <p class="ww-text" style="margin:0 0 14px;color:#1e1b4b;font-size:16px;font-weight:600;line-height:1.6;">${escapeHtml(parts.greeting)}</p>
               ${paragraphs}
               ${button}
+              ${afterButton}
               ${bank}
               <p class="ww-sign" style="margin:4px 0 20px;color:#1e1b4b;font-size:15px;line-height:1.6;">${signOff}</p>
             </td>

@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { CreditCard } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import { formatGbp } from '@/lib/money/pence';
 import { cn } from '@/lib/utils';
@@ -27,13 +28,12 @@ export function CardPayButton(props: {
       <input type="hidden" name="kind" value={props.kind} />
       <button
         type="submit"
-        className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'w-full')}
+        className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'w-full gap-2')}
       >
-        Pay {formatGbp(props.amount)} by card
+        <CreditCard className="size-4" />
+        Pay {formatGbp(props.amount, { always2dp: true })} by card
       </button>
-      <p className="text-center text-sm text-muted-foreground">
-        Card, Apple Pay or Google Pay · secure payment by Stripe
-      </p>
+      <p className="text-center text-sm text-muted-foreground">Card, Apple Pay or Google Pay</p>
     </form>
   );
 }

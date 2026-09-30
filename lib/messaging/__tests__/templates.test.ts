@@ -368,6 +368,7 @@ describe('composeVisitDoneSms', () => {
       bank: null,
       reference: null,
       invoiceNumber: null,
+      directDebit: null,
       ...over,
     };
   }
@@ -384,6 +385,31 @@ describe('composeVisitDoneSms', () => {
     expect(
       composeVisitDoneSms(input({ visitStatus: 'waived' }), extra),
     ).toBeNull();
+  });
+
+  it('says it will be collected by Direct Debit, with no link (D8)', () => {
+    const text = composeVisitDoneSms(input({ directDebit: { collectOn: 'Tue 7 Oct' }, payUrl: null }), extra);
+    expect(text).toBe(
+      "Dave's Windows: your window clean at 12 Elm Rd was done today. £15.00 will be collected by Direct Debit on or after Tue 7 Oct. Questions? Call 07700 900123",
+    );
+    expect(text).not.toContain('http');
+    expect(isGsm7(text as string)).toBe(true);
+    expect(countSegments(text as string).segments).toBeLessThanOrEqual(2);
+  });
+
+  it('Direct Debit wins over an invoice link; paid visits ignore it', () => {
+    const dd = { collectOn: 'Tue 7 Oct' };
+    const withInvoice = composeVisitDoneSms(
+      input({ directDebit: dd, invoiceNumber: 'INV-7' }),
+      { ...extra, invoiceUrl },
+    );
+    expect(withInvoice).toContain('will be collected by Direct Debit');
+    expect(withInvoice).not.toContain(invoiceUrl);
+    const paid = composeVisitDoneSms(
+      input({ directDebit: dd, visitStatus: 'paid', paidNow: { method: 'cash', amount: 15 } }),
+      extra,
+    );
+    expect(paid).not.toContain('Direct Debit');
   });
 
   it('uses to_pay for an unpaid visit', () => {

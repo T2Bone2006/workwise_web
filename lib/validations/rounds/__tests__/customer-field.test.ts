@@ -35,12 +35,18 @@ describe('customerFieldSchema', () => {
     ).toBe(false);
   });
 
-  it('accepts reminder and chaser switches', () => {
+  it('accepts reminder, chaser and thank-you choices', () => {
     expect(
-      customerFieldSchema.safeParse({ field: 'visit_reminders', value: true }).success,
+      customerFieldSchema.safeParse({ field: 'visit_reminders', value: 'default' }).success,
     ).toBe(true);
     expect(
-      customerFieldSchema.safeParse({ field: 'payment_chasers', value: false }).success,
+      customerFieldSchema.safeParse({ field: 'visit_reminders', value: true }).success,
+    ).toBe(false);
+    expect(
+      customerFieldSchema.safeParse({ field: 'payment_chasers', value: 'no' }).success,
+    ).toBe(true);
+    expect(
+      customerFieldSchema.safeParse({ field: 'payment_thanks', value: 'yes' }).success,
     ).toBe(true);
   });
 

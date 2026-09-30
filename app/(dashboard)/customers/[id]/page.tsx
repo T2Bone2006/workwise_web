@@ -31,24 +31,69 @@ import {
 import { createClient } from '@/lib/supabase/server';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, todayInLondon } from '@/lib/rounds/dates';
-import { frequencyLabel } from '@/lib/rounds/parse-frequency';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { CustomerPlacesMapCard } from '@/components/rounds/customer-places-map';
-import { CustomerStatStrip } from '@/components/rounds/customer-stat-strip';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import { HistoryBackButton } from '@/components/layout/history-back-button';
+import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
+import { CalendarDays, MapPin } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { CustomerDetailsCard } from '@/components/rounds/customer-details-card';
-import { formatUkPhoneDisplay } from '@/lib/utils/phone';
+import { CustomerDetailsCard, CustomerSendCard } from '@/components/rounds/customer-details-card';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
 import { getCustomerLedger } from '@/lib/data/payments/ledger';
 import { CustomerMoneyCard } from '@/components/payments/customer-money-card';
+import { getCustomerDirectDebit } from '@/lib/data/direct-debit/customer';
+import { getDirectDebitState } from '@/lib/direct-debit/state';
 import { CustomerActivity } from '@/components/rounds/customer-activity';
 import { CustomerMessagesCard } from '@/components/messaging/customer-messages-card';
 import { getCustomerRecentMessages } from '@/lib/data/messaging/threads';
 import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { contactChoiceFromColumn } from '@/lib/messaging/channel';
+import { flagToChoice } from '@/lib/messaging/customer-flag';
 import { splitHouse } from '@/lib/rounds/house';
+
+function NextVisitBox({
+  dateLabel,
+  overdue,
+  services,
+  money,
+}: {
+  dateLabel: string | null;
+  overdue: boolean;
+  services: { id: string; title: string }[];
+  money: string | null;
+}) {
+  return (
+    <Card className="glass-card border-border/80">
+      <CardHeader className="pb-2">
+        <CustomerSectionTitle
+          icon={CalendarDays}
+          title="Next visit"
+          tone={overdue ? 'rose' : 'amber'}
+          hint={dateLabel ?? 'Nothing booked'}
+        />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {services.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No visit booked yet.</p>
+        ) : (
+          <ul className="space-y-1">
+            {services.map((service) => (
+              <li key={service.id} className="text-sm font-medium">
+                {service.title}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-2">
+          <p className="text-xs text-muted-foreground">This visit</p>
+          <p className="text-lg font-semibold">{money ?? '—'}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function formatVisitDay(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -120,6 +165,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       { visits: recent, error: recentError },
       settings,
       ledgerResult,
+      directDebit,
       messaging,
     ] = await Promise.all([
       getRoundsCustomerById(tenantId, customerId),
@@ -128,6 +174,12 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       getRecentVisitsForCustomer(tenantId, customerId),
       createClient().then((supabase) => getRoundsSettings(supabase, tenantId)),
       createClient().then((supabase) => getCustomerLedger(supabase, tenantId, customerId)),
+      // Direct Debit shows only when the business has it On (D10).
+      createClient().then(async (supabase) =>
+        (await getDirectDebitState(supabase, tenantId)) === 'on'
+          ? getCustomerDirectDebit(supabase, tenantId, customerId)
+          : null,
+      ),
       createClient().then(async (supabase) => {
         const [messagingSettings, recentMessages, flags] = await Promise.all([
           getMessagingSettings(supabase, tenantId),
@@ -148,10 +200,6 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       redirect(paths.customers);
     }
 
-    const phone =
-      formatUkPhoneDisplay(customer.phone_e164) ||
-      customer.phone?.trim() ||
-      null;
     const sendsInvoice = customer.payment_terms === 'invoice';
     const forecast = forecastRowsForCustomer(agreements, upcoming, settings);
     const today = todayInLondon();
@@ -161,7 +209,6 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       .sort((a, b) => compareYmd(a, b))[0] ?? null;
     const nextOverdue = nextDate != null && compareYmd(nextDate, today) < 0;
     const live = agreements.filter((agreement) => agreement.status === 'active');
-    const roundValue = live.reduce((sum, agreement) => sum + agreement.price, 0);
     const places = live
       .filter((agreement) => agreement.lat != null && agreement.lng != null)
       .map((agreement) => ({
@@ -177,9 +224,36 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       style: 'currency',
       currency: 'GBP',
     });
+    const nextServices = nextDate
+      ? [
+          ...upcoming
+            .filter((visit) => visit.scheduled_date === nextDate)
+            .map((visit) => ({
+              id: visit.id,
+              title: visit.job_description || 'Visit',
+              amount: visit.quoted_amount,
+            })),
+          ...forecast
+            .filter((visit) => visit.scheduled_date === nextDate)
+            .map((visit) => ({
+              id: visit.id,
+              title: visit.job_description || 'Visit',
+              amount: visit.quoted_amount,
+            })),
+        ]
+      : [];
+    const nextAmounts = nextServices
+      .map((service) => service.amount)
+      .filter((amount): amount is number => amount != null);
+    const nextMoney =
+      nextAmounts.length === 0
+        ? null
+        : priceFormat.format(nextAmounts.reduce((sum, amount) => sum + amount, 0));
+    const place = [primary?.address, primary?.postcode].filter(Boolean).join(', ') || customer.address;
 
     return (
       <div className="space-y-6">
+        <SetBreadcrumbName id={customerId} name={customer.name} />
         <HistoryBackButton fallbackHref={paths.customers} />
         <PageGradientHeader
           eyebrow={
@@ -191,9 +265,9 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           }
           title={customer.name}
           subtitle={
-            [phone, customer.email, primary ? `${primary.address}, ${primary.postcode}` : null]
-              .filter(Boolean)
-              .join(' · ') || 'No phone, email, or address yet'
+            !customer.is_active
+              ? 'Inactive — they stay on file but drop off the round'
+              : place || undefined
           }
           actions={
             <div className="flex flex-wrap items-center gap-2">
@@ -209,22 +283,15 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           }
         />
 
-        <CustomerStatStrip
-          nextVisit={nextDate ? formatVisitDay(nextDate) : 'None'}
-          nextOverdue={nextOverdue}
-          services={
-            live.length === 0
-              ? 'None'
-              : live.length === 1
-                ? frequencyLabel(live[0]!.frequency_days)
-                : String(live.length)
-          }
-          price={live.length === 0 ? '—' : priceFormat.format(roundValue)}
-          payment={sendsInvoice ? 'Sends invoice' : '—'}
-        />
-
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
+            {ledgerResult.ledger ? (
+              <CustomerMoneyCard
+                ledger={ledgerResult.ledger}
+                payLinkAvailable
+                directDebit={directDebit}
+              />
+            ) : null}
             <CustomerDetailsCard
               customer={customer}
               house={
@@ -234,28 +301,22 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                     ? { address: primary.address, postcode: primary.postcode }
                     : { address: null, postcode: null }
               }
+            />
+            <CustomerSendCard
+              customerId={customerId}
+              phoneE164={customer.phone_e164}
               messaging={{
                 contactChoice: contactChoiceFromColumn(customer.preferred_channel),
-                visitReminders: messaging.flags?.visit_reminders === true,
-                paymentChasers: messaging.flags?.payment_chasers !== false,
-                paymentThanks: messaging.flags?.payment_thanks !== false,
+                visitReminders: flagToChoice(messaging.flags?.visit_reminders),
+                paymentChasers: flagToChoice(messaging.flags?.payment_chasers),
+                paymentThanks: flagToChoice(messaging.flags?.payment_thanks),
                 remindersEnabled: messaging.messagingSettings.reminders_enabled,
                 chasersEnabled: messaging.messagingSettings.chasers_enabled,
                 thanksEnabled: messaging.messagingSettings.payment_thanks_enabled,
                 reminderDaysBefore: messaging.messagingSettings.reminder_days_before,
+                chaseFirstDays: messaging.messagingSettings.chase_first_days,
+                chaseSecondDays: messaging.messagingSettings.chase_second_days,
               }}
-            />
-            {ledgerResult.ledger ? (
-              <CustomerMoneyCard ledger={ledgerResult.ledger} payLinkAvailable />
-            ) : null}
-            <CustomerMessagesCard
-              name={customer.name}
-              phoneE164={customer.phone_e164}
-              optedOut={
-                typeof messaging.flags?.messaging_opt_out_at === 'string' &&
-                messaging.flags.messaging_opt_out_at.trim() !== ''
-              }
-              recent={messaging.recentMessages}
             />
             <AgreementsCard
               customerId={customerId}
@@ -271,10 +332,31 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
             />
           </div>
           <div className="min-w-0 space-y-6">
+            <NextVisitBox
+              dateLabel={
+                nextDate
+                  ? nextOverdue
+                    ? `Was ${formatVisitDay(nextDate)}`
+                    : formatVisitDay(nextDate)
+                  : null
+              }
+              overdue={nextOverdue}
+              services={nextServices.map(({ id, title }) => ({ id, title }))}
+              money={nextMoney}
+            />
+            <CustomerMessagesCard
+              name={customer.name}
+              phoneE164={customer.phone_e164}
+              optedOut={
+                typeof messaging.flags?.messaging_opt_out_at === 'string' &&
+                messaging.flags.messaging_opt_out_at.trim() !== ''
+              }
+              recent={messaging.recentMessages}
+            />
             {places.length > 0 ? (
               <Card className="glass-card min-w-0 overflow-hidden border-border/80">
                 <CardHeader className="pb-2">
-                  <h2 className="text-lg font-semibold">Where they are</h2>
+                  <CustomerSectionTitle icon={MapPin} title="Where they are" tone="sky" />
                 </CardHeader>
                 <CardContent className="min-w-0">
                   <CustomerPlacesMapCard places={places} />
@@ -318,6 +400,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
 
   return (
     <div className="space-y-6">
+      <SetBreadcrumbName id={customerId} name={customer.name} />
       <div className="flex items-center gap-4">
         <HistoryBackButton fallbackHref={paths.customers} />
         <div className="min-w-0 flex-1">

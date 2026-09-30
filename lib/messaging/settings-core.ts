@@ -74,9 +74,9 @@ export async function updateCustomerMessagingCore(
   input: z.output<typeof customerMessagingSchema>,
 ): Promise<{ success: true } | { success: false; error: string }> {
   const patch: {
-    visit_reminders?: boolean;
-    payment_chasers?: boolean;
-    payment_thanks?: boolean;
+    visit_reminders?: boolean | null;
+    payment_chasers?: boolean | null;
+    payment_thanks?: boolean | null;
     preferred_channel?: 'sms' | 'email' | 'none' | null;
     updated_at?: string;
   } = {};
@@ -108,22 +108,3 @@ export async function updateCustomerMessagingCore(
   return { success: true };
 }
 
-/** Turns visit reminders on for every active customer who currently has them off. */
-export async function turnOnRemindersForAllCore(
-  supabase: SupabaseClient,
-  tenantId: string,
-): Promise<{ success: true; updated: number } | { success: false; error: string }> {
-  const { data, error, count } = await supabase
-    .from('customers')
-    .update({ visit_reminders: true }, { count: 'exact' })
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
-    .eq('visit_reminders', false)
-    .select('id');
-  if (error) {
-    console.error('[turnOnRemindersForAllCore]', error);
-    return { success: false, error: error.message };
-  }
-  const updated = typeof count === 'number' ? count : (data?.length ?? 0);
-  return { success: true, updated };
-}

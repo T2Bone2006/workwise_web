@@ -24,7 +24,11 @@ import {
   agreementSchema,
   type AgreementInput,
 } from '@/lib/validations/rounds/agreement';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
+import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -215,7 +219,7 @@ export function AgreementForm({
         return;
       }
       toast.success('Agreement updated');
-      router.push(cancelHref);
+      leaveViaHistory(router, cancelHref);
       router.refresh();
     } finally {
       setIsSubmitting(false);
@@ -339,7 +343,7 @@ export function AgreementForm({
                 name="address"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Address</FormLabel>
+                    <FormLabel>{unhookChromeAddressFill('Address')}</FormLabel>
                     <FormControl>
                       <AddressAutocompleteInput
                         value={field.value}
@@ -366,11 +370,13 @@ export function AgreementForm({
                 name="postcode"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Postcode</FormLabel>
+                    <FormLabel>{unhookChromeAddressFill('Postcode')}</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Filled in when you pick an address"
+                        placeholder={unhookChromeAddressFill('Filled in when you pick an address')}
                         {...field}
+                        name="outward"
+                        autoComplete="off"
                         disabled={isSubmitting}
                         className="uppercase"
                       />
@@ -705,11 +711,13 @@ export function AgreementForm({
                   ) : null}
                   {mode === 'create' ? 'Add service' : 'Save changes'}
                 </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href={cancelHref}>
-                    <ArrowLeft className="mr-2 size-4" />
-                    Cancel
-                  </Link>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => leaveViaHistory(router, cancelHref)}
+                >
+                  <ArrowLeft className="mr-2 size-4" />
+                  Cancel
                 </Button>
                 {mode === 'create' && watchPrice != null ? (
                   <span className="text-sm text-muted-foreground">
@@ -780,7 +788,7 @@ export function AgreementForm({
               variant="outline"
               onClick={() => {
                 setAfterCreateOpen(false);
-                router.push(cancelHref);
+                leaveViaHistory(router, cancelHref);
                 router.refresh();
               }}
             >

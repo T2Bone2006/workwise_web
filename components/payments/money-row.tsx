@@ -38,6 +38,8 @@ export function MoneyRow(props: {
   detail?: string;
   amount?: string;
   status?: string;
+  /** Small chips shown under the detail line. */
+  tags?: ReactNode;
   onClick?: () => void;
   actions?: ReactNode;
 }): ReactNode {
@@ -51,12 +53,16 @@ export function MoneyRow(props: {
         className={cn('pointer-events-none absolute inset-0 bg-gradient-to-r', props.accent.wash)}
         aria-hidden
       />
-      <div className="relative">
-        <button
-          type="button"
-          onClick={props.onClick}
-          className="flex w-full items-start gap-3 p-3 pl-4 text-left sm:p-4 sm:pl-5"
-        >
+      <div className="relative flex items-center gap-3 p-3 pl-4 sm:gap-4 sm:p-4 sm:pl-5">
+        {props.onClick ? (
+          <button
+            type="button"
+            onClick={props.onClick}
+            aria-label={props.title}
+            className="absolute inset-0 rounded-2xl"
+          />
+        ) : null}
+        <span className="pointer-events-none flex min-w-0 flex-1 items-start gap-3 text-left">
           <span
             className="flex size-9 shrink-0 items-center justify-center rounded-full border"
             style={{
@@ -72,22 +78,21 @@ export function MoneyRow(props: {
             {props.detail ? (
               <span className="mt-1 block truncate text-sm text-foreground/80">{props.detail}</span>
             ) : null}
+            {props.tags ? <span className="mt-1.5 flex flex-wrap gap-1.5">{props.tags}</span> : null}
           </span>
-          {props.amount || props.status ? (
-            <span className="flex shrink-0 flex-col items-end gap-1 text-right">
-              {props.amount ? (
-                <span className="text-sm font-medium tabular-nums text-foreground">{props.amount}</span>
-              ) : null}
-              {props.status ? (
-                <span className="text-xs font-medium text-foreground">{props.status}</span>
-              ) : null}
-            </span>
-          ) : null}
-        </button>
+        </span>
         {props.actions ? (
-          <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3 pl-16 sm:px-5 sm:pb-4">
-            {props.actions}
-          </div>
+          <div className="relative z-10 flex shrink-0 items-center gap-2">{props.actions}</div>
+        ) : null}
+        {props.amount || props.status ? (
+          <span className="pointer-events-none flex shrink-0 flex-col items-end gap-1 text-right">
+            {props.amount ? (
+              <span className="text-sm font-medium tabular-nums text-foreground">{props.amount}</span>
+            ) : null}
+            {props.status ? (
+              <span className="text-xs font-medium text-foreground">{props.status}</span>
+            ) : null}
+          </span>
         ) : null}
       </div>
     </li>

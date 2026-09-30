@@ -8,6 +8,7 @@ import { getCardPanelData } from '@/lib/data/payments/card-panel';
 import { getGetPaidChecklist } from '@/lib/data/payments/checklist';
 import { getEarningsOverview, getPaymentHistory } from '@/lib/data/payments/history';
 import { listInvoices } from '@/lib/data/payments/invoices';
+import { getDirectDebitState } from '@/lib/direct-debit/state';
 import { getOwedCustomers } from '@/lib/data/payments/owed';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
@@ -57,7 +58,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   const toBounds = to ? londonDayBoundsUtc(to) : null;
 
   const connectDone = raw.connect === 'done';
-  const [checklist, cardPanel, owed, history, earnings, invoicesResult] = await Promise.all([
+  const [checklist, cardPanel, owedAll, history, earnings, invoicesResult, ddState] = await Promise.all([
     getGetPaidChecklist(supabase, tenantId),
     getCardPanelData(supabase, tenantId, { refresh: connectDone }),
     getOwedCustomers(supabase, tenantId),
@@ -75,7 +76,21 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         error: error instanceof Error ? error.message : 'Could not load invoices.',
       }),
     ),
+    getDirectDebitState(supabase, tenantId),
   ]);
+  // Direct Debit only shows when the business has it On (D10).
+  const owed =
+    ddState === 'on'
+      ? owedAll
+      : {
+          ...owedAll,
+          rows: owedAll.rows.map((row) => ({
+            ...row,
+            collectingAmount: 0,
+            hasDirectDebit: false,
+            failedDirectDebits: 0,
+          })),
+        };
 
   const receivedAmount = history.rows.reduce((sum, row) => sum + row.amount, 0);
 

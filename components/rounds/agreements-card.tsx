@@ -4,7 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format, parseISO } from 'date-fns';
-import { CalendarIcon, ChevronDown, Loader2, Plus } from 'lucide-react';
+import { CalendarIcon, ChevronDown, Loader2, Plus, Repeat } from 'lucide-react';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
 import { toast } from 'sonner';
 import {
   endAgreement,
@@ -233,7 +234,7 @@ export function AgreementsCard({
     <>
       <Card className="glass-card border-border/80">
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
-          <h2 className="text-lg font-semibold">Agreements</h2>
+          <CustomerSectionTitle icon={Repeat} title="Services" tone="sky" hint="What you do for them, and how often" />
           <Button size="sm" asChild>
             <Link href={`/customers/${customerId}/agreements/new`}>
               <Plus className="mr-1.5 size-4" />

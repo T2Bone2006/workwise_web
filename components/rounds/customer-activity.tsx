@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Banknote, CheckCircle2, StickyNote } from 'lucide-react';
+import { Banknote, CheckCircle2, History, StickyNote } from 'lucide-react';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -13,15 +14,7 @@ import {
 import type { LedgerPayment } from '@/lib/data/payments/ledger';
 import type { VisitRow } from '@/lib/data/rounds/visits';
 import { formatGbp } from '@/lib/money/pence';
-import type { PaymentMethod } from '@/lib/payments/money-core';
-
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  cheque: 'Cheque',
-  bank_transfer: 'Bank transfer',
-  card: 'Card',
-  other: 'Other',
-};
+import { paymentMethodLabel } from '@/lib/payments/method-labels';
 
 function formatWhen(isoOrYmd: string): string {
   const day = isoOrYmd.slice(0, 10);
@@ -123,7 +116,7 @@ export function CustomerActivity({
           : refunded
             ? 'Payment refunded'
             : 'Payment',
-      detail: `${formatGbp(payment.amount)} · ${METHOD_LABEL[payment.method]}${
+      detail: `${formatGbp(payment.amount)} · ${paymentMethodLabel(payment.method)}${
         refunded ? ` · refunded ${formatGbp(payment.refundedAmount)}` : ''
       }`,
       icon: 'payment',
@@ -139,12 +132,18 @@ export function CustomerActivity({
     <Card className="glass-card border-border/80">
       <CardContent className="p-0">
         <div className="px-4 py-3">
-          <h2 className="text-lg font-semibold">Activity</h2>
-          {items.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {hasMore ? `Showing 5 of ${items.length}` : 'Recent activity'}
-            </p>
-          ) : null}
+          <CustomerSectionTitle
+            icon={History}
+            title="Activity"
+            tone="amber"
+            hint={
+              items.length === 0
+                ? undefined
+                : hasMore
+                  ? `Showing 5 of ${items.length}`
+                  : 'Recent activity'
+            }
+          />
         </div>
         {notes ? (
           <div className="flex gap-3 border-t border-border/70 px-4 py-3">

@@ -27,7 +27,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
+// Direct Debit and Pay by Bank are recorded by GoCardless, never by hand (see HAND_RECORDED_METHODS).
+type HandMethod = Exclude<PaymentMethod, 'direct_debit' | 'pay_by_bank'>;
+
+// Kept as before: this dialog also offers Card (card machine), which the method-labels list of
+// hand-recorded methods does not.
+const METHODS: { value: HandMethod; label: string }[] = [
   { value: 'cash', label: 'Cash' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'bank_transfer', label: 'Bank transfer' },
@@ -68,18 +73,20 @@ export function RecordPaymentDialog({
   unpaidVisits,
   open,
   onOpenChange,
+  title = 'Mark as paid',
 }: {
   customerId: string;
   defaultAmount: number | null;
   unpaidVisits: LedgerVisit[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  title?: string;
 }) {
   const router = useRouter();
   const [amount, setAmount] = useState(
     defaultAmount != null && defaultAmount > 0 ? String(defaultAmount) : '',
   );
-  const [method, setMethod] = useState<PaymentMethod | ''>('');
+  const [method, setMethod] = useState<HandMethod | ''>('');
   const [date, setDate] = useState(todayInLondon());
   const [note, setNote] = useState('');
   const [jobId, setJobId] = useState('auto');
@@ -126,7 +133,7 @@ export function RecordPaymentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Mark as paid</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1">
@@ -142,7 +149,7 @@ export function RecordPaymentDialog({
             <Label>Method</Label>
             <Select
               value={method || undefined}
-              onValueChange={(v) => setMethod(v as PaymentMethod)}
+              onValueChange={(v) => setMethod(v as HandMethod)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Choose…" />

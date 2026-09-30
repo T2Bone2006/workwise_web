@@ -212,7 +212,8 @@ export function visitDoneSms(p: {
     | { kind: 'to_pay'; amount: number; payUrl: string }
     | { kind: 'invoice'; number: string; amount: number; invoiceUrl: string }
     | { kind: 'paid_now'; amount: number; method: 'cash' | 'cheque'; creditLeft: number }
-    | { kind: 'paid_by_credit'; creditLeft: number };
+    | { kind: 'paid_by_credit'; creditLeft: number }
+    | { kind: 'direct_debit'; amount: number; collectOn: string };
 }): string {
   const serviceText = `${serviceLabel(p.services)} at ${shortAddress(p.address)}`;
   const tail: SmsPiece[] = [];
@@ -223,6 +224,14 @@ export function visitDoneSms(p: {
         { text: doneWhen(p.dayLabel, '.') },
         { text: `${formatGbp(p.outcome.amount)} to pay: ${p.outcome.payUrl}` },
         { text: 'Thanks!', drop: 1 },
+      );
+      break;
+    case 'direct_debit':
+      tail.push(
+        { text: doneWhen(p.dayLabel, '.') },
+        {
+          text: `${formatGbp(p.outcome.amount, { always2dp: true })} will be collected by Direct Debit on or after ${p.outcome.collectOn}.`,
+        },
       );
       break;
     case 'invoice':
@@ -273,13 +282,16 @@ export function visitDoneSms(p: {
   );
 }
 
+/** forVisits false (only other amounts owed, no visits) never says "for your recent visits". */
 export function chaserSms(p: {
   brand: SmsBrand;
   owed: number;
   payUrl: string;
   stage: 1 | 2;
+  forVisits?: boolean;
 }): string {
   const money = formatGbp(p.owed);
+  const forVisits = p.forVisits !== false;
   return fitBranded(
     p.brand.businessName,
     (biz) => {
@@ -288,7 +300,7 @@ export function chaserSms(p: {
           [
             { text: `${biz}: a friendly reminder, ${money} to pay` },
             // The pay page lists the visits; dropping this keeps one segment.
-            { text: 'for your recent visits', drop: 2 },
+            ...(forVisits ? [{ text: 'for your recent visits', drop: 2 }] : []),
             { text: `. Pay here: ${p.payUrl}`, glue: 'none' },
             { text: 'Thanks!', drop: 1 },
           ],
@@ -305,6 +317,34 @@ export function chaserSms(p: {
         p.brand,
       );
     },
+    undefined,
+    2,
+  );
+}
+
+/** Phase 4 Direct Debit invitation (≤ 2 segments; the trader's number is kept). */
+export function directDebitInviteSms(p: { brand: SmsBrand; url: string }): string {
+  return fitBranded(
+    p.brand.businessName,
+    (biz) =>
+      withRequiredCall(
+        [{ text: `${biz}: pay automatically by Direct Debit after each visit. Set up in 2 mins: ${p.url}` }],
+        p.brand,
+      ),
+    undefined,
+    2,
+  );
+}
+
+/** Phase 4 failed Direct Debit collection (≤ 2 segments; the trader's number is kept). */
+export function directDebitFailedSms(p: { brand: SmsBrand; amount: number; url: string }): string {
+  return fitBranded(
+    p.brand.businessName,
+    (biz) =>
+      withRequiredCall(
+        [{ text: `${biz}: we couldn't collect ${formatGbp(p.amount, { always2dp: true })} by Direct Debit. Pay here: ${p.url}` }],
+        p.brand,
+      ),
     undefined,
     2,
   );

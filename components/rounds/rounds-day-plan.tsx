@@ -26,7 +26,10 @@ import type { SmsBrand } from '@/lib/messaging/templates';
 import type { Ymd } from '@/lib/rounds/dates';
 import type { VisitChangeSummary } from '@/lib/rounds/visit-changes';
 import { groupHouseStops } from '@/lib/rounds/house-stops';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -453,7 +456,7 @@ function OneOffVisitDialog({
               value={customerId}
               onValueChange={pickCustomer}
               placeholder="Select customer"
-              searchPlaceholder="Search name or street…"
+              searchPlaceholder={unhookChromeAddressFill('Search name or street…')}
               emptyText="No customer found."
             />
           </div>
@@ -462,7 +465,7 @@ function OneOffVisitDialog({
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label>Address</Label>
+            <Label>{unhookChromeAddressFill('Address')}</Label>
             <AddressAutocompleteInput
               value={address}
               onValueChange={setAddress}
@@ -474,11 +477,13 @@ function OneOffVisitDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Postcode</Label>
+            <Label>{unhookChromeAddressFill('Postcode')}</Label>
             <Input
               value={postcode}
               onChange={(e) => setPostcode(e.target.value)}
-              placeholder="Filled in when you pick an address"
+              name="outward"
+              autoComplete="off"
+              placeholder={unhookChromeAddressFill('Filled in when you pick an address')}
               className="uppercase"
             />
           </div>

@@ -4,7 +4,9 @@ export type MessageKind =
   | 'chaser'
   | 'payment_received'
   | 'visit_change'
-  | 'reply_ack';
+  | 'reply_ack'
+  | 'dd_invite'
+  | 'dd_failed';
 
 export type MessageGroup = 'reminder' | 'money' | 'change';
 export type Channel = 'text' | 'email';

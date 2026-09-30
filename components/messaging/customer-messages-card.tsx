@@ -2,6 +2,8 @@
 
 import type { JSX } from 'react';
 import Link from 'next/link';
+import { MessageSquare } from 'lucide-react';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
 import { TextCustomerButton } from '@/components/messaging/text-customer-button';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -41,7 +43,7 @@ export function CustomerMessagesCard(props: {
   return (
     <Card className="glass-card border-border/80">
       <CardHeader className="pb-2">
-        <h2 className="text-lg font-semibold">Messages</h2>
+        <CustomerSectionTitle icon={MessageSquare} title="Recent messages" tone="sky" />
       </CardHeader>
       <CardContent className="space-y-5">
         {optedOut ? (

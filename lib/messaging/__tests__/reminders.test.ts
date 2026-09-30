@@ -240,9 +240,30 @@ describe('visitServiceTitle', () => {
 });
 
 describe('remindersEnabled', () => {
-  it('returns nothing when business reminders are off', () => {
+  it('skips a customer on the business default when reminders are off', () => {
     expect(
-      plan([visit({ id: 'j1' })], { remindersEnabled: false }),
+      plan([visit({ id: 'j1' })], {
+        remindersEnabled: false,
+        customers: new Map([['cust-1', customer({ visit_reminders: null })]]),
+      }),
     ).toEqual([]);
+  });
+
+  it('still reminds a customer set to yes when the business default is off', () => {
+    expect(
+      plan([visit({ id: 'j1' })], {
+        remindersEnabled: false,
+        customers: new Map([['cust-1', customer({ visit_reminders: true })]]),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('follows an on default when the customer has not chosen', () => {
+    expect(
+      plan([visit({ id: 'j1' })], {
+        remindersEnabled: true,
+        customers: new Map([['cust-1', customer({ visit_reminders: null })]]),
+      }),
+    ).toHaveLength(1);
   });
 });

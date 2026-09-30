@@ -13,7 +13,10 @@ import { getPaymentSettings, hasBankDetails } from '@/lib/data/payments/settings
 import { createInvoiceCore } from '@/lib/invoices/invoice-core';
 import { renderInvoicePdf } from '@/lib/invoices/render';
 import { toInvoiceViewModel } from '@/lib/invoices/view-model';
+import { directDebitCollectOn } from '@/lib/direct-debit/dates';
+import { workingDirectDebit } from '@/lib/direct-debit/state';
 import { getTenantMessagingContext } from '@/lib/messaging/brand';
+import { asCustomerFlag, resolveCustomerFlag } from '@/lib/messaging/customer-flag';
 import type { Channel } from '@/lib/messaging/channel';
 import { isUkMobileE164 } from '@/lib/messaging/phone';
 import type { EmailAttempt, SendOutcome } from '@/lib/messaging/send';
@@ -23,6 +26,7 @@ import {
   composePaymentReceivedMessage,
   composeVisitDoneMessage,
   composeVisitDoneSms,
+  formatVisitDay,
   paymentMethodLabel,
   type ComposedMessage,
   type VisitDoneMessageInput,
@@ -464,8 +468,16 @@ async function assembleVisitDone(
       : null;
 
   const owed = balance.owedAmount;
+  // D8: a customer whose Direct Debit will collect this is told so — no pay link, no bank line.
+  const ddStatus =
+    visitOutstanding > 0
+      ? await workingDirectDebit(supabase, p.tenantId, p.customerId)
+      : null;
+  const directDebit = ddStatus
+    ? { collectOn: formatVisitDay(directDebitCollectOn(todayInLondon(), ddStatus)) }
+    : null;
   const token =
-    owed > 0
+    owed > 0 && !directDebit
       ? await ensurePayLinkToken(supabase, {
           tenantId: p.tenantId,
           customerId: p.customerId,
@@ -473,13 +485,14 @@ async function assembleVisitDone(
       : null;
   const payUrl = token ? payLinkUrl(token) : null;
 
-  const bank = hasBankDetails(settings)
-    ? {
-        accountName: settings.bankAccountName!,
-        sortCode: settings.bankSortCode!,
-        accountNumber: settings.bankAccountNumber!,
-      }
-    : null;
+  const bank =
+    !directDebit && hasBankDetails(settings)
+      ? {
+          accountName: settings.bankAccountName!,
+          sortCode: settings.bankSortCode!,
+          accountNumber: settings.bankAccountNumber!,
+        }
+      : null;
 
   const tenantRow = tenant as { name?: unknown; settings?: unknown } | null;
   const businessName = asString(tenantRow?.name) ?? 'Your cleaner';
@@ -507,6 +520,7 @@ async function assembleVisitDone(
     bank,
     reference: asString(p.customer.bank_reference_hint),
     invoiceNumber: p.invoiceNumber,
+    directDebit,
   };
   const msg = composeVisitDoneMessage(input);
   if (!msg) return { ok: false, error: 'Waived', waived: true };
@@ -1046,10 +1060,10 @@ export async function sendPaymentReceivedNotice(
     if (asString(c.preferred_channel) === 'none') {
       return { outcome: 'skipped_opted_out' };
     }
-    // Payment thank-yous can be turned off for one customer or the whole business.
-    if (c.payment_thanks === false) return { outcome: 'skipped_opted_out' };
+    // NULL follows the business default. An explicit yes or no wins.
     const thanksCtx = await getTenantMessagingContext(supabase, p.tenantId);
-    if (thanksCtx?.settings?.payment_thanks_enabled === false) {
+    const businessThanks = thanksCtx?.settings?.payment_thanks_enabled !== false;
+    if (!resolveCustomerFlag(asCustomerFlag(c.payment_thanks), businessThanks)) {
       return { outcome: 'skipped_opted_out' };
     }
 

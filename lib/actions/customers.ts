@@ -6,7 +6,12 @@ import {
   findAuthUserByEmail,
   isAlreadyRegisteredAuthError,
 } from '@/lib/supabase/find-auth-user';
-import { customerSchema } from '@/lib/validations/customer';
+import { customerSchema, owesFromBeforeSchema } from '@/lib/validations/customer';
+import {
+  addChargeCore,
+  STARTING_BALANCE_DESCRIPTION,
+} from '@/lib/payments/charges-core';
+import { todayInLondon } from '@/lib/rounds/dates';
 import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { resend, FROM_EMAIL } from '@/lib/resend';
@@ -137,14 +142,61 @@ export async function createCustomer(formData: FormData) {
   return { success: true, id: inserted?.id as string };
 }
 
-/** Rounds dashboard create: always an individual, then on to the first agreement. */
-export async function createRoundsCustomer(formData: FormData) {
+/**
+ * Rounds dashboard create: always an individual, then on to the first agreement.
+ * An optional "Owes from before" becomes a starting-balance charge (Phase 4 D12).
+ */
+export async function createRoundsCustomer(formData: FormData): Promise<
+  | { success: false; error: string }
+  | { success: true; id: string; warning?: string }
+> {
   formData.set('type', 'individual');
-  const result = await createCustomer(formData);
-  if (result.success) {
-    revalidatePath('/customers');
+
+  const owes = owesFromBeforeSchema.safeParse(formData.get('owesFromBefore') ?? undefined);
+  if (!owes.success) {
+    return { success: false, error: owes.error.issues[0]?.message ?? 'Invalid amount' };
   }
-  return result;
+  formData.delete('owesFromBefore');
+
+  const result = await createCustomer(formData);
+  if (!result.success || !('id' in result) || typeof result.id !== 'string') {
+    return {
+      success: false,
+      error: ('error' in result ? result.error : undefined) ?? 'Failed to create customer',
+    };
+  }
+  revalidatePath('/customers');
+
+  const owesFromBefore = owes.data ?? 0;
+  if (owesFromBefore > 0) {
+    const supabase = await createClient();
+    const [tenantId, { data: { user } }] = await Promise.all([
+      getTenantIdForCurrentUser(),
+      supabase.auth.getUser(),
+    ]);
+    const charge = tenantId
+      ? await addChargeCore(supabase, {
+          tenantId,
+          customerId: result.id,
+          kind: 'starting_balance',
+          description: STARTING_BALANCE_DESCRIPTION,
+          amount: owesFromBefore,
+          chargeDate: todayInLondon(),
+          userId: user?.id ?? null,
+        })
+      : null;
+    if (!charge?.success) {
+      return {
+        success: true,
+        id: result.id,
+        warning:
+          "Customer added, but the amount owed from before wasn't saved — add it on their page.",
+      };
+    }
+    revalidatePath('/payments');
+  }
+
+  return { success: true, id: result.id };
 }
 
 /** Minimal create for the import wizard (name + bulk_client). Returns new customer id. */

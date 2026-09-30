@@ -14,6 +14,8 @@ export type PaymentMethod =
   | 'cheque'
   | 'bank_transfer'
   | 'card'
+  | 'direct_debit'
+  | 'pay_by_bank'
   | 'other';
 
 /** `retryable`: a database/server failure worth retrying (phone APIs answer 503), not a bad request. */

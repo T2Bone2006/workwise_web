@@ -11,7 +11,10 @@ import {
 } from 'react';
 import { Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -352,7 +355,7 @@ export function InlineAddress(props: {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">{unhookChromeAddressFill(label)}</p>
       <AddressAutocompleteInput
         value={draftAddress}
         onValueChange={setDraftAddress}
@@ -365,11 +368,13 @@ export function InlineAddress(props: {
       />
       <Input
         value={draftPostcode}
-        placeholder="Postcode"
+        name="outward"
+        autoComplete="off"
+        placeholder={unhookChromeAddressFill('Postcode')}
         disabled={saving}
         onChange={(event) => setDraftPostcode(event.target.value)}
         onKeyDown={onKeyDown}
-        aria-label="Postcode"
+        aria-label={unhookChromeAddressFill('Postcode')}
       />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="flex items-center gap-2">

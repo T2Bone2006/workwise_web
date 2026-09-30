@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, X, ChevronDown } from 'lucide-react';
+import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { toast } from 'sonner';
 import { workerSchema, type WorkerFormInput } from '@/lib/validations/worker';
 import { createWorker, updateWorker } from '@/lib/actions/workers';
@@ -167,7 +167,11 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
         return;
       }
       toast.success(mode === 'create' ? 'Worker created' : 'Worker updated');
-      router.push('/workers');
+      if (mode === 'edit') {
+        router.replace('/workers');
+      } else {
+        leaveViaHistory(router, '/workers');
+      }
       router.refresh();
     } finally {
       setIsSubmitting(false);
@@ -424,11 +428,19 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
             />
 
             <div className="flex flex-wrap gap-3 pt-2">
-              <Button type="button" variant="ghost" asChild disabled={isSubmitting}>
-                <Link href="/workers">
-                  <ArrowLeft className="size-4" />
-                  Cancel
-                </Link>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={isSubmitting}
+                onClick={() =>
+                  leaveViaHistory(
+                    router,
+                    mode === 'edit' && worker?.id ? `/workers/${worker.id}` : '/workers',
+                  )
+                }
+              >
+                <ArrowLeft className="size-4" />
+                Cancel
               </Button>
               <Button
                 type="submit"

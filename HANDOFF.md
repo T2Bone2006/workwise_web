@@ -22,8 +22,9 @@ Pro's jobs, workers, or phone tabs, that is a bug, not a feature.
 one person plus agents. Phases 1–3 code is on branch `rounds-foundations`
 (pushed to GitHub 2026-09-29 so nothing is lost) and is **not deployed**.
 Phase 2 (payments) is done; Phase 3 (messaging) is **code complete, walkthrough
-not finished** — see the Phase 3 section below. Next spec is Phase 4 (open
-banking): `../docs/specs/phase-4/`, not written yet. Do not deploy, OTA, or merge
+not finished** — see the Phase 3 section below. Phase 4 is now **Direct Debit
+(Stripe Bacs)**: `../docs/specs/phase-4/` (open banking parked 2026-09-29 in
+`../docs/specs/parked/open-banking/` — too expensive before revenue). Do not deploy, OTA, or merge
 to `main` until the owner asks — they want every phase finished, and to be happy
 with it, before anything goes live. Pushing the branch is fine when they ask.
 
@@ -44,7 +45,9 @@ with it, before anything goes live. Pushing the branch is fine when they ask.
 | `../docs/specs/phase-1.md` | Phase 1 (done). §9 is its step list. |
 | `../docs/specs/phase-2.md` | Phase 2 payments (done). §6.0 is the step index. |
 | `../docs/specs/phase-3/` | Phase 3 messaging (code complete). `README.md` is the step index; one card per step. |
-| `../docs/specs/phase-4/` | Phase 4 open banking. Not written yet. |
+| `../docs/specs/phase-4/` | Phase 4 Direct Debit (Stripe Bacs). Spec written 2026-09-29; `README.md` is the step index. |
+| `../docs/specs/phase-5/` | Phase 5 running the business (expenses, In & out, accountant access, downloads, Coming up, import). Spec written 2026-09-30; `README.md` is the step index. |
+| `../docs/specs/parked/open-banking/` | Parked open-banking (Yapily) spec — for after revenue. Do not build from it. |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
 
@@ -80,7 +83,75 @@ card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
 ## IN PROGRESS
 
 - Phase 3 code complete (steps 3–31 done; step 31 phone checks run 2026-09-29: tsc clean, 75 tests pass, iOS export OK). Step 33 paperwork done. Branch pushed.
-- Next: the owner finishes the step 32 walkthrough (19 rows in the Phase 3 section below; `../docs/specs/phase-3/32-walkthrough.md`), then the Phase 4 spec (`../docs/specs/phase-4/`, phase-spec skill).
+- Phase 3 step 32 walkthrough still open (19 rows below). Phase 4 = Direct Debit through **GoCardless** (spec rewritten 2026-09-30 from Stripe Bacs): `../docs/specs/phase-4/` (35 cards; open banking and Stripe bank details parked).
+- Phase 4 (Direct Debit) code complete, verified in the sandbox, not released (steps 1–25 done; step 26 is for launch). Results and release checklist in the Phase 4 section below; 826 web / 97 phone tests pass.
+
+- Phase 5 spec written 2026-09-30 (not started): `../docs/specs/phase-5/` (30 cards). First: step 1 (owner: two env vars + test receipts/round sheet), then steps 2–4 migrations (Cursor drafts, Claude reviews), step 5 paste. Finish the Phase 4 walkthrough first or alongside.
+
+---
+
+## Phase 4 — Direct Debit (GoCardless) + more ways to pay (branch `rounds-foundations`) — CODE COMPLETE, NOT RELEASED
+
+Spec folder: `../docs/specs/phase-4/` (`README.md` is the step index). Steps 1–25 done; step 26 (live at launch) stays open. **Nothing ships until all phases are done**: migrations → web → one phone build.
+
+**SQL pasted** (owner, 2026-09-30, in this order): `20260930100000_customer_charges.sql`, `20260930100100_owner_pushes.sql`, `20260930100200_direct_debits.sql`, `20260930100300_more_ways_to_pay.sql`. Owner follow-ups: refresh `supabase/schema_current.sql`; regenerate the phone types if wanted (they were hand-added in `workwise-mobile/src/types/supabase.ts`: `customer_charges`, `other_owed_amount`, `payment_allocations.charge_id`).
+
+**Checks** (2026-10-01): web `tsc` clean · 826 tests pass · eslint on the step-24 paths: 0 errors, 1 warning not from Phase 4 (`components/settings/settings-skills-section.tsx`) · `npm run build` succeeds · `check-cards.mjs phase-4` passes. Phone: `tsc` clean · 97 tests (this includes some tests from work outside Phase 4) · `expo export --platform ios` OK · no dependency or native-module change.
+
+**At release**
+- Stripe: no new webhook events (Stripe only takes cards now).
+- Vercel: the six `GOCARDLESS_*` variables with live values (step 26): `GOCARDLESS_ENVIRONMENT`, `GOCARDLESS_CLIENT_ID`, `GOCARDLESS_CLIENT_SECRET`, `GOCARDLESS_WEBHOOK_SECRET`, `GOCARDLESS_TOKEN_KEY`, `GOCARDLESS_REDIRECT_URI`.
+- Live GoCardless partner app: webhook URL `https://app.joinworkwise.com/api/gocardless/webhook`, redirect URL `https://app.joinworkwise.com/api/gocardless/callback`.
+- Crons in `vercel.json` already: `/api/cron/direct-debits` (17:00 UTC), `/api/cron/send-held-messages` (07:00 UTC, also releases held pushes and sweeps stuck collections); confirm both show in the hosting dashboard.
+
+**At launch (step 26)**: GoCardless's partner review passed (demo video, user guide, logo), revenue share agreed, live partner app created; Stripe live Apple Pay / Google Pay on for connected accounts, bank methods off.
+
+**Verified** (step 24 — owner walkthrough in GoCardless's sandbox and Stripe test mode, 2026-09-30/10-01; "(owner)" = owner confirmed it worked, no detail recorded)
+| # | Result | Note |
+|---|---|---|
+| 1 | ✓ | Connect GoCardless (box unticked) with a second email; card went to Checking/On |
+| 2 | ✓ | Verification → Refresh → On (dashboard and phone Getting paid) |
+| 3 | ✓ | Send Direct Debit link → email, offer first |
+| 4 | ✓ | Set up as `Successful` → thanks banner, Active, push |
+| 5 | ✓ | Visit-done email goes out the moment the visit is marked Done (by design); says it will be collected, no pay link |
+| 6 | ✓ | Evening cron → Collecting £15.00 |
+| 7 | ✓ | Confirmed → paid, Direct Debit payment, push, no thank-you email |
+| 8 | ✓ | Paid cash → nothing collected; repeat cron runs collect nothing new (owner) |
+| 9 | ✓ (wording) | Bob (`Penniless`): failed, push, customer email, held. The push said "their bank didn't pay it", not "not enough money in their account": the reason was read from the wrong GoCardless event. Fixed in `failureDetails` (webhook.ts), not confirmed live — Mary's reason also came back blank |
+| 10 | ✓ | Collect again, Leave it → chaser sent (the chaser comes from the `visit-reminders` cron, not the evening one; the card said evening) |
+| 11 | ✓ (wording) | Mary (`Late`): the sandbox confirms and fails almost at once, so the collection ends failed, owed again, push + email; same generic wording note as row 9 |
+| 12 | ✓ | Carl (`Invalid`): Not accepted by their bank (owner) |
+| 13 | ✓ after fix | Dan (`Fickle`): the sandbox reclaimed before WorkWise recorded the payment, so the collection stuck at Collecting. Fixed (the `charged_back` case now records the payment first) and healed by the morning sweep: reclaimed, push, owed again |
+| 14 | not walked | Sandbox refund: GoCardless refunds need an available refund balance, and the sandbox pays out instantly (balance £0). Refund handling is covered by unit tests |
+| 15 | ✓ | Phone Cancel Direct Debit → cancelled, cron skips (owner) |
+| 16 | ✓ | Ollie owes from before £15 → one collection, cleared (owner) |
+| 17 | ✓ | Fiona: two services (£60 + £12) → one collection of £72 |
+| 18 | ✓ | Ollie £1,250 → over-the-limit push (held), nothing collected |
+| 19 | ✓ | Switchers: Eve linked automatically, Gail to link, Hugh "another app still collecting" |
+| 20 | ✓ | Hugh linked with old app still collecting → not collected; after cancelling the subscription → collected (owner) |
+| 21 | ✓ after fix | One-off £10 on a linked mandate: no WorkWise payment recorded. The first warning push never appeared because the sandbox had already paid it out; fixed (warns on creation). Retest produced the held "Another app is collecting" push |
+| 22 | ✓ | Disconnect and reconnect (box ticked): Off, On, Direct Debits kept (owner) |
+| 23a | ✓ | Pay by bank → paid, Pay by Bank in history, thank-you, push; cron collected nothing for it (owner) |
+| 23b | ✓ | Pay now by bank and set up Direct Debit on one GoCardless page (owner) |
+| 23c | ✓ | Pay by card + "Card, Apple Pay or Google Pay"; no Pay by Bank on Stripe (owner) |
+| 24 | ✓ | Other amounts owed + Add a payment, dashboard and phone (owner) |
+| 25 | ✓ | GoCardless disconnected: no Direct Debit or Pay by bank, card and bank details still work (owner) |
+| 26 | ✓ | Card payment after 21:00: the thank-you email goes straight away; the push to the owner is held until 07:00 |
+| 27 | ✓ | RS Locksmiths unchanged (owner) |
+| 28 | ✓ | Before/after query (owner) |
+
+**Found and fixed while walking** (all in `lib/direct-debit/webhook.ts`, with tests): the failure reason was read from the wrong GoCardless event (submitted vs failed); a payment reclaimed before it was recorded left the collection stuck at Collecting; the "another app is collecting" warning was skipped when the payment had already paid out. Also: a link to Existing Direct Debits is now always shown on the Settings card once connected (the page was only reachable through a button that needed something waiting), and the phone and card wording now say Settings → Payments → Existing Direct Debits.
+
+**Not verified**
+- A refund made in GoCardless showing up in WorkWise (row 14).
+- The failure-reason wording live (rows 9 and 11): the fix is unit-tested only.
+- The held pushes arriving on the phone after 07:00 (the rows exist and are held; delivery to a real device wasn't watched).
+- The phone screens were used in places (Getting paid, Cancel, Done) but the Stop "Direct Debit" tag, Collect again / Leave it on the phone and the share sheet weren't separately confirmed.
+- Apple Pay / Google Pay on a real phone browser.
+
+**Known gaps**: no automatic retries (by design); refunds are made in the GoCardless dashboard, not WorkWise; existing Direct Debits are matched on the dashboard only; Stripe bank details (recognised automatically) parked in `docs/specs/parked/stripe-bank-details/`; standing orders into the trader's own bank are ticked off by hand; other amounts owed not on invoices; no Direct Debit on invoice pay pages; open banking parked (`docs/specs/parked/open-banking/`). Both work trees also contain modified files that Phase 4 did not touch (phone: AddCustomer, Today and others; web: several Pro pages) — not reviewed here; look before committing.
+
+**Next — Phase 5 (Running the business):** `docs/specs/phase-5/` is written (30 cards); start at its README.
 
 ---
 
@@ -95,6 +166,7 @@ Owner decision: **no deploy or OTA until asked** (branch pushed 2026-09-29).
 2. `20260929100100_text_credits.sql`
 3. `20260929100200_visit_changes.sql`
 4. `20260929120000_payment_thanks.sql` (added during the walkthrough; pasted 2026-09-29)
+5. `20260929130000_customer_message_defaults.sql` (pasted 2026-09-30)
 
 **Owner follow-ups still outstanding**
 - Refresh `supabase/schema_current.sql` from the live schema (owner's file).

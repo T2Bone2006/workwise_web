@@ -28,3 +28,19 @@ export async function listRoundsTenantIds(
     ),
   ];
 }
+
+/** True when the tenant has an entitled Rounds subscription (the bearer-token twin of getTenantProducts().hasRounds). */
+export async function tenantHasRounds(admin: SupabaseClient, tenantId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('subscriptions')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('product', 'rounds')
+    .in('status', [...ENTITLED_STATUSES])
+    .limit(1);
+  if (error) {
+    console.error('[tenantHasRounds]', error.message);
+    throw new Error(error.message);
+  }
+  return (data ?? []).length > 0;
+}

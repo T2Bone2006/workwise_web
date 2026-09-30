@@ -26,6 +26,7 @@ const base: VisitDoneMessageInput = {
   },
   reference: 'SMITH12',
   invoiceNumber: null,
+  directDebit: null,
 };
 
 describe('composeVisitDoneMessage', () => {
@@ -160,6 +161,59 @@ describe('composeVisitDoneMessage', () => {
       'Any questions? Just reply to this email — happy to help.',
     );
     expect(msg.signOff).toBe("Thanks,\nDave's Window Cleaning");
+  });
+});
+
+describe('composeVisitDoneMessage with Direct Debit', () => {
+  const dd = { collectOn: 'Tue 7 Oct' };
+
+  it('says it will be collected, with no pay link and no bank line', () => {
+    const msg = composeVisitDoneMessage({ ...base, directDebit: dd, payUrl: null, bank: null })!;
+    expect(msg.paragraphs).toContain(
+      "£18.00 will be collected by Direct Debit on or after Tue 7 Oct. You don't need to do anything.",
+    );
+    expect(msg.payUrl).toBeNull();
+    expect(msg.bankLine).toBeNull();
+    expect(msg.text).not.toContain('to pay for this visit');
+    expect(msg.text).not.toContain('/pay/');
+  });
+
+  it('even if a pay link and bank are passed in, they are not shown', () => {
+    const msg = composeVisitDoneMessage({ ...base, directDebit: dd })!;
+    expect(msg.payUrl).toBeNull();
+    expect(msg.bankLine).toBeNull();
+  });
+
+  it('uses what is left for this stop, and keeps the invoice line', () => {
+    const msg = composeVisitDoneMessage({
+      ...base,
+      directDebit: dd,
+      visitOutstanding: 10,
+      customerOwedTotal: 40,
+      invoiceNumber: 'INV-7',
+    })!;
+    expect(msg.paragraphs.join(' ')).toContain('£10.00 will be collected');
+    expect(msg.paragraphs.join(' ')).toContain('Invoice INV-7 is attached');
+    expect(msg.paragraphs.join(' ')).not.toContain('in total');
+  });
+
+  it('a visit paid at the door keeps the thanks wording, no Direct Debit sentence', () => {
+    const msg = composeVisitDoneMessage({
+      ...base,
+      directDebit: dd,
+      visitStatus: 'paid',
+      paidNow: { method: 'cash', amount: 18 },
+      visitOutstanding: 0,
+    })!;
+    expect(msg.text).toContain('Thanks so much for your payment');
+    expect(msg.text).not.toContain('Direct Debit');
+  });
+
+  it('is unchanged when directDebit is null', () => {
+    const msg = composeVisitDoneMessage(base)!;
+    expect(msg.payUrl).toBe(base.payUrl);
+    expect(msg.text).toContain('to pay for this visit');
+    expect(msg.text).not.toContain('Direct Debit');
   });
 });
 

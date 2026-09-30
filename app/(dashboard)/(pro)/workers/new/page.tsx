@@ -2,8 +2,7 @@ import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { redirect } from 'next/navigation';
 import { WorkerForm } from '@/components/workers/worker-form';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 
 export default async function NewWorkerPage() {
   const tenantId = await getTenantIdForCurrentUser();
@@ -17,13 +16,7 @@ export default async function NewWorkerPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/workers"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-          Back to workers
-        </Link>
+        <HistoryBackButton fallbackHref="/workers" label="Back to workers" />
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Add worker
         </h1>

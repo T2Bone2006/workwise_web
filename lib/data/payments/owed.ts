@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getDirectDebitSummaries } from '@/lib/data/direct-debit/customer';
 
 export type OwedCustomerRow = {
   customerId: string;
@@ -9,7 +10,11 @@ export type OwedCustomerRow = {
   unpaidVisitCount: number;
   oldestUnpaidDate: string | null;
   creditAmount: number;
+  otherOwedAmount: number; // other amounts owed (charges) inside owedAmount
   chaseStage: 0 | 1 | 2; // highest chaser stage sent for the customer's CURRENT oldest unpaid date
+  collectingAmount: number; // being collected by Direct Debit now (D5)
+  hasDirectDebit: boolean; // pending or active Direct Debit
+  failedDirectDebits: number; // failed collections waiting for Collect again / Leave it
 };
 
 function chaseStageFromDedupeKey(
@@ -55,7 +60,7 @@ export async function getOwedCustomers(
   const { data, error } = await supabase
     .from('customer_balances')
     .select(
-      'customer_id, owed_amount, unpaid_visit_count, oldest_unpaid_date, credit_amount',
+      'customer_id, owed_amount, unpaid_visit_count, oldest_unpaid_date, credit_amount, other_owed_amount',
     )
     .eq('tenant_id', tenantId);
 
@@ -122,6 +127,8 @@ export async function getOwedCustomers(
     }
   }
 
+  const directDebits = await getDirectDebitSummaries(supabase, tenantId);
+
   const rows: OwedCustomerRow[] = [];
   for (const row of balanceRows) {
     const owed = asFiniteNumber(row.owed_amount) ?? 0;
@@ -142,7 +149,11 @@ export async function getOwedCustomers(
       unpaidVisitCount: asFiniteNumber(row.unpaid_visit_count) ?? 0,
       oldestUnpaidDate: asString(row.oldest_unpaid_date)?.slice(0, 10) ?? null,
       creditAmount: credit,
+      otherOwedAmount: asFiniteNumber(row.other_owed_amount) ?? 0,
       chaseStage: chaseStageByCustomer.get(customerId) ?? 0,
+      collectingAmount: directDebits.get(customerId)?.collecting ?? 0,
+      hasDirectDebit: directDebits.get(customerId)?.hasDirectDebit ?? false,
+      failedDirectDebits: directDebits.get(customerId)?.failedCount ?? 0,
     });
   }
 
@@ -173,18 +184,20 @@ export async function getCustomerBalance(
   unpaidVisitCount: number;
   oldestUnpaidDate: string | null;
   creditAmount: number;
+  otherOwedAmount: number;
 }> {
   const empty = {
     owedAmount: 0,
     unpaidVisitCount: 0,
     oldestUnpaidDate: null as string | null,
     creditAmount: 0,
+    otherOwedAmount: 0,
   };
 
   const { data, error } = await supabase
     .from('customer_balances')
     .select(
-      'owed_amount, unpaid_visit_count, oldest_unpaid_date, credit_amount',
+      'owed_amount, unpaid_visit_count, oldest_unpaid_date, credit_amount, other_owed_amount',
     )
     .eq('tenant_id', tenantId)
     .eq('customer_id', customerId)
@@ -198,5 +211,6 @@ export async function getCustomerBalance(
     unpaidVisitCount: asFiniteNumber(row.unpaid_visit_count) ?? 0,
     oldestUnpaidDate: asString(row.oldest_unpaid_date)?.slice(0, 10) ?? null,
     creditAmount: asFiniteNumber(row.credit_amount) ?? 0,
+    otherOwedAmount: asFiniteNumber(row.other_owed_amount) ?? 0,
   };
 }

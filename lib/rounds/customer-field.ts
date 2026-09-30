@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { z } from 'zod';
+import { choiceToFlag } from '@/lib/messaging/customer-flag';
 import { updateCustomerMessagingCore } from '@/lib/messaging/settings-core';
 import { setCustomerHouseCore } from '@/lib/rounds/customer-house';
 import type { customerFieldSchema } from '@/lib/validations/rounds/customer-field';
@@ -105,10 +106,10 @@ export async function updateCustomerFieldCore(
     const saved = await updateCustomerMessagingCore(supabase, p.tenantId, {
       customerId: p.customerId,
       ...(change.field === 'visit_reminders'
-        ? { visitReminders: change.value }
+        ? { visitReminders: choiceToFlag(change.value) }
         : change.field === 'payment_chasers'
-          ? { paymentChasers: change.value }
-          : { paymentThanks: change.value }),
+          ? { paymentChasers: choiceToFlag(change.value) }
+          : { paymentThanks: choiceToFlag(change.value) }),
     });
     if (!saved.success) return saved;
     return { success: true, value: change.value };

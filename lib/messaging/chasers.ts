@@ -1,3 +1,4 @@
+import { resolveCustomerFlag } from '@/lib/messaging/customer-flag';
 import type { MessagingSettings } from '@/lib/messaging/settings';
 import { sendsInvoice } from '@/lib/payments/terms';
 import { addDays, diffDays } from '@/lib/rounds/dates';
@@ -7,12 +8,14 @@ export type ChaserCandidate = {
   owed: number; // owed_amount
   oldestUnpaidDate: string; // Ymd
   paymentTerms: string | null; // 'invoice' | 'monthly_invoice' | 'on_the_day' | null
-  paymentChasers: boolean; // customers.payment_chasers
+  paymentChasers: boolean | null; // customers.payment_chasers; null = business default
   isActive: boolean;
   preferredChannel: string | null;
   lastChaserAt: string | null; // ISO, most recent chaser message of any stage
   /** Their reply is waiting in Needs attention (e.g. "I've paid"): don't chase until it's dealt with. */
   awaitingReview?: boolean;
+  /** A working Direct Debit will collect what they owe (step 15): never chased. */
+  directDebitWorking?: boolean;
 };
 
 export type ChaserPlan = {
@@ -39,16 +42,15 @@ export function planChasers(
   >,
   p: { today: string; invoiceDueDays: number; now: Date },
 ): ChaserPlan[] {
-  if (!settings.chasers_enabled) return [];
-
   const plans: ChaserPlan[] = [];
 
   for (const c of candidates) {
-    if (!c.paymentChasers) continue;
+    if (!resolveCustomerFlag(c.paymentChasers, settings.chasers_enabled)) continue;
     if (!c.isActive) continue;
     if (c.preferredChannel === 'none') continue;
     if (c.owed <= 0) continue;
     if (c.awaitingReview) continue;
+    if (c.directDebitWorking) continue;
 
     const baseDate = sendsInvoice(c.paymentTerms)
       ? addDays(c.oldestUnpaidDate, p.invoiceDueDays)

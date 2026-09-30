@@ -39,6 +39,10 @@ interface SettingsViewProps {
   companyLogoUrl?: string | null;
   showSkills: boolean;
   defaultTab?: string;
+  /** `?gc=` return code from the GoCardless connect flow. */
+  gc?: string | null;
+  /** GoCardless's verification page (null when not configured). */
+  verifyUrl?: string | null;
 }
 
 const baseTabs = [
@@ -57,6 +61,8 @@ export function SettingsView({
   companyLogoUrl = null,
   showSkills,
   defaultTab,
+  gc,
+  verifyUrl,
 }: SettingsViewProps) {
   const router = useRouter();
   const onSaved = () => router.refresh();
@@ -162,6 +168,8 @@ export function SettingsView({
             <SettingsPaymentsTab
               settings={payments.settings}
               cardPanel={payments.cardPanel}
+              verifyUrl={verifyUrl}
+              gc={gc}
               onSaved={onSaved}
               onDirtyChange={setFormDirty}
             />

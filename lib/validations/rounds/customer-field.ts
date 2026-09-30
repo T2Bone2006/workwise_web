@@ -20,15 +20,15 @@ export const customerFieldSchema = z.discriminatedUnion('field', [
   }),
   z.object({
     field: z.literal('visit_reminders'),
-    value: z.boolean(),
+    value: z.enum(['default', 'yes', 'no']),
   }),
   z.object({
     field: z.literal('payment_chasers'),
-    value: z.boolean(),
+    value: z.enum(['default', 'yes', 'no']),
   }),
   z.object({
     field: z.literal('payment_thanks'),
-    value: z.boolean(),
+    value: z.enum(['default', 'yes', 'no']),
   }),
   z.object({
     field: z.literal('payment_terms'),

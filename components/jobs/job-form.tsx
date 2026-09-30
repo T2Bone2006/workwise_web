@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, CalendarIcon, Brain, X } from 'lucide-react';
+import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -42,7 +42,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SearchableSelect } from '@/components/ui/searchable-select';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -188,7 +191,7 @@ export function JobForm({
         toast.success('Job created successfully');
       }
 
-      router.push('/jobs');
+      leaveViaHistory(router, '/jobs');
       router.refresh();
     } catch {
       toast.error('Unable to create job. Please try again.');
@@ -275,7 +278,7 @@ export function JobForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                    Address
+                    {unhookChromeAddressFill('Address')}
                   </FormLabel>
                   <FormControl>
                     <AddressAutocompleteInput
@@ -305,16 +308,18 @@ export function JobForm({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="after:content-['*'] after:ml-0.5 after:text-destructive">
-                    Postcode
+                    {unhookChromeAddressFill('Postcode')}
                   </FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Filled in when you pick an address"
+                      placeholder={unhookChromeAddressFill('Filled in when you pick an address')}
                       className={cn(
                         'bg-white/80 dark:bg-white/5 dark:border-white/10 uppercase',
                         'focus-visible:border-brand-primary focus-visible:shadow-[var(--shadow-input-focus-value)] transition-all duration-300'
                       )}
                       {...field}
+                      name="outward"
+                      autoComplete="off"
                     />
                   </FormControl>
                   <FormMessage className="text-destructive text-xs" />
@@ -649,12 +654,10 @@ export function JobForm({
                 type="button"
                 variant="ghost"
                 className="order-2 sm:order-1"
-                asChild
+                onClick={() => leaveViaHistory(router, '/jobs')}
               >
-                <Link href="/jobs">
-                  <ArrowLeft className="size-4" />
-                  Cancel
-                </Link>
+                <ArrowLeft className="size-4" />
+                Cancel
               </Button>
               <Button
                 type="submit"

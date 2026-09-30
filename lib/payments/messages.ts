@@ -7,6 +7,8 @@ export type PaymentMethodLabel =
   | 'cheque'
   | 'bank_transfer'
   | 'card'
+  | 'direct_debit'
+  | 'pay_by_bank'
   | 'other';
 
 export type VisitDoneMessageInput = {
@@ -25,6 +27,8 @@ export type VisitDoneMessageInput = {
   bank: { accountName: string; sortCode: string; accountNumber: string } | null;
   reference: string | null;
   invoiceNumber: string | null;
+  /** Set for a customer whose Direct Debit will collect this (D8): no pay link, no bank line. */
+  directDebit: { collectOn: string } | null;
 };
 
 export type ComposedMessage = {
@@ -68,7 +72,7 @@ export function formatVisitDay(ymd: string): string {
   return `${WEEKDAYS[utc.getUTCDay()]} ${day} ${MONTHS[month - 1]}`;
 }
 
-function firstNameForGreeting(customerName: string): string | null {
+export function firstNameForGreeting(customerName: string): string | null {
   const first = customerName.trim().split(/\s+/)[0] ?? '';
   const letters = first.replace(/[^A-Za-z]/g, '');
   if (letters.length < 2) return null;
@@ -153,6 +157,10 @@ export function composeVisitDoneMessage(
         );
       }
     }
+  } else if (input.directDebit) {
+    paragraphs.push(
+      `${formatGbp(input.visitOutstanding, { always2dp: true })} will be collected by Direct Debit on or after ${input.directDebit.collectOn}. You don't need to do anything.`,
+    );
   } else {
     // partial or unpaid
     paragraphs.push(
@@ -172,7 +180,8 @@ export function composeVisitDoneMessage(
   paragraphs.push(replyPrompt());
 
   const needsPay =
-    input.visitStatus === 'partial' || input.visitStatus === 'unpaid';
+    !input.directDebit &&
+    (input.visitStatus === 'partial' || input.visitStatus === 'unpaid');
   const payUrl = needsPay ? input.payUrl : null;
   const bankLine = needsPay
     ? buildBankLine(input.bank, input.reference)
@@ -220,6 +229,17 @@ export function composeVisitDoneSms(
     address: input.address,
     dayLabel,
   };
+
+  if (input.directDebit && (input.visitStatus === 'partial' || input.visitStatus === 'unpaid')) {
+    return visitDoneSms({
+      ...base,
+      outcome: {
+        kind: 'direct_debit',
+        amount: input.visitOutstanding,
+        collectOn: input.directDebit.collectOn,
+      },
+    });
+  }
 
   if (input.invoiceNumber && extra.invoiceUrl) {
     const amount =
@@ -276,6 +296,10 @@ export function paymentMethodLabel(method: PaymentMethodLabel): string {
       return 'bank transfer';
     case 'card':
       return 'card';
+    case 'direct_debit':
+      return 'Direct Debit';
+    case 'pay_by_bank':
+      return 'bank';
     case 'other':
       return 'other';
     default:
@@ -333,7 +357,11 @@ export function composePaymentReceivedMessage(input: {
   };
 }
 
-/** Friendly payment reminder (stage 1) or nudge (stage 2). Always includes pay link. */
+/**
+ * Friendly payment reminder (stage 1) or nudge (stage 2). Always includes pay link.
+ * forVisits false (nothing owed is a visit, only other amounts owed) drops
+ * "for your recent visits".
+ */
 export function composeChaserMessage(input: {
   businessName: string;
   customerName: string;
@@ -342,17 +370,19 @@ export function composeChaserMessage(input: {
   payUrl: string;
   bank: VisitDoneMessageInput['bank'];
   reference: string | null;
+  forVisits?: boolean;
 }): ComposedMessage {
   const greeting = greetingLine(input.customerName);
   const money = formatGbp(input.owed);
+  const forVisits = input.forVisits !== false ? ' for your recent visits' : '';
   const paragraphs: string[] =
     input.stage === 1
       ? [
-          `Just a friendly reminder that there's ${money} to pay for your recent visits.`,
+          `Just a friendly reminder that there's ${money} to pay${forVisits}.`,
           replyPrompt(),
         ]
       : [
-          `Just a nudge: ${money} is still to pay for your recent visits. If you've already paid, thank you, and please ignore this.`,
+          `Just a nudge: ${money} is still to pay${forVisits}. If you've already paid, thank you, and please ignore this.`,
           replyPrompt(),
         ];
 
@@ -394,9 +424,14 @@ export function composeShareMessage(input: {
     return `Hi ${first}, it's ${input.businessName}. You're all paid up — thank you!`;
   }
 
-  const visitsLabel =
-    input.unpaidVisits === 1 ? '1 visit' : `${input.unpaidVisits} visits`;
-  let msg = `Hi ${first}, it's ${input.businessName}. There's ${formatGbp(input.owedTotal)} to pay for ${visitsLabel}. Pay online: ${input.payUrl}`;
+  // Nothing owed may be a visit (only other amounts owed, Phase 4 D12).
+  const visitsBit =
+    input.unpaidVisits <= 0
+      ? ''
+      : input.unpaidVisits === 1
+        ? ' for 1 visit'
+        : ` for ${input.unpaidVisits} visits`;
+  let msg = `Hi ${first}, it's ${input.businessName}. There's ${formatGbp(input.owedTotal)} to pay${visitsBit}. Pay online: ${input.payUrl}`;
   if (input.bank) {
     const sort = formatSortCode(input.bank.sortCode);
     const refBit = input.reference ? `, ref ${input.reference}` : '';

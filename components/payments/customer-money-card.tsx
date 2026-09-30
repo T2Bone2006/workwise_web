@@ -1,10 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { Wallet } from 'lucide-react';
+import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
+import { AddChargeDialog } from '@/components/payments/add-charge-dialog';
+import { CustomerDirectDebitSection } from '@/components/payments/customer-direct-debit';
 import { CopyPayLinkButton } from '@/components/payments/copy-pay-link-button';
 import { EmailPayLinkButton } from '@/components/payments/email-pay-link-button';
 import { PreviewList } from '@/components/payments/preview-list';
 import { RefundInStripeButton } from '@/components/payments/refund-in-stripe-button';
+import { RemoveChargeButton } from '@/components/payments/remove-charge-button';
 import { SendInvoiceDialog } from '@/components/payments/send-invoice-dialog';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
 import { VoidPaymentButton } from '@/components/payments/void-payment-button';
@@ -12,22 +17,17 @@ import { WaiveVisitButton } from '@/components/payments/waive-visit-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import type { CustomerDirectDebit } from '@/lib/data/direct-debit/customer';
 import type { CustomerLedger, LedgerPayment } from '@/lib/data/payments/ledger';
 import { formatGbp } from '@/lib/money/pence';
+import { paymentMethodLabel } from '@/lib/payments/method-labels';
 import type { PaymentMethod } from '@/lib/payments/money-core';
-
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  cheque: 'Cheque',
-  bank_transfer: 'Bank transfer',
-  card: 'Card',
-  other: 'Other',
-};
 
 const SOURCE_LABEL: Record<LedgerPayment['source'], string> = {
   stripe: 'Card',
   manual: 'Manual',
   open_banking: 'Bank',
+  gocardless: 'Direct Debit',
 };
 
 function formatDay(ymd: string): string {
@@ -64,21 +64,30 @@ function methodWord(method: PaymentMethod): string {
 export function CustomerMoneyCard({
   ledger,
   payLinkAvailable,
+  directDebit = null,
 }: {
   ledger: CustomerLedger;
   payLinkAvailable: boolean;
+  /** Set only when the business has Direct Debit On (D10). */
+  directDebit?: CustomerDirectDebit | null;
 }) {
   const [payOpen, setPayOpen] = useState(false);
   const [paySession, setPaySession] = useState(0);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [chargeOpen, setChargeOpen] = useState(false);
+  const [chargeSession, setChargeSession] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
   const owed = ledger.balance.owedAmount;
   const credit = ledger.balance.creditAmount;
   const unpaid = ledger.unpaidVisits;
   const waived = ledger.recentVisits.filter((visit) => visit.paymentStatus === 'waived');
   const payments = ledger.payments;
+  const charges = ledger.charges;
   const nothingOwed = owed <= 0;
-  const noHistory = payments.length === 0 && unpaid.length === 0 && waived.length === 0;
+  const noHistory =
+    payments.length === 0 && unpaid.length === 0 && waived.length === 0 && charges.length === 0;
   const hasEmail = Boolean(ledger.customer.email?.trim());
+  const collectedByDd = directDebit?.status === 'active' || directDebit?.status === 'pending';
 
   const since =
     ledger.balance.unpaidVisitCount > 0
@@ -88,7 +97,7 @@ export function CustomerMoneyCard({
       : null;
 
   const unpaidRows = unpaid.map((visit) => (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+    <div key={visit.jobId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
       <span>
         {visit.date ? formatDay(visit.date) : 'Visit'} · {visit.title} ·{' '}
         {formatGbp(visit.outstanding)}
@@ -102,8 +111,31 @@ export function CustomerMoneyCard({
     </div>
   ));
 
+  const chargeRows = charges.map((charge) => (
+    <div key={charge.chargeId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+      <div className="min-w-0">
+        <p>
+          {charge.description} · {formatDay(charge.date)} · {formatGbp(charge.amount)}
+        </p>
+        {charge.outstanding <= 0 ? (
+          <p className="text-xs text-muted-foreground">Paid</p>
+        ) : charge.allocated > 0 ? (
+          <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+            {formatGbp(charge.outstanding)} left
+          </p>
+        ) : null}
+      </div>
+      <RemoveChargeButton chargeId={charge.chargeId} description={charge.description} />
+    </div>
+  ));
+
+  const openPayment = () => {
+    setPaySession((n) => n + 1);
+    setPayOpen(true);
+  };
+
   const waivedRows = waived.map((visit) => (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+    <div key={visit.jobId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
       <span>
         {visit.date ? formatDay(visit.date) : 'Visit'} · {visit.title} · Waived
       </span>
@@ -129,11 +161,12 @@ export function CustomerMoneyCard({
           : 'border-l-emerald-500';
     return (
       <div
+        key={payment.id}
         className={`-mx-1 flex flex-wrap items-center justify-between gap-2 border-l-4 py-0.5 pl-2.5 text-sm ${tone}`}
       >
         <div className="min-w-0">
           <p className={voided ? 'text-muted-foreground line-through' : undefined}>
-            {formatReceived(payment.receivedAt)} · {METHOD_LABEL[payment.method]} ·{' '}
+            {formatReceived(payment.receivedAt)} · {paymentMethodLabel(payment.method)} ·{' '}
             {formatGbp(payment.amount)}
           </p>
           {refunded ? (
@@ -175,7 +208,7 @@ export function CustomerMoneyCard({
   return (
     <Card className="glass-card border-border/80">
       <CardHeader className="pb-2">
-        <h2 className="text-lg font-semibold">Money</h2>
+        <CustomerSectionTitle icon={Wallet} title="Money" tone="emerald" hint="What they owe, and what they've paid" />
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-baseline gap-2">
@@ -184,6 +217,9 @@ export function CustomerMoneyCard({
           ) : (
             <p className="text-2xl font-semibold text-rose-700 dark:text-rose-400">
               Owes {formatGbp(owed)}
+              {collectedByDd ? (
+                <span className="text-sm font-normal text-muted-foreground"> · collected by Direct Debit</span>
+              ) : null}
             </p>
           )}
           {since && !nothingOwed ? (
@@ -193,30 +229,73 @@ export function CustomerMoneyCard({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            onClick={() => {
-              setPaySession((n) => n + 1);
-              setPayOpen(true);
-            }}
-          >
-            Mark as paid
-          </Button>
-          <CopyPayLinkButton customerId={ledger.customer.id} available={payLinkAvailable} />
-          <EmailPayLinkButton
-            customerId={ledger.customer.id}
-            available={payLinkAvailable}
-            hasEmail={hasEmail}
-          />
+          {nothingOwed ? null : (
+            <Button size="sm" onClick={openPayment}>
+              Mark as paid
+            </Button>
+          )}
+          {collectedByDd ? (
+            <Button variant="outline" size="sm" onClick={() => setMoreOpen((open) => !open)}>
+              More
+            </Button>
+          ) : (
+            <>
+              <CopyPayLinkButton customerId={ledger.customer.id} available={payLinkAvailable} />
+              <EmailPayLinkButton
+                customerId={ledger.customer.id}
+                available={payLinkAvailable}
+                hasEmail={hasEmail}
+              />
+            </>
+          )}
           {nothingOwed ? null : (
             <Button variant="outline" size="sm" onClick={() => setInvoiceOpen(true)}>
               Send invoice
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setChargeSession((n) => n + 1);
+              setChargeOpen(true);
+            }}
+          >
+            Add amount owed
+          </Button>
         </div>
+        {collectedByDd && moreOpen ? (
+          <div className="flex flex-wrap gap-2">
+            <CopyPayLinkButton customerId={ledger.customer.id} available={payLinkAvailable} />
+            <EmailPayLinkButton
+              customerId={ledger.customer.id}
+              available={payLinkAvailable}
+              hasEmail={hasEmail}
+            />
+          </div>
+        ) : null}
+        {directDebit ? (
+          <CustomerDirectDebitSection
+            directDebit={directDebit}
+            customerId={ledger.customer.id}
+            customerName={ledger.customer.name}
+          />
+        ) : null}
+        {nothingOwed ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="-mt-2 h-auto px-0 text-sm"
+            onClick={openPayment}
+          >
+            Add a payment
+          </Button>
+        ) : null}
 
         {noHistory ? null : (
           <>
+            <PreviewList title="Other amounts owed" items={chargeRows} />
             <PreviewList title="Unpaid visits" items={unpaidRows} />
             <PreviewList title="Waived" items={waivedRows} />
             {payments.length === 0 ? (
@@ -236,6 +315,14 @@ export function CustomerMoneyCard({
         unpaidVisits={unpaid}
         open={payOpen}
         onOpenChange={setPayOpen}
+        title={nothingOwed ? 'Add a payment' : 'Mark as paid'}
+      />
+      <AddChargeDialog
+        key={`charge-${chargeSession}`}
+        customerId={ledger.customer.id}
+        customerName={ledger.customer.name}
+        open={chargeOpen}
+        onOpenChange={setChargeOpen}
       />
       <SendInvoiceDialog
         customerId={ledger.customer.id}

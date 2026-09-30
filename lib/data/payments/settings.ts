@@ -1,4 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { directDebitState, type DirectDebitState } from '@/lib/direct-debit/state';
+import { isGoCardlessConfigured } from '@/lib/gocardless/config';
+import { asConnectionRow, CONNECTION_COLUMNS } from '@/lib/gocardless/connection';
 import {
   connectStatus,
   type ConnectMirror,
@@ -23,9 +26,18 @@ export type PaymentSettings = {
     mirror: ConnectMirror | null;
     syncedAt: string | null;
   };
+  /** Phase 4: the business's own GoCardless (T9). */
+  directDebit: {
+    state: DirectDebitState;
+    configured: boolean;
+    connectedEmail: string | null;
+    connectedAt: string | null;
+    disconnectReason: string | null;
+    existingToLink: number; // gocardless_mandate_links decision 'pending'
+  };
 };
 
-export const DEFAULT_PAYMENT_SETTINGS: Omit<PaymentSettings, 'connect'> = {
+export const DEFAULT_PAYMENT_SETTINGS: Omit<PaymentSettings, 'connect' | 'directDebit'> = {
   bankAccountName: null,
   bankSortCode: null,
   bankAccountNumber: null,
@@ -60,12 +72,42 @@ function asStringArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string');
 }
 
+/** Stored connection only (no GoCardless call). Reads name columns: the token is never granted. */
+async function getDirectDebitSettings(
+  supabase: SupabaseClient,
+  tenantId: string,
+): Promise<PaymentSettings['directDebit']> {
+  const [{ data: connectionData }, { count }] = await Promise.all([
+    supabase
+      .from('gocardless_connections')
+      .select(CONNECTION_COLUMNS)
+      .eq('tenant_id', tenantId)
+      .maybeSingle(),
+    supabase
+      .from('gocardless_mandate_links')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('decision', 'pending'),
+  ]);
+  const connection = asConnectionRow(connectionData);
+  const connected = connection?.status === 'connected';
+  return {
+    state: directDebitState(connection),
+    configured: isGoCardlessConfigured(),
+    connectedEmail: connected ? connection.connected_email : null,
+    connectedAt: connected ? connection.connected_at : null,
+    disconnectReason:
+      connection?.status === 'disconnected' ? connection.disconnect_reason : null,
+    existingToLink: count ?? 0,
+  };
+}
+
 /** No row → defaults. accountId from tenants.stripe_connect_account_id. */
 export async function getPaymentSettings(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<PaymentSettings> {
-  const [{ data: settings }, { data: tenant }] = await Promise.all([
+  const [{ data: settings }, { data: tenant }, directDebit] = await Promise.all([
     supabase
       .from('tenant_payment_settings')
       .select(
@@ -95,6 +137,7 @@ export async function getPaymentSettings(
       .select('stripe_connect_account_id')
       .eq('id', tenantId)
       .maybeSingle(),
+    getDirectDebitSettings(supabase, tenantId),
   ]);
 
   const accountId = asString(
@@ -112,6 +155,7 @@ export async function getPaymentSettings(
         mirror: null,
         syncedAt: null,
       },
+      directDebit,
     };
   }
 
@@ -155,6 +199,7 @@ export async function getPaymentSettings(
       mirror,
       syncedAt: asString(row.stripe_connect_synced_at),
     },
+    directDebit,
   };
 }
 

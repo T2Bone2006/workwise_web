@@ -10,29 +10,25 @@ import {
 import { MoneyRow, MONEY_ACCENT } from '@/components/payments/money-row';
 import type { PaymentHistoryRow } from '@/lib/data/payments/history';
 import { formatGbp } from '@/lib/money/pence';
-import type { PaymentMethod } from '@/lib/payments/money-core';
+import { paymentMethodLabel } from '@/lib/payments/method-labels';
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
+const METHODS: { value: string; label: string }[] = [
   { value: 'cash', label: 'Cash' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'bank_transfer', label: 'Bank transfer' },
   { value: 'card', label: 'Card' },
+  { value: 'direct_debit', label: 'Direct Debit' },
+  { value: 'pay_by_bank', label: 'Pay by Bank' },
   { value: 'other', label: 'Other' },
 ];
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  cheque: 'Cheque',
-  bank_transfer: 'Bank transfer',
-  card: 'Card',
-  other: 'Other',
-};
-
-const METHOD_ICON: Record<PaymentMethod, typeof Banknote> = {
+const METHOD_ICON: Record<string, typeof Banknote> = {
   cash: Banknote,
   cheque: Receipt,
   bank_transfer: Landmark,
   card: CreditCard,
+  direct_debit: Landmark,
+  pay_by_bank: Landmark,
   other: Wallet,
 };
 
@@ -140,7 +136,7 @@ export function PaymentsHistoryTable({
                 accent={MONEY_ACCENT.received}
                 icon={Icon}
                 title={row.customerName}
-                detail={`${formatReceived(row.receivedAt)} · ${METHOD_LABEL[row.method]}`}
+                detail={`${formatReceived(row.receivedAt)} · ${paymentMethodLabel(row.method)}`}
                 amount={formatGbp(row.amount)}
                 onClick={() => router.push(`/customers/${row.customerId}`)}
               />

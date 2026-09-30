@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { CardPaymentsPanel } from '@/components/payments/card-payments-panel';
+import { DirectDebitPanel } from '@/components/payments/direct-debit-panel';
 import { savePaymentSettings } from '@/lib/actions/payment-settings';
 import type { CardPanelData } from '@/lib/data/payments/card-panel';
 import type { PaymentSettings } from '@/lib/data/payments/settings';
@@ -69,11 +70,17 @@ function savedSnapshot(settings: PaymentSettings) {
 export function SettingsPaymentsTab({
   settings,
   cardPanel,
+  verifyUrl,
+  gc,
   onSaved,
   onDirtyChange,
 }: {
   settings: PaymentSettings;
   cardPanel: CardPanelData;
+  /** GoCardless's verification page (null when Direct Debit isn't configured). */
+  verifyUrl?: string | null;
+  /** Return code from the GoCardless connect flow (`?gc=`). */
+  gc?: string | null;
   onSaved: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -158,6 +165,7 @@ export function SettingsPaymentsTab({
   }
 
   return (
+    <div className="space-y-6">
     <form onSubmit={handleSubmit} className="space-y-6">
       <Card className="glass-card rounded-xl border border-border/60 bg-card/80">
         <CardHeader>
@@ -318,5 +326,8 @@ export function SettingsPaymentsTab({
 
       <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
     </form>
+    {/* Outside the form: it has its own form (Connect GoCardless), and forms can't nest. */}
+    <DirectDebitPanel data={settings.directDebit} verifyUrl={verifyUrl ?? null} gc={gc ?? null} />
+    </div>
   );
 }

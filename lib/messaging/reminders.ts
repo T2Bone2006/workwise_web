@@ -1,3 +1,4 @@
+import { resolveCustomerFlag } from '@/lib/messaging/customer-flag';
 import { isUkMobileE164 } from '@/lib/messaging/phone';
 import { groupHouseStops } from '@/lib/rounds/house-stops';
 import { addDays } from '@/lib/rounds/dates';
@@ -21,7 +22,7 @@ export type ReminderVisit = {
 export type ReminderCustomer = {
   id: string;
   is_active: boolean;
-  visit_reminders: boolean;
+  visit_reminders: boolean | null;
   preferred_channel: string | null;
   phone_e164: string | null;
 };
@@ -78,8 +79,6 @@ export function planReminders(p: {
   remindersEnabled: boolean; // settings.messaging.reminders_enabled
   toldAboutJobIds: Set<string>; // job ids with a visit_change text/email sent in the last 14 days
 }): ReminderPlan[] {
-  if (!p.remindersEnabled) return [];
-
   const eligible = p.visits.filter((visit) => {
     if (visit.status !== 'assigned') return false;
     if (visit.service_agreement_id == null) return false;
@@ -89,7 +88,7 @@ export function planReminders(p: {
     const customer = p.customers.get(visit.customer_id);
     if (!customer) return false;
     if (!customer.is_active) return false;
-    if (!customer.visit_reminders) return false;
+    if (!resolveCustomerFlag(customer.visit_reminders, p.remindersEnabled)) return false;
     if (customer.preferred_channel === 'none') return false;
     if (!isUkMobileE164(customer.phone_e164)) return false;
     return true;

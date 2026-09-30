@@ -7,7 +7,8 @@ import { getConnectionsForTenant } from '@/lib/data/network';
 import { JobForm } from '@/components/jobs/job-form';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Users, ArrowLeft } from 'lucide-react';
+import { Users } from 'lucide-react';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { cn } from '@/lib/utils';
 
 interface NewJobPageProps {
@@ -75,11 +76,7 @@ export default async function NewJobPage({ searchParams }: NewJobPageProps) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" asChild aria-label="Back to jobs">
-          <Link href="/jobs">
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
+        <HistoryBackButton iconOnly label="Back to jobs" fallbackHref="/jobs" />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Create Job

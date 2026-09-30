@@ -6,6 +6,7 @@ import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { getCardPanelData } from '@/lib/data/payments/card-panel';
 import { getPaymentSettings } from '@/lib/data/payments/settings';
+import { goCardlessConfig, isGoCardlessConfigured } from '@/lib/gocardless/config';
 import { createClient } from '@/lib/supabase/server';
 import { SettingsView } from '@/components/settings/settings-view';
 import { MessagingSectionProvider } from '@/components/settings/settings-messages-section';
@@ -14,7 +15,7 @@ import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; gc?: string }>;
 }) {
   const raw = await searchParams;
   const [data, billing, products] = await Promise.all([
@@ -37,37 +38,27 @@ export default async function SettingsPage({
     >;
     companyPhone: string | null;
     businessName: string;
-    activeCustomerCount: number;
   } | null = null;
   if (products.hasRounds && data.tenantId) {
     const supabase = await createClient();
     const tenantId = data.tenantId;
-    const [roundsSettings, paymentSettings, cardPanel, messagingSettings, activeCustomers] =
-      await Promise.all([
-        getRoundsSettings(supabase, tenantId),
-        getPaymentSettings(supabase, tenantId),
-        getCardPanelData(supabase, tenantId),
-        getMessagingSettings(supabase, tenantId),
-        supabase
-          .from('customers')
-          .select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-          .eq('is_active', true),
-      ]);
+    const [roundsSettings, paymentSettings, cardPanel, messagingSettings] = await Promise.all([
+      getRoundsSettings(supabase, tenantId),
+      getPaymentSettings(supabase, tenantId),
+      getCardPanelData(supabase, tenantId),
+      getMessagingSettings(supabase, tenantId),
+    ]);
     rounds = { settings: roundsSettings };
     payments = { settings: paymentSettings, cardPanel };
-    if (activeCustomers.error) {
-      console.error('[settings messages] active customers', activeCustomers.error);
-    }
     const { companyPhone, businessName, ...messageSettings } = messagingSettings;
     messaging = {
       settings: messageSettings,
       companyPhone,
       businessName,
-      activeCustomerCount: activeCustomers.count ?? 0,
     };
   }
 
+  const verifyUrl = isGoCardlessConfigured() ? goCardlessConfig().verifyUrl : null;
   const companyLogoUrl = data.tenant?.settings?.company?.logo_url ?? null;
 
   return (
@@ -87,6 +78,8 @@ export default async function SettingsPage({
             companyLogoUrl={companyLogoUrl}
             showSkills={products.isPro}
             defaultTab={raw.tab}
+            gc={raw.gc ?? null}
+            verifyUrl={verifyUrl}
           />
         </MessagingSectionProvider>
       ) : (
@@ -99,6 +92,8 @@ export default async function SettingsPage({
           companyLogoUrl={companyLogoUrl}
           showSkills={products.isPro}
           defaultTab={raw.tab}
+          gc={raw.gc ?? null}
+          verifyUrl={verifyUrl}
         />
       )}
     </div>

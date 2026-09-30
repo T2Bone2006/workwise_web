@@ -10,8 +10,8 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 import {
-  ArrowLeft,
   Edit,
   Phone,
   Mail,
@@ -179,11 +179,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
     <div className="space-y-6 p-8">
       <div className="flex items-start justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-4">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to workers">
-            <Link href="/workers">
-              <ArrowLeft className="size-4" />
-            </Link>
-          </Button>
+          <HistoryBackButton iconOnly label="Back to workers" fallbackHref="/workers" />
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex items-center gap-3">
               <h1 className="text-3xl font-bold">{worker.full_name}</h1>

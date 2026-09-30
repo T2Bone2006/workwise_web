@@ -6,6 +6,7 @@ import {
   connectStatus,
   type ConnectMirror,
 } from '@/lib/payments/connect-status';
+import { getDirectDebitState } from '@/lib/direct-debit/state';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 
@@ -30,6 +31,8 @@ export type CustomerPayPage = {
   reference: string | null;
   owedAmount: number;
   creditAmount: number;
+  /** Phase 4 (D12): other amounts owed still to pay, oldest first. Listed above the visits. */
+  otherOwed: { date: string; description: string; outstanding: number }[];
   unpaidVisits: {
     date: string | null;
     title: string;
@@ -38,7 +41,64 @@ export type CustomerPayPage = {
   }[];
   bank: PublicBank;
   card: { enabled: boolean };
+  /** Phase 4 (D17): Pay by bank (GoCardless) — Direct Debit On and at least £1 owed. */
+  payByBank: { available: boolean };
+  /** Phase 4 (D4, D10): the Direct Debit offer. */
+  directDebit: {
+    available: boolean; // getDirectDebitState === 'on' (no Stripe needed — D10)
+    status: 'none' | 'pending' | 'active'; // this customer's live Direct Debit
+    bankEnding: string | null; // last 2 digits (T22)
+  };
 };
+
+const NO_DIRECT_DEBIT: CustomerPayPage['directDebit'] = {
+  available: false,
+  status: 'none',
+  bankEnding: null,
+};
+
+/** Never throws: any trouble reading means no Direct Debit offer, and the page works as before. */
+async function loadDirectDebitOffer(
+  admin: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  customerId: string,
+): Promise<CustomerPayPage['directDebit']> {
+  try {
+    if ((await getDirectDebitState(admin, tenantId)) !== 'on') return NO_DIRECT_DEBIT;
+    const { data, error } = await admin
+      .from('customer_direct_debits')
+      .select('status, account_number_ending')
+      .eq('tenant_id', tenantId)
+      .eq('customer_id', customerId)
+      .in('status', ['pending', 'active'])
+      .maybeSingle();
+    if (error) return NO_DIRECT_DEBIT;
+    const row = data as { status?: unknown; account_number_ending?: unknown } | null;
+    if (row?.status === 'pending' || row?.status === 'active') {
+      return { available: true, status: row.status, bankEnding: asString(row.account_number_ending) };
+    }
+    return { available: true, status: 'none', bankEnding: null };
+  } catch {
+    return NO_DIRECT_DEBIT;
+  }
+}
+
+/** Pay by bank needs the business's GoCardless On and at least £1 to pay (D17). */
+const MIN_PAY_BY_BANK = 1;
+
+/** Never throws: any trouble reading means no Pay by bank button. */
+async function payByBankAvailable(
+  admin: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  amountDue: number,
+): Promise<boolean> {
+  if (!(amountDue >= MIN_PAY_BY_BANK)) return false;
+  try {
+    return (await getDirectDebitState(admin, tenantId)) === 'on';
+  } catch {
+    return false;
+  }
+}
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,80}$/;
 const GREETING_TITLES = new Set(['MR', 'MRS', 'MS', 'MISS', 'DR']);
@@ -179,6 +239,7 @@ export const loadCustomerPayPage = cache(async function loadCustomerPayPage(
     { data: visits, error: visitsError },
     { data: tenant, error: tenantError },
     { data: paymentSettings, error: settingsError },
+    { data: charges, error: chargesError },
   ] = await Promise.all([
     admin
       .from('customer_balances')
@@ -228,14 +289,24 @@ export const loadCustomerPayPage = cache(async function loadCustomerPayPage(
       )
       .eq('tenant_id', tenantId)
       .maybeSingle(),
+    admin
+      .from('customer_charges')
+      .select('id, description, amount, charge_date, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('customer_id', customerId)
+      .eq('status', 'active')
+      .order('charge_date', { ascending: true })
+      .order('created_at', { ascending: true })
+      .limit(50),
   ]);
 
-  if (balanceError || visitsError || tenantError || settingsError) {
+  if (balanceError || visitsError || tenantError || settingsError || chargesError) {
     console.error('loadCustomerPayPage related reads failed', {
       balanceError,
       visitsError,
       tenantError,
       settingsError,
+      chargesError,
     });
     throw new Error('Could not load this payment link.');
   }
@@ -269,6 +340,45 @@ export const loadCustomerPayPage = cache(async function loadCustomerPayPage(
     }
   }
 
+  const chargeRows = (charges ?? []) as unknown as Record<string, unknown>[];
+  const chargeIds = chargeRows
+    .map((row) => asString(row.id))
+    .filter((id): id is string => id != null);
+
+  const allocatedByCharge = new Map<string, number>();
+  if (chargeIds.length > 0) {
+    const { data: allocs, error: allocError } = await admin
+      .from('payment_allocations')
+      .select('charge_id, amount')
+      .eq('tenant_id', tenantId)
+      .in('charge_id', chargeIds);
+    if (allocError) {
+      console.error('loadCustomerPayPage charge allocations failed', allocError);
+      throw new Error('Could not load this payment link.');
+    }
+    for (const raw of allocs ?? []) {
+      const row = raw as Record<string, unknown>;
+      const chargeId = asString(row.charge_id);
+      const amount = asFiniteNumber(row.amount) ?? 0;
+      if (!chargeId) continue;
+      allocatedByCharge.set(chargeId, (allocatedByCharge.get(chargeId) ?? 0) + amount);
+    }
+  }
+
+  const otherOwed: CustomerPayPage['otherOwed'] = [];
+  for (const raw of chargeRows) {
+    const chargeId = asString(raw.id);
+    const description = asString(raw.description);
+    const date = asString(raw.charge_date)?.slice(0, 10) ?? null;
+    const amount = asFiniteNumber(raw.amount);
+    if (!chargeId || !description || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || amount == null) {
+      continue;
+    }
+    const allocated = allocatedByCharge.get(chargeId) ?? 0;
+    const outstanding = Math.max(0, Math.round((amount - allocated) * 100) / 100);
+    if (outstanding > 0) otherOwed.push({ date, description, outstanding });
+  }
+
   const unpaidVisits = visitRows
     .map((raw) => {
       const due =
@@ -296,6 +406,8 @@ export const loadCustomerPayPage = cache(async function loadCustomerPayPage(
   const company = companyFromSettings(tenantRow?.settings);
   const settingsRow = paymentSettings as unknown as Record<string, unknown> | null;
   const hasAccount = Boolean(asString(tenantRow?.stripe_connect_account_id));
+  const directDebit = await loadDirectDebitOffer(admin, tenantId, customerId);
+  const owedAmount = asFiniteNumber(balanceRow?.owed_amount) ?? 0;
 
   return {
     business: {
@@ -308,20 +420,29 @@ export const loadCustomerPayPage = cache(async function loadCustomerPayPage(
     customerId,
     customerFirstName: firstName(customerName),
     reference: asString(customerRow?.bank_reference_hint),
-    owedAmount: asFiniteNumber(balanceRow?.owed_amount) ?? 0,
+    owedAmount,
     creditAmount: asFiniteNumber(balanceRow?.credit_amount) ?? 0,
+    otherOwed,
     unpaidVisits,
     bank: bankFromRow(settingsRow),
     card: {
       enabled: connectStatus(hasAccount, mirrorFromRow(settingsRow)) === 'active',
     },
+    // loadDirectDebitOffer has already checked the state, so no second read here.
+    payByBank: { available: directDebit.available && owedAmount >= MIN_PAY_BY_BANK },
+    directDebit,
   };
 });
 
 /** Invoice link token. null when the token is malformed or unknown. */
 export async function loadInvoiceByToken(
   token: string,
-): Promise<{ invoice: InvoiceRecord; business: PublicBusiness; card: { enabled: boolean } } | null> {
+): Promise<{
+  invoice: InvoiceRecord;
+  business: PublicBusiness;
+  card: { enabled: boolean };
+  payByBank: { available: boolean };
+} | null> {
   if (!TOKEN_RE.test(token)) return null;
 
   const admin = createAdminClient();
@@ -387,6 +508,10 @@ export async function loadInvoiceByToken(
     },
     card: {
       enabled: connectStatus(hasAccount, mirrorFromRow(settingsRow)) === 'active',
+    },
+    payByBank: {
+      available:
+        invoice.status === 'issued' && (await payByBankAvailable(admin, tenantId, invoice.balanceDue)),
     },
   };
 }

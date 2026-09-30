@@ -1,10 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { cn } from '@/lib/utils';
 import type { JobStatus, JobPriority } from '@/lib/data/jobs';
 import type { JobLength } from '@/lib/jobs/normalize-job-length';
@@ -59,7 +56,7 @@ export function JobDetailHeader({
   createdAt,
   hideDeleteAction = false,
 }: JobDetailHeaderProps) {
-  const router = useRouter();
+  const jobsListHref = getRememberedJobsListHref();
 
   const createdRelative = (() => {
     try {
@@ -71,24 +68,11 @@ export function JobDetailHeader({
 
   return (
     <div className="flex flex-col gap-4">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-fit -ml-2 text-muted-foreground hover:text-foreground"
-        asChild
-      >
-        <Link
-          href="/jobs"
-          className="gap-2"
-          onClick={(e) => {
-            e.preventDefault();
-            router.push(getRememberedJobsListHref());
-          }}
-        >
-          <ArrowLeft className="size-4" />
-          Back to Jobs
-        </Link>
-      </Button>
+      <HistoryBackButton
+        label="Back to Jobs"
+        fallbackHref={jobsListHref}
+        className="text-muted-foreground hover:text-foreground"
+      />
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
         <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">

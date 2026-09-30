@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, Building2, User } from 'lucide-react';
+import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { toast } from 'sonner';
 import {
   CONTACT_CHOICE_LABELS,
@@ -16,7 +16,10 @@ import { customerSchema, type CustomerFormInput } from '@/lib/validations/custom
 import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
 import { setCustomerHouse } from '@/lib/actions/rounds/agreements';
 import { splitHouse } from '@/lib/rounds/house';
-import { AddressAutocompleteInput } from '@/components/ui/address-autocomplete-input';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -79,7 +82,8 @@ export function CustomerForm({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isRounds = variant === 'rounds';
-  const cancelHref = '/customers';
+  const cancelHref =
+    mode === 'edit' && customer?.id ? `/customers/${customer.id}` : '/customers';
 
   // The customer's own address wins; a service address is the fallback for
   // customers saved before the address moved onto the customer.
@@ -101,6 +105,7 @@ export function CustomerForm({
       preferred_channel: isRounds
         ? contactChoiceFromColumn(customer?.preferred_channel)
         : undefined,
+      owesFromBefore: '',
     },
   });
 
@@ -137,6 +142,13 @@ export function CustomerForm({
         const contactBy =
           values.preferred_channel === 'whatsapp' ? 'sms' : (values.preferred_channel ?? 'default');
         formData.set('preferred_channel', contactBy);
+        if (mode === 'create') {
+          // The resolver hands back the parsed number (blank → undefined).
+          const owes = values.owesFromBefore;
+          if (typeof owes === 'number' && owes > 0) {
+            formData.set('owesFromBefore', String(owes));
+          }
+        }
       }
 
       const result =
@@ -151,6 +163,9 @@ export function CustomerForm({
         return;
       }
       toast.success(mode === 'create' ? 'Customer created' : 'Customer updated');
+      if ('warning' in result && typeof result.warning === 'string') {
+        toast.warning(result.warning);
+      }
       if (isRounds) {
         const address = (values.address ?? '').trim();
         const postcode = (values.postcode ?? '').trim();
@@ -169,12 +184,12 @@ export function CustomerForm({
           });
           router.push(`/customers/${result.id}/agreements/new?${params.toString()}`);
         } else if (customer?.id) {
-          router.push(`/customers/${customer.id}`);
+          leaveViaHistory(router, `/customers/${customer.id}`);
         } else {
-          router.push('/customers');
+          leaveViaHistory(router, '/customers');
         }
       } else {
-        router.push('/customers');
+        leaveViaHistory(router, '/customers');
       }
       router.refresh();
     } finally {
@@ -190,7 +205,7 @@ export function CustomerForm({
     setDeleteDialogOpen(false);
     if (result.success) {
       toast.success('Customer deleted');
-      router.push('/customers');
+      leaveViaHistory(router, '/customers');
       router.refresh();
     } else {
       toast.error(result.error ?? 'Failed to delete customer');
@@ -347,7 +362,7 @@ export function CustomerForm({
                     name="address"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Address</FormLabel>
+                        <FormLabel>{unhookChromeAddressFill('Address')}</FormLabel>
                         <FormControl>
                           <AddressAutocompleteInput
                             value={field.value ?? ''}
@@ -371,11 +386,13 @@ export function CustomerForm({
                     name="postcode"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Postcode</FormLabel>
+                        <FormLabel>{unhookChromeAddressFill('Postcode')}</FormLabel>
                         <FormControl>
                           <Input
                             placeholder="SW1A 1AA"
                             {...field}
+                            name="outward"
+                            autoComplete="off"
                             value={field.value ?? ''}
                             disabled={isSubmitting}
                             className="uppercase"
@@ -415,6 +432,39 @@ export function CustomerForm({
                       </FormItem>
                     )}
                   />
+
+                  {mode === 'create' ? (
+                    <FormField
+                      control={form.control}
+                      name="owesFromBefore"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Owes from before (£)</FormLabel>
+                          <FormControl>
+                            <Input
+                              inputMode="decimal"
+                              placeholder="0.00"
+                              name={field.name}
+                              ref={field.ref}
+                              onBlur={field.onBlur}
+                              onChange={field.onChange}
+                              value={
+                                typeof field.value === 'string' || typeof field.value === 'number'
+                                  ? field.value
+                                  : ''
+                              }
+                              disabled={isSubmitting}
+                              className="focus-visible:ring-brand-primary/30"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Money they owed you before you started using WorkWise. It&apos;s paid off first.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
 
                   <FormField
                     control={form.control}
@@ -497,11 +547,15 @@ export function CustomerForm({
               />
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
-                <Button type="button" variant="ghost" asChild disabled={isSubmitting}>
-                  <Link href={cancelHref} className="gap-2">
-                    <ArrowLeft className="size-4" />
-                    Cancel
-                  </Link>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="gap-2"
+                  disabled={isSubmitting}
+                  onClick={() => leaveViaHistory(router, cancelHref)}
+                >
+                  <ArrowLeft className="size-4" />
+                  Cancel
                 </Button>
                 <Button
                   type="submit"
