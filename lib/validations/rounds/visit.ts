@@ -96,3 +96,29 @@ export const undoVisitChangeSchema = z.object({
 
 export type UndoVisitChangeInput = z.input<typeof undoVisitChangeSchema>;
 export type UndoVisitChangeValues = z.output<typeof undoVisitChangeSchema>;
+
+const boardYmd = z.string().refine(isValidYmd, { message: 'Invalid date' });
+
+export const moveStopSchema = z.object({
+  jobIds: z.array(z.string().uuid('Invalid job')).min(1).max(20),
+  toDate: boardYmd,
+  orderedJobIds: z.array(z.string().uuid('Invalid job')).max(300).optional(),
+});
+
+export type MoveStopInput = z.input<typeof moveStopSchema>;
+export type MoveStopValues = z.output<typeof moveStopSchema>;
+
+export const swapDaysSchema = z.object({
+  dayA: boardYmd,
+  dayB: boardYmd,
+  clientKey: z.string().uuid('Invalid request'),
+  notifyCustomers: z.boolean().optional(),
+});
+
+export type SwapDaysInput = z.input<typeof swapDaysSchema>;
+export type SwapDaysValues = z.output<typeof swapDaysSchema>;
+
+export const tellChangeSchema = z.object({ changeId: z.string().uuid('Invalid change') });
+
+export type TellChangeInput = z.input<typeof tellChangeSchema>;
+export type TellChangeValues = z.output<typeof tellChangeSchema>;

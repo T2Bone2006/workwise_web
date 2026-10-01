@@ -2,7 +2,7 @@
 
 import { useState, type JSX, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, KeyRound, Mail, MapPin, Phone, StickyNote, UserRound, Wallet } from 'lucide-react';
+import { Bell, KeyRound, Mail, MapPin, Phone, StickyNote, UserRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
   InlineAddress,
@@ -27,11 +27,6 @@ import type { RoundsCustomerDetail } from '@/lib/data/rounds/customers';
 import { formatUkPhoneDisplay, normalizeUkPhoneE164 } from '@/lib/utils/phone';
 
 const CONTACT_BY_OPTIONS: ContactChoice[] = ['default', 'sms', 'email', 'none'];
-
-const PAYMENT_OPTIONS = [
-  { value: 'on_the_day' as const, label: 'Pay on the day' },
-  { value: 'invoice' as const, label: 'Send an invoice after each visit' },
-];
 
 function FieldIcon(props: { icon: LucideIcon; children: ReactNode; className?: string }): JSX.Element {
   const Icon = props.icon;
@@ -185,18 +180,7 @@ export function CustomerDetailsCard(props: {
             </FieldIcon>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-2">
-            <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/[0.06] p-3">
-              <CustomerSectionTitle as="h3" icon={Wallet} title="How they pay" tone="emerald" />
-              <div className="mt-3">
-                <InlineSelect
-                  label="Payment terms"
-                  value={customer.payment_terms}
-                  options={PAYMENT_OPTIONS}
-                  onSave={(value) => save({ field: 'payment_terms', value })}
-                />
-              </div>
-            </div>
+          <div className="mt-4">
             <div className="rounded-xl border border-border/70 bg-muted/40 p-3">
               <CustomerSectionTitle
                 as="h3"

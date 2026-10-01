@@ -18,8 +18,9 @@ import {
   daySkippedSms,
 } from '@/lib/messaging/templates';
 import { formatVisitDay } from '@/lib/payments/messages';
-import { isValidYmd } from '@/lib/rounds/dates';
+import { isValidYmd, type Ymd } from '@/lib/rounds/dates';
 import { groupHouseStops, type HouseFields } from '@/lib/rounds/house-stops';
+import { getVisitChange } from '@/lib/rounds/visit-changes';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export type NoticeCounts = {
@@ -350,6 +351,22 @@ async function deliverStop(
   }
 }
 
+/** A swap moves jobs both ways, so one house with a job on each day is two stops (each has its own old day). */
+function splitByOldDay(groups: NoticeJob[][], dates: Map<string, string | null>): NoticeJob[][] {
+  const split: NoticeJob[][] = [];
+  for (const group of groups) {
+    const byDay = new Map<string, NoticeJob[]>();
+    for (const job of group) {
+      const day = dates.get(job.id) ?? '';
+      const list = byDay.get(day);
+      if (list) list.push(job);
+      else byDay.set(day, [job]);
+    }
+    split.push(...byDay.values());
+  }
+  return split;
+}
+
 async function bodyForStop(
   admin: SupabaseClient,
   tenantId: string,
@@ -363,6 +380,12 @@ async function bodyForStop(
   if (!fromDay || !fromYmd) return null;
   if (isMoveKind(change.kind)) {
     const toDay = dayLabel(change.toDate);
+    if (!toDay) return null;
+    return dayMovedSms({ brand, fromDay, toDay });
+  }
+  if (change.kind === 'swap_days') {
+    // Each stop goes to the OTHER day of the swap.
+    const toDay = dayLabel(fromYmd === change.fromDate ? change.toDate : change.fromDate);
     if (!toDay) return null;
     return dayMovedSms({ brand, fromDay, toDay });
   }
@@ -401,7 +424,10 @@ export async function notifyVisitChange(p: {
 
     const jobs = await loadJobs(admin, p.tenantId, change.jobIds);
     if (!jobs) return counts;
-    const groups = groupHouseStops(jobs);
+    const groups =
+      change.kind === 'swap_days'
+        ? splitByOldDay(groupHouseStops(jobs), change.dates)
+        : groupHouseStops(jobs);
     const ctx = await getTenantMessagingContext(admin, p.tenantId);
     const brand = ctx
       ? { businessName: ctx.businessName, contactPhone: ctx.contactPhone }
@@ -441,6 +467,61 @@ export async function notifyVisitChange(p: {
     logFailure('notifyVisitChange', err);
   }
   return counts;
+}
+
+/**
+ * "Tell them" for a move that has already happened. Sets notify_customers
+ * (with the trader's own client, so RLS keeps it to their business) only while
+ * the change is not undone and not yet told, then notifyVisitChange claims
+ * notified_at and sends. Pressing twice sends once.
+ */
+export async function requestChangeNotice(
+  supabase: SupabaseClient,
+  p: { tenantId: string; changeId: string; today: Ymd },
+): Promise<
+  | { success: true; alreadyTold: boolean; notified: NoticeCounts }
+  | { success: false; error: string }
+> {
+  const change = await getVisitChange(supabase, p.tenantId, p.changeId);
+  if (!change) return { success: false, error: 'Change not found' };
+  if (change.undoneAt) return { success: false, error: 'This change was undone.' };
+  if (change.notifiedAt) {
+    return { success: true, alreadyTold: true, notified: emptyCounts() };
+  }
+  if (change.kind !== 'reschedule' && change.kind !== 'move_remaining' && change.kind !== 'swap_days') {
+    return { success: false, error: 'Only moves can be told.' };
+  }
+  const tooLate =
+    change.kind === 'swap_days'
+      ? (change.fromDate ?? '') < p.today && (change.toDate ?? '') < p.today
+      : (change.toDate ?? '') < p.today;
+  if (tooLate) {
+    return { success: false, error: 'Too late to tell them — that day has passed.' };
+  }
+
+  const { data, error } = await supabase
+    .from('visit_changes')
+    .update({ notify_customers: true })
+    .eq('id', p.changeId)
+    .eq('tenant_id', p.tenantId)
+    .is('undone_at', null)
+    .is('notified_at', null)
+    .select('id');
+  if (error) {
+    console.error('[requestChangeNotice] claim', error.message);
+    return { success: false, error: 'Could not tell them. Try again.' };
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    const again = await getVisitChange(supabase, p.tenantId, p.changeId);
+    if (again?.undoneAt) return { success: false, error: 'This change was undone.' };
+    if (again?.notifiedAt) {
+      return { success: true, alreadyTold: true, notified: emptyCounts() };
+    }
+    return { success: false, error: 'Could not tell them. Try again.' };
+  }
+
+  const notified = await notifyVisitChange({ tenantId: p.tenantId, changeId: p.changeId });
+  return { success: true, alreadyTold: false, notified };
 }
 
 type ToldMessage = {

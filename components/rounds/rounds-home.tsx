@@ -138,7 +138,7 @@ export function RoundsHome({
 
   const onSummarySelect = (key: string) => {
     if (key === 'week') {
-      router.push('/calendar');
+      router.push('/calendar?view=week');
       return;
     }
     if (key === 'customers') {

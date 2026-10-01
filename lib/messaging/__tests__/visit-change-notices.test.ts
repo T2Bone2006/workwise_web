@@ -27,6 +27,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 import {
   notifyVisitChange,
   notifyVisitChangeUndone,
+  requestChangeNotice,
 } from '@/lib/messaging/visit-change-notices';
 
 type Row = Record<string, unknown>;
@@ -43,6 +44,8 @@ type FakeDb = {
   messages: Row[];
   customers: Row[];
   refunds: Record<string, unknown>[];
+  /** The next update on visit_changes fails (then works again). */
+  failNextChangeUpdate?: boolean;
 };
 
 const TENANT = 'tenant-1';
@@ -93,6 +96,10 @@ function buildAdmin(): SupabaseClient {
       let limitN: number | null = null;
 
       const run = (mode: 'many' | 'one') => {
+        if (table === 'visit_changes' && op === 'update' && db.failNextChangeUpdate) {
+          db.failNextChangeUpdate = false;
+          return { data: null, error: { message: 'could not save' } };
+        }
         const matched = tableRows(table).filter((row) => matches(row, filters));
         if (op === 'update' && payload) {
           for (const row of matched) Object.assign(row, payload);
@@ -198,6 +205,7 @@ function changeRow(overrides: Row = {}): Row {
     before: [{ job_id: 'job-1', scheduled_date: '2026-10-01' }],
     notify_customers: true,
     notified_at: null,
+    undone_at: null,
     undo_notified_at: null,
     ...overrides,
   };
@@ -263,6 +271,80 @@ describe('visit change notices', () => {
     });
     expect(second).toEqual(ZEROS);
     expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells each swapped customer about their own old and new day, and only once', async () => {
+    db.jobs = [
+      job({ id: 'job-t', customer_id: 'cust-t', scheduled_date: '2026-10-06' }),
+      job({
+        id: 'job-u',
+        customer_id: 'cust-u',
+        address: '2 Bridge Road',
+        postcode: 'SW1A 2BB',
+        scheduled_date: '2026-10-01',
+      }),
+    ];
+    db.changes = [
+      changeRow({
+        kind: 'swap_days',
+        from_date: '2026-10-01',
+        to_date: '2026-10-06',
+        job_ids: ['job-u', 'job-t'],
+        before: [
+          { job_id: 'job-u', scheduled_date: '2026-10-01' },
+          { job_id: 'job-t', scheduled_date: '2026-10-06' },
+        ],
+      }),
+    ];
+
+    const counts = await notifyVisitChange({ tenantId: TENANT, changeId: CHANGE, now: NOW });
+
+    expect(counts).toEqual({ ...ZEROS, stops: 2, texted: 2 });
+    const oct1 = formatVisitDay('2026-10-01');
+    const oct6 = formatVisitDay('2026-10-06');
+    const byCustomer = new Map(
+      sendCustomerMessage.mock.calls.map((call) => {
+        const input = call[0] as {
+          customerId: string;
+          text: (ctx: { firstText: boolean }) => string;
+        };
+        return [input.customerId, input.text({ firstText: true })] as const;
+      }),
+    );
+    expect(byCustomer.get('cust-u')).toContain(`can't make it on ${oct1}`);
+    expect(byCustomer.get('cust-u')).toContain(`We'll come on ${oct6} instead`);
+    expect(byCustomer.get('cust-t')).toContain(`can't make it on ${oct6}`);
+    expect(byCustomer.get('cust-t')).toContain(`We'll come on ${oct1} instead`);
+
+    const again = await notifyVisitChange({ tenantId: TENANT, changeId: CHANGE, now: NOW });
+    expect(again).toEqual(ZEROS);
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives a customer with a job on each swapped day one text per day', async () => {
+    db.jobs = [
+      job({ id: 'job-m1', scheduled_date: '2026-10-01' }),
+      job({ id: 'job-m2', scheduled_date: '2026-10-06' }),
+    ];
+    db.changes = [
+      changeRow({
+        kind: 'swap_days',
+        from_date: '2026-10-01',
+        to_date: '2026-10-06',
+        job_ids: ['job-m1', 'job-m2'],
+        before: [
+          { job_id: 'job-m1', scheduled_date: '2026-10-01' },
+          { job_id: 'job-m2', scheduled_date: '2026-10-06' },
+        ],
+      }),
+    ];
+
+    const counts = await notifyVisitChange({ tenantId: TENANT, changeId: CHANGE, now: NOW });
+
+    expect(counts).toEqual({ ...ZEROS, stops: 2, texted: 2 });
+    const bodies = texts();
+    expect(bodies.some((t) => t.includes(`can't make it on ${formatVisitDay('2026-10-01')}`))).toBe(true);
+    expect(bodies.some((t) => t.includes(`can't make it on ${formatVisitDay('2026-10-06')}`))).toBe(true);
   });
 
   it('does nothing when the change did not ask to tell customers', async () => {
@@ -574,5 +656,101 @@ describe('visit change notices', () => {
     expect(skipRemainingSchema.parse({ date: '2026-10-01' }).notifyCustomers ?? false).toBe(
       false,
     );
+  });
+});
+
+describe('requestChangeNotice (Tell them after a move)', () => {
+  const TODAY = '2026-10-01';
+  const ask = (over: Partial<{ changeId: string; today: string }> = {}) =>
+    requestChangeNotice(fakeAdmin, { tenantId: TENANT, changeId: CHANGE, today: TODAY, ...over });
+
+  it('turns notify on, sends one text for a move that was made without asking, and sets notified_at once', async () => {
+    db.changes = [changeRow({ notify_customers: false })];
+
+    const first = await ask();
+
+    expect(first).toMatchObject({ success: true, alreadyTold: false });
+    expect(first.success && first.notified).toEqual({ ...ZEROS, stops: 1, texted: 1 });
+    expect(db.changes[0]?.notify_customers).toBe(true);
+    expect(db.changes[0]?.notified_at).not.toBeNull();
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a second press says already told and sends nothing', async () => {
+    db.changes = [changeRow({ notify_customers: false })];
+    await ask();
+
+    const second = await ask();
+
+    expect(second).toEqual({ success: true, alreadyTold: true, notified: ZEROS });
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('two presses at the same moment still send once', async () => {
+    db.changes = [changeRow({ notify_customers: false })];
+
+    const [a, b] = await Promise.all([ask(), ask()]);
+
+    expect(a.success && b.success).toBe(true);
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses after the change was undone, and sends nothing', async () => {
+    db.changes = [changeRow({ notify_customers: false, undone_at: NOW.toISOString() })];
+
+    expect(await ask()).toEqual({ success: false, error: 'This change was undone.' });
+    expect(sendCustomerMessage).not.toHaveBeenCalled();
+    expect(db.changes[0]?.notify_customers).toBe(false);
+  });
+
+  it('refuses a skip', async () => {
+    db.changes = [changeRow({ kind: 'skip', notify_customers: false, to_date: null })];
+
+    expect(await ask()).toEqual({ success: false, error: 'Only moves can be told.' });
+    expect(sendCustomerMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a move to a day that has passed, but allows a swap where one day is still ahead', async () => {
+    db.changes = [changeRow({ notify_customers: false, from_date: '2026-09-20', to_date: '2026-09-25' })];
+    expect(await ask()).toEqual({
+      success: false,
+      error: 'Too late to tell them — that day has passed.',
+    });
+    expect(sendCustomerMessage).not.toHaveBeenCalled();
+
+    db.changes = [
+      changeRow({
+        kind: 'swap_days',
+        notify_customers: false,
+        from_date: '2026-09-25',
+        to_date: '2026-10-06',
+        job_ids: ['job-1'],
+        before: [{ job_id: 'job-1', scheduled_date: '2026-09-25' }],
+      }),
+    ];
+    expect(await ask()).toMatchObject({ success: true, alreadyTold: false });
+  });
+
+  it('returns an error and sends nothing when the update fails, and pressing again works', async () => {
+    db.changes = [changeRow({ notify_customers: false })];
+    db.failNextChangeUpdate = true;
+
+    expect(await ask()).toEqual({ success: false, error: 'Could not tell them. Try again.' });
+    expect(db.changes[0]?.notify_customers).toBe(false);
+    expect(sendCustomerMessage).not.toHaveBeenCalled();
+
+    expect(await ask()).toMatchObject({ success: true, alreadyTold: false });
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('still sends when notify was already on but nothing had gone out yet', async () => {
+    db.changes = [changeRow({ notify_customers: true, notified_at: null })];
+
+    expect(await ask()).toMatchObject({ success: true, alreadyTold: false });
+    expect(sendCustomerMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('says not found for an unknown change', async () => {
+    expect(await ask({ changeId: 'nope' })).toEqual({ success: false, error: 'Change not found' });
   });
 });

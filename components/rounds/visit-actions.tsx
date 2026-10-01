@@ -15,6 +15,7 @@ import {
 import { dayMovedSms, daySkippedSms, type SmsBrand } from '@/lib/messaging/templates';
 import { formatVisitDay } from '@/lib/payments/messages';
 import { isValidYmd } from '@/lib/rounds/dates';
+import { CurrentDayKey, currentDayProps } from '@/components/rounds/current-day-key';
 import { ChangePreview } from '@/components/messaging/change-preview';
 import {
   SKIP_REASON_LABELS,
@@ -466,11 +467,13 @@ export function RescheduleVisitDialog({
                 <Calendar
                   mode="single"
                   selected={date}
+                  {...currentDayProps(initialDate)}
                   onSelect={(d) => {
                     setDate(d);
                     setCalOpen(false);
                   }}
                 />
+                <CurrentDayKey current={initialDate} />
               </PopoverContent>
             </Popover>
           </div>
@@ -600,11 +603,13 @@ export function MoveRemainingDialog({
               <Calendar
                 mode="single"
                 selected={toDate}
+                {...currentDayProps(fromDate)}
                 onSelect={(d) => {
                   setToDate(d);
                   setCalOpen(false);
                 }}
               />
+              <CurrentDayKey current={fromDate} label="Moving from" />
             </PopoverContent>
           </Popover>
         </div>

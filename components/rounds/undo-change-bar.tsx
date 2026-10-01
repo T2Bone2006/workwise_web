@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { undoVisitChange } from '@/lib/actions/rounds/visits';
-import { afterAllSms, type SmsBrand } from '@/lib/messaging/templates';
+import { tellCustomersAboutChange, undoVisitChange } from '@/lib/actions/rounds/visits';
+import { afterAllSms, dayMovedSms, type SmsBrand } from '@/lib/messaging/templates';
 import { formatVisitDay } from '@/lib/payments/messages';
 import { isValidYmd } from '@/lib/rounds/dates';
 import type { VisitChangeSummary } from '@/lib/rounds/visit-changes';
@@ -21,6 +21,9 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+
+/** Only a change you have just made is worth a bar. Older ones stay undoable elsewhere but don't sit here. */
+const RECENT_MS = 60 * 60 * 1000;
 
 function dayLabel(ymd: string | null): string | null {
   if (!ymd || !isValidYmd(ymd)) return null;
@@ -50,6 +53,11 @@ function summaryLine(change: VisitChangeSummary): string {
   if (change.kind === 'skip' || change.kind === 'skip_remaining') {
     return `Skipped ${n} ${noun}${tail}`;
   }
+  if (change.kind === 'swap_days') {
+    const a = dayLabel(change.fromDate) ?? 'a day';
+    const b = dayLabel(change.toDate) ?? 'a day';
+    return `Swapped ${a} and ${b} · ${n} ${noun}${tail}`;
+  }
   const to = dayLabel(change.toDate);
   const where = to ? ` to ${to}` : '';
   return `Moved ${n} ${noun}${where}${tail}`;
@@ -65,8 +73,33 @@ export function UndoChangeBar(props: {
   const [open, setOpen] = useState(false);
   const [tell, setTell] = useState(true);
   const [pending, setPending] = useState(false);
+  const [tellOpen, setTellOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   if (!change || dismissedId === change.id) return null;
+  if (now - new Date(change.createdAt).getTime() > RECENT_MS) return null;
+
+  const canTell =
+    change.notifiedAt == null &&
+    (change.kind === 'reschedule' || change.kind === 'move_remaining' || change.kind === 'swap_days');
+
+  const sendTell = async () => {
+    setPending(true);
+    const result = await tellCustomersAboutChange({ changeId: change.id });
+    setPending(false);
+    setTellOpen(false);
+    if (!result.success) {
+      toast.error(result.error);
+      return;
+    }
+    const told = result.notified.texted + result.notified.emailed + result.notified.held;
+    toast.success(result.alreadyTold ? 'Already told' : `Told ${told}`);
+    router.refresh();
+  };
 
   const restoredDay = dayLabel(change.fromDate) ?? dayLabel(change.toDate) ?? 'that day';
 
@@ -99,10 +132,42 @@ export function UndoChangeBar(props: {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-sm">
         <p className="text-foreground">{summaryLine(change)}</p>
-        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-          Undo
-        </Button>
+        <div className="flex items-center gap-2">
+          {canTell ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => setTellOpen(true)}>
+              Tell them
+            </Button>
+          ) : null}
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Undo
+          </Button>
+        </div>
       </div>
+      <Dialog open={tellOpen} onOpenChange={(next) => !pending && setTellOpen(next)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tell them?</DialogTitle>
+          </DialogHeader>
+          {change.toDate ? (
+            <ChangePreview
+              text={dayMovedSms({
+                brand,
+                fromDay: dayLabel(change.fromDate) ?? dayLabel(change.toDate) ?? 'that day',
+                toDay: dayLabel(change.toDate) ?? 'that day',
+              })}
+            />
+          ) : null}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setTellOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={() => void sendTell()} disabled={pending}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+              Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={open}
         onOpenChange={(next) => {

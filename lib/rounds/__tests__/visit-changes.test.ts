@@ -6,11 +6,14 @@ import { SKIP_REASON_LABELS, USER_SKIP_REASONS } from '@/lib/rounds/skip-reasons
 import {
   getVisitChange,
   latestUndoableChange,
+  listUntoldMoves,
   moveRemainingWithLog,
+  moveStopToDayWithLog,
   rescheduleStopWithLog,
   skipRemainingCore,
   skipStopWithLog,
   skipVisitWithLog,
+  swapDaysWithLog,
   undoVisitChangeCore,
 } from '@/lib/rounds/visit-changes';
 
@@ -316,6 +319,19 @@ function createFakeSupabase(db: FakeDb): SupabaseClient {
         if (op === 'insert') {
           if (db.failChangeInsert) return { data: null, error: { message: 'insert failed' } };
           const source = (payload ?? {}) as Record<string, unknown>;
+          if (
+            typeof source.client_key === 'string' &&
+            db.changes.some(
+              (existing) =>
+                existing.tenant_id === source.tenant_id &&
+                existing.client_key === source.client_key,
+            )
+          ) {
+            return {
+              data: null,
+              error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+            };
+          }
           const row: Record<string, unknown> = { ...source };
           if (typeof row.id !== 'string') row.id = `change-${db.nextChangeId++}`;
           if (typeof row.created_at !== 'string') row.created_at = new Date().toISOString();
@@ -898,5 +914,436 @@ describe('visit changes', () => {
         customer_reply_at: null,
       });
     }
+  });
+});
+
+describe('move a stop and swap days', () => {
+  const TUE = '2026-09-15'; // = TODAY in these tests
+  const THU = '2026-09-17';
+  const YESTERDAY = '2026-09-14';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-15T12:00:00.000Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function idsOn(db: FakeDb, day: string): string[] {
+    return db.jobs
+      .filter((row) => row.scheduled_date === day)
+      .sort(
+        (a, b) =>
+          Number(a.route_position ?? Number.MAX_SAFE_INTEGER) -
+          Number(b.route_position ?? Number.MAX_SAFE_INTEGER),
+      )
+      .map((row) => String(row.id));
+  }
+
+  function jobOf(db: FakeDb, id: string): Record<string, unknown> {
+    const found = db.jobs.find((row) => row.id === id);
+    if (!found) throw new Error(`no job ${id}`);
+    return found;
+  }
+
+  function twoDayDb(): FakeDb {
+    return emptyDb({
+      jobs: [
+        job({ id: 'd1', scheduled_date: TUE, status: 'completed', route_position: 1 }),
+        job({ id: 't1', scheduled_date: TUE, route_position: 2 }),
+        job({ id: 't2', scheduled_date: TUE, route_position: 3 }),
+        job({ id: 't3', scheduled_date: TUE, route_position: 4 }),
+        job({ id: 'd2', scheduled_date: TUE, status: 'completed', route_position: 5 }),
+        job({ id: 't4', scheduled_date: TUE, route_position: 6 }),
+        job({ id: 't5', scheduled_date: TUE, route_position: 7 }),
+        job({ id: 't6', scheduled_date: TUE, route_position: 8 }),
+        job({ id: 'h1', scheduled_date: THU, route_position: 1 }),
+        job({ id: 'k1', scheduled_date: THU, status: 'cancelled', route_position: 2 }),
+        job({ id: 'h2', scheduled_date: THU, route_position: 3 }),
+        job({ id: 'h3', scheduled_date: THU, route_position: 4 }),
+      ],
+    });
+  }
+
+  const swap = (supabase: SupabaseClient, over: Record<string, unknown> = {}) =>
+    swapDaysWithLog(supabase, {
+      tenantId: TENANT,
+      dayA: TUE,
+      dayB: THU,
+      clientKey: 'key-1',
+      notifyCustomers: false,
+      today: TODAY,
+      actor: ACTOR,
+      ...over,
+    });
+
+  it('moves a two-job stop to a chosen spot as one change, and Undo puts both back', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'w', scheduled_date: TUE, route_position: 1 }),
+        job({ id: 'g', scheduled_date: TUE, route_position: 2 }),
+        job({ id: 'x', scheduled_date: THU, route_position: 1 }),
+        job({ id: 'y', scheduled_date: THU, route_position: 2 }),
+      ],
+    });
+    const supabase = createFakeSupabase(db);
+
+    const result = await moveStopToDayWithLog(supabase, {
+      tenantId: TENANT,
+      jobIds: ['w', 'g'],
+      toDate: THU,
+      orderedJobIds: ['x', 'w', 'g', 'y'],
+      today: TODAY,
+      actor: ACTOR,
+    });
+
+    expect(result).toMatchObject({ success: true, moved: 2, orderSaved: true });
+    expect(idsOn(db, THU)).toEqual(['x', 'w', 'g', 'y']);
+    expect(db.changes).toHaveLength(1);
+    expect(db.changes[0]).toMatchObject({ kind: 'reschedule', from_date: TUE, to_date: THU });
+    expect(db.changes[0]?.job_ids).toEqual(['w', 'g']);
+    expect(db.changes[0]?.notify_customers).toBe(false);
+
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: changeIdOf(result as { success: boolean; changeId: string | null }),
+      actor: ACTOR,
+    });
+    expect(undone).toMatchObject({ success: true, restored: 2, leftAlone: 0 });
+    expect(jobOf(db, 'w').scheduled_date).toBe(TUE);
+    expect(jobOf(db, 'g').scheduled_date).toBe(TUE);
+  });
+
+  it('reorders inside one day without logging a change', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: THU, route_position: 1 }),
+        job({ id: 'b', scheduled_date: THU, route_position: 2 }),
+        job({ id: 'c', scheduled_date: THU, route_position: 3 }),
+      ],
+    });
+    const supabase = createFakeSupabase(db);
+
+    const result = await moveStopToDayWithLog(supabase, {
+      tenantId: TENANT,
+      jobIds: ['c'],
+      toDate: THU,
+      orderedJobIds: ['c', 'a', 'b'],
+      today: TODAY,
+      actor: ACTOR,
+    });
+
+    expect(result).toEqual({ success: true, moved: 0, changeId: null, orderSaved: true });
+    expect(idsOn(db, THU)).toEqual(['c', 'a', 'b']);
+    expect(db.changes).toHaveLength(0);
+  });
+
+  it('puts a stop with no order at the end of the new day', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: TUE, route_position: 1 }),
+        job({ id: 'b', scheduled_date: THU, route_position: 1 }),
+      ],
+    });
+    const result = await moveStopToDayWithLog(createFakeSupabase(db), {
+      tenantId: TENANT,
+      jobIds: ['a'],
+      toDate: THU,
+      today: TODAY,
+      actor: ACTOR,
+    });
+    expect(result).toMatchObject({ success: true, moved: 1, orderSaved: true });
+    expect(idsOn(db, THU)).toEqual(['b', 'a']);
+  });
+
+  it('refuses a move to a day before today and writes nothing', async () => {
+    const db = emptyDb({ jobs: [job({ id: 'a', scheduled_date: TUE })] });
+    const result = await moveStopToDayWithLog(createFakeSupabase(db), {
+      tenantId: TENANT,
+      jobIds: ['a'],
+      toDate: YESTERDAY,
+      today: TODAY,
+      actor: ACTOR,
+    });
+    expect(result).toEqual({ success: false, error: 'Pick today or a later day.' });
+    expect(jobOf(db, 'a').scheduled_date).toBe(TUE);
+    expect(db.changes).toHaveLength(0);
+  });
+
+  it("refuses a stop when one of its jobs was just marked Done", async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: TUE }),
+        job({ id: 'b', scheduled_date: TUE, status: 'completed' }),
+      ],
+    });
+    const result = await moveStopToDayWithLog(createFakeSupabase(db), {
+      tenantId: TENANT,
+      jobIds: ['a', 'b'],
+      toDate: THU,
+      today: TODAY,
+      actor: ACTOR,
+    });
+    expect(result).toEqual({ success: false, error: "This visit can't be moved." });
+    expect(jobOf(db, 'a').scheduled_date).toBe(TUE);
+    expect(db.changes).toHaveLength(0);
+  });
+
+  it('refuses an order that is missing a moved job, before anything moves', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: TUE }),
+        job({ id: 'b', scheduled_date: TUE }),
+        job({ id: 'c', scheduled_date: THU }),
+      ],
+    });
+    const result = await moveStopToDayWithLog(createFakeSupabase(db), {
+      tenantId: TENANT,
+      jobIds: ['a', 'b'],
+      toDate: THU,
+      orderedJobIds: ['c', 'a'],
+      today: TODAY,
+      actor: ACTOR,
+    });
+    expect(result.success).toBe(false);
+    expect(jobOf(db, 'a').scheduled_date).toBe(TUE);
+    expect(jobOf(db, 'b').scheduled_date).toBe(TUE);
+    expect(db.changes).toHaveLength(0);
+  });
+
+  it('swaps two days: done and skipped jobs stay, one swap_days change holds all 9 jobs', async () => {
+    const db = twoDayDb();
+    const result = await swap(createFakeSupabase(db));
+
+    expect(result).toMatchObject({
+      success: true,
+      alreadyDone: false,
+      movedToB: 6,
+      movedToA: 3,
+      orderSaved: true,
+    });
+    expect(idsOn(db, TUE)).toEqual(['d1', 'd2', 'h1', 'h2', 'h3']);
+    expect(idsOn(db, THU)).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 'k1']);
+    expect(jobOf(db, 'd1').scheduled_date).toBe(TUE);
+    expect(jobOf(db, 'k1').scheduled_date).toBe(THU);
+    expect(db.changes).toHaveLength(1);
+    expect(db.changes[0]).toMatchObject({
+      kind: 'swap_days',
+      from_date: TUE,
+      to_date: THU,
+      client_key: 'key-1',
+      notify_customers: false,
+    });
+    expect(db.changes[0]?.job_ids).toHaveLength(9);
+    expect(db.changes[0]?.job_ids).not.toContain('d1');
+    expect(db.changes[0]?.job_ids).not.toContain('k1');
+  });
+
+  it('Undo puts both swapped days back in one go', async () => {
+    const db = twoDayDb();
+    const supabase = createFakeSupabase(db);
+    const swapped = await swap(supabase);
+    if (!swapped.success) throw new Error('swap failed');
+
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: swapped.changeId,
+      actor: ACTOR,
+    });
+
+    expect(undone).toMatchObject({ success: true, restored: 9, leftAlone: 0 });
+    expect(idsOn(db, TUE).sort()).toEqual(['d1', 'd2', 't1', 't2', 't3', 't4', 't5', 't6']);
+    expect(idsOn(db, THU).sort()).toEqual(['h1', 'h2', 'h3', 'k1']);
+  });
+
+  it("swaps with an empty day: the stops move across, nothing comes back, and Undo returns them", async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: TUE, route_position: 1 }),
+        job({ id: 'b', scheduled_date: TUE, route_position: 2 }),
+      ],
+    });
+    const supabase = createFakeSupabase(db);
+    const result = await swap(supabase);
+
+    expect(result).toMatchObject({ success: true, movedToB: 2, movedToA: 0 });
+    expect(idsOn(db, THU)).toEqual(['a', 'b']);
+    expect(idsOn(db, TUE)).toEqual([]);
+    expect(db.changes).toHaveLength(1);
+
+    if (!result.success) throw new Error('swap failed');
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: result.changeId,
+      actor: ACTOR,
+    });
+    expect(undone).toMatchObject({ success: true, restored: 2 });
+    expect(idsOn(db, TUE)).toEqual(['a', 'b']);
+  });
+
+  it('a repeated clientKey is already done and does not swap the days back', async () => {
+    const db = twoDayDb();
+    const supabase = createFakeSupabase(db);
+    const first = await swap(supabase);
+    const afterFirstTue = idsOn(db, TUE);
+    const afterFirstThu = idsOn(db, THU);
+
+    const second = await swap(supabase);
+
+    expect(first).toMatchObject({ success: true, alreadyDone: false });
+    expect(second).toMatchObject({
+      success: true,
+      alreadyDone: true,
+      movedToA: 0,
+      movedToB: 0,
+      changeId: first.success ? first.changeId : '',
+    });
+    expect(idsOn(db, TUE)).toEqual(afterFirstTue);
+    expect(idsOn(db, THU)).toEqual(afterFirstThu);
+    expect(db.changes).toHaveLength(1);
+  });
+
+  it('moves nothing when the change cannot be saved (migration not pasted)', async () => {
+    const db = twoDayDb();
+    db.failChangeInsert = true;
+    const result = await swap(createFakeSupabase(db));
+
+    expect(result).toEqual({
+      success: false,
+      error: "Couldn't save the swap so it could be undone. Nothing moved.",
+    });
+    expect(idsOn(db, TUE)).toEqual(['d1', 't1', 't2', 't3', 'd2', 't4', 't5', 't6']);
+    expect(idsOn(db, THU)).toEqual(['h1', 'k1', 'h2', 'h3']);
+  });
+
+  it('refuses a swap with the same day twice, a past day, or two empty days', async () => {
+    const db = twoDayDb();
+    const supabase = createFakeSupabase(db);
+    expect(await swap(supabase, { dayB: TUE })).toEqual({
+      success: false,
+      error: 'Pick two different days.',
+    });
+    expect(await swap(supabase, { dayA: YESTERDAY })).toEqual({
+      success: false,
+      error: 'Pick today or a later day.',
+    });
+    expect(await swap(supabase, { dayA: '2026-09-20', dayB: '2026-09-21' })).toEqual({
+      success: false,
+      error: 'Nothing to swap — both days are done or empty.',
+    });
+    expect(db.changes).toHaveLength(0);
+  });
+
+  it('stops part-way, keeps the change, and Undo restores what moved and leaves the rest alone', async () => {
+    const db = twoDayDb();
+    // 3 jobs move, the 4th move fails.
+    db.failJobUpdateAfter = 3;
+    const supabase = createFakeSupabase(db);
+    const result = await swap(supabase);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Only part of the swap went through. Press Undo to put it back.',
+    });
+    const changeId = (result as { changeId?: string }).changeId;
+    expect(changeId).toBeDefined();
+    expect(db.changes).toHaveLength(1);
+    expect(jobOf(db, 't1').scheduled_date).toBe(THU);
+    expect(jobOf(db, 't3').scheduled_date).toBe(THU);
+    expect(jobOf(db, 't4').scheduled_date).toBe(TUE);
+
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: changeId as string,
+      actor: ACTOR,
+    });
+    expect(undone).toMatchObject({ success: true, restored: 3, leftAlone: 6 });
+    expect(jobOf(db, 't1').scheduled_date).toBe(TUE);
+    expect(jobOf(db, 'h1').scheduled_date).toBe(THU);
+  });
+
+  it('Undo of a swap leaves a job alone if it was completed afterwards', async () => {
+    const db = twoDayDb();
+    const supabase = createFakeSupabase(db);
+    const swapped = await swap(supabase);
+    if (!swapped.success) throw new Error('swap failed');
+    jobOf(db, 't2').status = 'completed';
+
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: swapped.changeId,
+      actor: ACTOR,
+    });
+
+    expect(undone).toMatchObject({ success: true, restored: 8, leftAlone: 1 });
+    expect(jobOf(db, 't2').scheduled_date).toBe(THU);
+    expect(jobOf(db, 't1').scheduled_date).toBe(TUE);
+    expect(jobOf(db, 'h1').scheduled_date).toBe(THU);
+  });
+});
+
+describe('listUntoldMoves', () => {
+  const TUE = '2026-09-15';
+  const THU = '2026-09-17';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-15T12:00:00.000Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('lists a move nobody was told about, with each job and where it came from', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a', scheduled_date: TUE, route_position: 1 }),
+        job({ id: 'b', scheduled_date: THU, route_position: 1 }),
+      ],
+    });
+    const supabase = createFakeSupabase(db);
+    await swapDaysWithLog(supabase, {
+      tenantId: TENANT,
+      dayA: TUE,
+      dayB: THU,
+      clientKey: 'k1',
+      notifyCustomers: false,
+      today: TODAY,
+      actor: ACTOR,
+    });
+
+    const moves = await listUntoldMoves(supabase, TENANT, { today: TODAY });
+
+    expect(moves).toHaveLength(1);
+    expect(moves?.[0]).toMatchObject({ kind: 'swap_days', fromDate: TUE, toDate: THU });
+    expect(moves?.[0]?.jobs).toEqual([
+      { jobId: 'a', fromDate: TUE },
+      { jobId: 'b', fromDate: THU },
+    ]);
+  });
+
+  it('leaves out moves already told, undone, skips, and moves to a day that has passed', async () => {
+    const db = emptyDb({ jobs: [] });
+    const base = {
+      tenant_id: TENANT,
+      job_ids: ['x'],
+      before: [{ job_id: 'x', status: 'assigned', scheduled_date: TUE }],
+      notified_at: null,
+      undone_at: null,
+      created_at: new Date().toISOString(),
+    };
+    db.changes.push(
+      { ...base, id: 'ok', kind: 'reschedule', from_date: TUE, to_date: THU },
+      { ...base, id: 'told', kind: 'reschedule', from_date: TUE, to_date: THU, notified_at: '2026-09-15T10:00:00Z' },
+      { ...base, id: 'undone', kind: 'reschedule', from_date: TUE, to_date: THU, undone_at: '2026-09-15T10:00:00Z' },
+      { ...base, id: 'skip', kind: 'skip', from_date: TUE, to_date: null },
+      { ...base, id: 'past', kind: 'reschedule', from_date: '2026-09-10', to_date: '2026-09-12' },
+      { ...base, id: 'old', kind: 'reschedule', from_date: TUE, to_date: THU, created_at: '2026-08-01T00:00:00Z' },
+    );
+
+    const moves = await listUntoldMoves(createFakeSupabase(db), TENANT, { today: TODAY });
+
+    expect(moves?.map((m) => m.changeId)).toEqual(['ok']);
   });
 });

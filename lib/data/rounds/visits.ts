@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { endOfMonth, isValidYmd, startOfMonth, type Ymd } from '@/lib/rounds/dates';
+import { diffDays, endOfMonth, isValidYmd, startOfMonth, type Ymd } from '@/lib/rounds/dates';
 import { sendsInvoice } from '@/lib/payments/terms';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 
@@ -206,6 +206,45 @@ export async function getVisitsForDay(
     return { visits: mapRows(data), error: null };
   } catch (err) {
     console.error('[getVisitsForDay]', err);
+    return {
+      visits: [],
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+/** The longest run of days `getVisitsForRange` will read in one go. */
+export const MAX_RANGE_DAYS = 120;
+
+/** Every visit from `from` to `to` (inclusive), for the Week board. Same columns as the day plan, date first. */
+export async function getVisitsForRange(
+  tenantId: string,
+  from: Ymd,
+  to: Ymd,
+): Promise<{ visits: VisitRow[]; error: Error | null }> {
+  if (!isValidYmd(from) || !isValidYmd(to) || to < from || diffDays(from, to) > MAX_RANGE_DAYS) {
+    return { visits: [], error: new Error('Pick a shorter run of days.') };
+  }
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('jobs')
+      .select(VISIT_SELECT)
+      .eq('tenant_id', tenantId)
+      .gte('scheduled_date', from)
+      .lte('scheduled_date', to)
+      .order('scheduled_date', { ascending: true })
+      .order('route_position', { ascending: true, nullsFirst: false })
+      .order('scheduled_time', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[getVisitsForRange]', error);
+      return { visits: [], error: new Error(error.message) };
+    }
+    return { visits: mapRows(data), error: null };
+  } catch (err) {
+    console.error('[getVisitsForRange]', err);
     return {
       visits: [],
       error: err instanceof Error ? err : new Error(String(err)),

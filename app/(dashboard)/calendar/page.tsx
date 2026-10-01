@@ -7,14 +7,19 @@ import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import {
   getVisitCountsForMonth,
   getVisitsForDay,
+  getVisitsForRange,
 } from '@/lib/data/rounds/visits';
 import { getLatestUndoableChange } from '@/lib/actions/rounds/visits';
+import { listUntoldMoves } from '@/lib/rounds/visit-changes';
 import { isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { listOneOffCustomerOptions } from '@/lib/rounds/one-off';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { RoundsMonthGrid } from '@/components/rounds/rounds-month-grid';
 import { RoundsDayPlan } from '@/components/rounds/rounds-day-plan';
+import { CalendarViewPicker } from '@/components/rounds/calendar-view-picker';
+import { WeekBoard } from '@/components/rounds/week-board/week-board';
+import { initialRange, rangeEnd } from '@/lib/rounds/week-board';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
@@ -57,10 +62,44 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
   const raw = await searchParams;
   const today = todayInLondon();
   const date = resolveDate(raw.date, today);
-  const view = raw.view === 'day' ? 'day' : 'month';
+  // No view = the Week board.
+  const view = raw.view === 'day' ? 'day' : raw.view === 'month' ? 'month' : 'week';
 
   const supabase = await createClient();
   const settings = await getRoundsSettings(supabase, tenantId);
+
+  if (view === 'week') {
+    const range = initialRange(date);
+    const [{ visits, error }, messaging, untold] = await Promise.all([
+      getVisitsForRange(tenantId, range.from, rangeEnd(range)),
+      getMessagingSettings(supabase, tenantId),
+      listUntoldMoves(supabase, tenantId, { today }),
+    ]);
+    const brand = {
+      businessName: messaging.businessName,
+      contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
+    };
+
+    return (
+      <div className="space-y-6">
+        <PageGradientHeader
+          title="Calendar"
+          subtitle="Drag jobs and days around, or click one to open it."
+          actions={<CalendarViewPicker view="week" date={date} />}
+        />
+        {error ? <p className="text-sm text-destructive">{error.message}</p> : null}
+        <WeekBoard
+          initialVisits={visits}
+          initialRange={range}
+          today={today}
+          workingDays={settings.working_days}
+          blackouts={settings.blackouts}
+          brand={brand}
+          initialUntold={untold ?? []}
+        />
+      </div>
+    );
+  }
 
   if (view === 'day') {
     const [{ visits, error }, { options: customers }, messaging, undoable] = await Promise.all([
@@ -79,11 +118,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
         <PageGradientHeader
           title="Day plan"
           subtitle="Reorder, optimise, done / skip / reschedule, or move remaining."
-          actions={
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/calendar?view=month&date=${date}`}>Month view</Link>
-            </Button>
-          }
+          actions={<CalendarViewPicker view="day" date={date} />}
         />
         {error ? (
           <p className="text-sm text-destructive">{error.message}</p>
@@ -109,9 +144,12 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
         title="Calendar"
         subtitle="Month workload and £ — tap a day for the plan."
         actions={
-          <Button size="sm" asChild>
-            <Link href={`/calendar?view=day&date=${today}`}>Open today</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" asChild>
+              <Link href={`/calendar?view=day&date=${today}`}>Open today</Link>
+            </Button>
+            <CalendarViewPicker view="month" date={date} />
+          </div>
         }
       />
       {error ? (

@@ -4,21 +4,25 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
-import { isValidYmd, type Ymd } from '@/lib/rounds/dates';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { createOneOffVisitCore } from '@/lib/rounds/one-off';
 import { sendVisitDoneAfterSkip } from '@/lib/payments/notify';
 import {
   notifyVisitChange,
   notifyVisitChangeUndone,
+  requestChangeNotice,
   type NoticeCounts,
 } from '@/lib/messaging/visit-change-notices';
 import { optimiseDayCore } from '@/lib/rounds/optimise-day';
 import {
   latestUndoableChange,
   moveRemainingWithLog,
+  moveStopToDayWithLog,
   rescheduleVisitWithLog,
   skipRemainingCore,
   skipVisitWithLog,
+  swapDaysWithLog,
   undoVisitChangeCore,
   type VisitChangeSummary,
 } from '@/lib/rounds/visit-changes';
@@ -30,19 +34,25 @@ import {
 import {
   completeVisitSchema,
   moveRemainingSchema,
+  moveStopSchema,
   oneOffVisitSchema,
   reorderDaySchema,
   rescheduleVisitSchema,
   skipRemainingSchema,
   skipVisitSchema,
+  swapDaysSchema,
+  tellChangeSchema,
   undoVisitChangeSchema,
   type CompleteVisitInput,
   type MoveRemainingInput,
+  type MoveStopInput,
   type OneOffVisitInput,
   type ReorderDayInput,
   type RescheduleVisitInput,
   type SkipRemainingInput,
   type SkipVisitInput,
+  type SwapDaysInput,
+  type TellChangeInput,
   type UndoVisitChangeInput,
 } from '@/lib/validations/rounds/visit';
 
@@ -79,6 +89,18 @@ async function requireActor(): Promise<
   } = await supabase.auth.getUser();
 
   return { success: true, tenantId, actor: { userId: user?.id } };
+}
+
+/** The board's actions move many customers' visits at once: only a Rounds business may use them. */
+async function requireRoundsActor(): Promise<
+  | { success: true; tenantId: string; actor: Actor }
+  | { success: false; error: string }
+> {
+  const ctx = await requireActor();
+  if (!ctx.success) return ctx;
+  const products = await getTenantProducts();
+  if (!products.hasRounds) return { success: false, error: 'Not available' };
+  return ctx;
 }
 
 async function noticeForChange(
@@ -241,6 +263,104 @@ export async function moveRemaining(
     changeId: result.changeId,
     ...(notified ? { notified } : {}),
   };
+}
+
+export async function moveStopToDay(
+  input: MoveStopInput,
+): Promise<
+  | { success: true; moved: number; changeId: string | null; orderSaved: boolean }
+  | { success: false; error: string }
+> {
+  const ctx = await requireRoundsActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = moveStopSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  const result = await moveStopToDayWithLog(supabase, {
+    tenantId: ctx.tenantId,
+    jobIds: parsed.data.jobIds,
+    toDate: parsed.data.toDate,
+    orderedJobIds: parsed.data.orderedJobIds,
+    today: todayInLondon(),
+    actor: ctx.actor,
+  });
+  if (!result.success) return result;
+
+  revalidateVisits();
+  return result;
+}
+
+export async function swapDays(
+  input: SwapDaysInput,
+): Promise<
+  | {
+      success: true;
+      changeId: string;
+      movedToB: number;
+      movedToA: number;
+      orderSaved: boolean;
+      alreadyDone: boolean;
+      notified?: NoticeCounts;
+    }
+  | { success: false; error: string; changeId?: string }
+> {
+  const ctx = await requireRoundsActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = swapDaysSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const notify = parsed.data.notifyCustomers ?? false;
+  const supabase = await createClient();
+  const result = await swapDaysWithLog(supabase, {
+    tenantId: ctx.tenantId,
+    dayA: parsed.data.dayA,
+    dayB: parsed.data.dayB,
+    clientKey: parsed.data.clientKey,
+    notifyCustomers: notify,
+    today: todayInLondon(),
+    actor: ctx.actor,
+  });
+  if (!result.success) {
+    // Part-way: some jobs did move, so the screens must refresh.
+    if (result.changeId) revalidateVisits();
+    return result;
+  }
+
+  const notified = result.alreadyDone
+    ? undefined
+    : await noticeForChange(ctx.tenantId, result.changeId, notify);
+  revalidateVisits();
+  return { ...result, ...(notified ? { notified } : {}) };
+}
+
+export async function tellCustomersAboutChange(
+  input: TellChangeInput,
+): Promise<
+  | { success: true; alreadyTold: boolean; notified: NoticeCounts }
+  | { success: false; error: string }
+> {
+  const ctx = await requireRoundsActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = tellChangeSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  try {
+    const result = await requestChangeNotice(supabase, {
+      tenantId: ctx.tenantId,
+      changeId: parsed.data.changeId,
+      today: todayInLondon(),
+    });
+    if (result.success) revalidateVisits();
+    return result;
+  } catch (err) {
+    console.error('[visits] tellCustomersAboutChange', err instanceof Error ? err.message : 'failed');
+    return { success: false, error: 'Could not tell them. Try again.' };
+  }
 }
 
 export async function skipRemaining(

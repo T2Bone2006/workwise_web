@@ -205,9 +205,6 @@ export function RoundsDayPlan({
               <ChevronRight className="size-4" />
             </Link>
           </Button>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href={`/calendar?view=month&date=${date}`}>Month</Link>
-          </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {leftovers.length > 0 ? (

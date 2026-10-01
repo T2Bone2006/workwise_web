@@ -5,6 +5,7 @@ import {
   RESCHEDULE_STATUSES,
   deleteUntouchedFutureVisits,
   moveRemainingCore,
+  reorderDayCore,
   rescheduleVisitCore,
   skipVisitCore,
   writeHistory,
@@ -15,7 +16,12 @@ import {
 
 // No 'use server'. Takes a client so dashboard actions and phone APIs share it.
 
-export type VisitChangeKind = 'skip' | 'reschedule' | 'move_remaining' | 'skip_remaining';
+export type VisitChangeKind =
+  | 'skip'
+  | 'reschedule'
+  | 'move_remaining'
+  | 'skip_remaining'
+  | 'swap_days';
 
 export type JobSnapshot = {
   job_id: string;
@@ -53,6 +59,7 @@ const KINDS: readonly VisitChangeKind[] = [
   'reschedule',
   'move_remaining',
   'skip_remaining',
+  'swap_days',
 ];
 
 const SNAPSHOT_COLUMNS = [
@@ -80,6 +87,7 @@ const CHANGE_COLUMNS = [
   'notified_at',
   'created_at',
   'undone_at',
+  'client_key',
 ].join(', ');
 
 type ChangeRow = Record<string, unknown>;
@@ -252,6 +260,20 @@ function isTooOld(createdAt: string, now: Date): boolean {
   const created = new Date(createdAt);
   if (Number.isNaN(created.getTime())) return true;
   return now.getTime() - created.getTime() > UNDO_WINDOW_DAYS * DAY_MS;
+}
+
+/** Where a job of this change should be sitting now. A swap sends each job to the other day. */
+function expectedDateAfterChange(
+  kind: VisitChangeKind,
+  fromDate: string | null,
+  toDate: string | null,
+  snapshotDate: string | null,
+): string | null {
+  if (kind !== 'swap_days') return toDate;
+  if (!fromDate || !toDate || !snapshotDate) return null;
+  if (snapshotDate === fromDate) return toDate;
+  if (snapshotDate === toDate) return fromDate;
+  return null;
 }
 
 function stillAsLeft(kind: VisitChangeKind, job: { status: string; scheduled_date: string | null }, toDate: string | null): boolean {
@@ -571,6 +593,323 @@ export async function rescheduleStopWithLog(
     actor: p.actor,
     notifyCustomers: p.notifyCustomers ?? false,
   });
+}
+
+function isUnique(value: string[]): boolean {
+  return new Set(value).size === value.length;
+}
+
+/**
+ * Move every job of ONE stop to `toDate`, then (optionally) save the order of
+ * that day. The move is one logged 'reschedule' change (undoable). Reordering
+ * inside one day is not logged. Never texts; the caller decides.
+ */
+export async function moveStopToDayWithLog(
+  supabase: SupabaseClient,
+  p: {
+    tenantId: string;
+    jobIds: string[];
+    toDate: Ymd;
+    orderedJobIds?: string[];
+    today: Ymd;
+    actor: Actor;
+  },
+): Promise<
+  | { success: true; moved: number; changeId: string | null; orderSaved: boolean }
+  | { success: false; error: string }
+> {
+  if (!isValidYmd(p.toDate) || p.toDate < p.today) {
+    return { success: false, error: 'Pick today or a later day.' };
+  }
+  if (p.jobIds.length === 0 || !isUnique(p.jobIds)) {
+    return { success: false, error: "This visit can't be moved." };
+  }
+  if (
+    p.orderedJobIds &&
+    (!isUnique(p.orderedJobIds) || p.jobIds.some((id) => !p.orderedJobIds?.includes(id)))
+  ) {
+    return { success: false, error: "Couldn't read that order. Try again." };
+  }
+
+  const snapshots = await loadSnapshots(supabase, p.tenantId, p.jobIds);
+  if (!snapshots) return { success: false, error: 'Could not load the visits. Try again.' };
+  const fromDate = snapshots[0]?.scheduled_date ?? null;
+  if (
+    snapshots.length !== p.jobIds.length ||
+    !fromDate ||
+    snapshots.some((snapshot) => !isOpenStatus(snapshot.status) || snapshot.scheduled_date !== fromDate)
+  ) {
+    return { success: false, error: "This visit can't be moved." };
+  }
+
+  let moved = 0;
+  let changeId: string | null = null;
+  if (fromDate !== p.toDate) {
+    const result = await rescheduleStopWithLog(supabase, {
+      tenantId: p.tenantId,
+      jobIds: p.jobIds,
+      scheduledDate: p.toDate,
+      actor: p.actor,
+      notifyCustomers: false,
+    });
+    if (!result.success) return result;
+    moved = result.moved;
+    changeId = result.changeId;
+  }
+
+  if (!p.orderedJobIds) {
+    return { success: true, moved, changeId, orderSaved: true };
+  }
+  const order = await reorderDayCore(supabase, {
+    tenantId: p.tenantId,
+    date: p.toDate,
+    orderedJobIds: p.orderedJobIds,
+  });
+  if (!order.success) {
+    console.error('[visit-changes] moveStopToDayWithLog order:', order.error);
+  }
+  return { success: true, moved, changeId, orderSaved: order.success };
+}
+
+function byRoutePosition<T extends { position: number | null; index: number }>(a: T, b: T): number {
+  if (a.position == null && b.position == null) return a.index - b.index;
+  if (a.position == null) return 1;
+  if (b.position == null) return -1;
+  return a.position - b.position || a.index - b.index;
+}
+
+/** Save the order of one day after a swap: stayed stops, then stops that moved in, then skipped. */
+async function orderDayAfterSwap(
+  supabase: SupabaseClient,
+  tenantId: string,
+  day: Ymd,
+  movedIn: string[],
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('id, status, route_position')
+    .eq('tenant_id', tenantId)
+    .eq('scheduled_date', day);
+  if (error) {
+    console.error('[visit-changes] swap order read:', error);
+    return false;
+  }
+  const present = new Set<string>();
+  const movedSet = new Set(movedIn);
+  const stayed: { id: string; position: number | null; index: number }[] = [];
+  const skipped: { id: string; position: number | null; index: number }[] = [];
+  (data ?? []).forEach((raw, index) => {
+    if (!raw || typeof raw !== 'object') return;
+    const row = raw as Record<string, unknown>;
+    const id = asString(row.id);
+    if (!id) return;
+    present.add(id);
+    if (movedSet.has(id)) return;
+    const entry = { id, position: asFiniteNumber(row.route_position), index };
+    (row.status === 'cancelled' ? skipped : stayed).push(entry);
+  });
+  const ordered = [
+    ...stayed.sort(byRoutePosition).map((entry) => entry.id),
+    ...movedIn.filter((id) => present.has(id)),
+    ...skipped.sort(byRoutePosition).map((entry) => entry.id),
+  ];
+  if (ordered.length === 0) return true;
+  const result = await reorderDayCore(supabase, { tenantId, date: day, orderedJobIds: ordered });
+  if (!result.success) console.error('[visit-changes] swap order write:', result.error);
+  return result.success;
+}
+
+type SwapClaim =
+  | { ok: true; changeId: string }
+  | { ok: false; duplicate: true }
+  | { ok: false; duplicate: false };
+
+/** Insert the swap's change row BEFORE anything moves. A repeated client_key hits the unique index (23505). */
+async function claimSwapChange(
+  supabase: SupabaseClient,
+  p: {
+    tenantId: string;
+    dayA: Ymd;
+    dayB: Ymd;
+    jobIds: string[];
+    before: JobSnapshot[];
+    notifyCustomers: boolean;
+    clientKey: string;
+    actor: Actor;
+  },
+): Promise<SwapClaim> {
+  const { data, error } = await supabase
+    .from('visit_changes')
+    .insert({
+      tenant_id: p.tenantId,
+      kind: 'swap_days',
+      from_date: p.dayA,
+      to_date: p.dayB,
+      job_ids: p.jobIds,
+      before: p.before,
+      notify_customers: p.notifyCustomers,
+      client_key: p.clientKey,
+      created_by_user_id: p.actor.userId ?? null,
+    })
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === '23505') return { ok: false, duplicate: true };
+    console.error('[visit-changes] claimSwapChange', error);
+    return { ok: false, duplicate: false };
+  }
+  const id = data && typeof data === 'object' ? asString((data as { id?: unknown }).id) : null;
+  if (!id) {
+    console.error('[visit-changes] claimSwapChange: no id returned');
+    return { ok: false, duplicate: false };
+  }
+  return { ok: true, changeId: id };
+}
+
+async function existingSwapChangeId(
+  supabase: SupabaseClient,
+  tenantId: string,
+  clientKey: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('visit_changes')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('client_key', clientKey)
+    .maybeSingle();
+  if (error || !data || typeof data !== 'object') return null;
+  return asString((data as { id?: unknown }).id);
+}
+
+/**
+ * Swap the planned stops of two days as ONE change (kind 'swap_days'). Done and
+ * skipped jobs stay where they are. The change row goes in first so a repeated
+ * request (same clientKey) is "already done" instead of swapping back. Never texts.
+ */
+export async function swapDaysWithLog(
+  supabase: SupabaseClient,
+  p: {
+    tenantId: string;
+    dayA: Ymd;
+    dayB: Ymd;
+    clientKey: string;
+    notifyCustomers: boolean;
+    today: Ymd;
+    actor: Actor;
+  },
+): Promise<
+  | {
+      success: true;
+      changeId: string;
+      movedToB: number;
+      movedToA: number;
+      orderSaved: boolean;
+      alreadyDone: boolean;
+    }
+  | { success: false; error: string; changeId?: string }
+> {
+  if (!isValidYmd(p.dayA) || !isValidYmd(p.dayB) || p.dayA < p.today || p.dayB < p.today) {
+    return { success: false, error: 'Pick today or a later day.' };
+  }
+  if (p.dayA === p.dayB) return { success: false, error: 'Pick two different days.' };
+  const clientKey = p.clientKey.trim();
+  if (clientKey === '') {
+    return { success: false, error: "Couldn't save the swap so it could be undone. Nothing moved." };
+  }
+
+  const openA = await listOpenJobIds(supabase, p.tenantId, p.dayA);
+  const openB = await listOpenJobIds(supabase, p.tenantId, p.dayB);
+  if (!openA || !openB) return { success: false, error: 'Could not load the visits. Try again.' };
+
+  const snapshots = await loadSnapshots(supabase, p.tenantId, [...openA, ...openB]);
+  if (!snapshots) return { success: false, error: 'Could not load the visits. Try again.' };
+
+  // Only jobs still open on the day we listed them for (one may have been done in between).
+  const inOrder = (day: Ymd): JobSnapshot[] =>
+    snapshots
+      .map((snapshot, index) => ({ snapshot, position: snapshot.route_position, index }))
+      .filter(
+        ({ snapshot }) => snapshot.scheduled_date === day && isOpenStatus(snapshot.status),
+      )
+      .sort(byRoutePosition)
+      .map(({ snapshot }) => snapshot);
+  const fromA = inOrder(p.dayA);
+  const fromB = inOrder(p.dayB);
+  if (fromA.length === 0 && fromB.length === 0) {
+    return { success: false, error: 'Nothing to swap — both days are done or empty.' };
+  }
+  const idsA = fromA.map((snapshot) => snapshot.job_id);
+  const idsB = fromB.map((snapshot) => snapshot.job_id);
+
+  const claim = await claimSwapChange(supabase, {
+    tenantId: p.tenantId,
+    dayA: p.dayA,
+    dayB: p.dayB,
+    jobIds: [...idsA, ...idsB],
+    before: [...fromA, ...fromB],
+    notifyCustomers: p.notifyCustomers,
+    clientKey,
+    actor: p.actor,
+  });
+  if (!claim.ok) {
+    if (claim.duplicate) {
+      const existing = await existingSwapChangeId(supabase, p.tenantId, clientKey);
+      if (!existing) return { success: false, error: 'Could not load the visits. Try again.' };
+      return {
+        success: true,
+        alreadyDone: true,
+        changeId: existing,
+        movedToB: 0,
+        movedToA: 0,
+        orderSaved: true,
+      };
+    }
+    return { success: false, error: "Couldn't save the swap so it could be undone. Nothing moved." };
+  }
+
+  const movedIds: string[] = [];
+  const moveAll = async (ids: string[], toDay: Ymd): Promise<number | null> => {
+    let moved = 0;
+    for (const jobId of ids) {
+      const result = await rescheduleVisitCore(supabase, {
+        tenantId: p.tenantId,
+        jobId,
+        scheduledDate: toDay,
+        actor: p.actor,
+      });
+      if (!result.success) {
+        console.error('[visit-changes] swap move:', result.error);
+        return null;
+      }
+      movedIds.push(jobId);
+      moved += 1;
+    }
+    return moved;
+  };
+
+  const movedToB = await moveAll(idsA, p.dayB);
+  const movedToA = movedToB == null ? null : await moveAll(idsB, p.dayA);
+  if (movedToB == null || movedToA == null) {
+    await clearReplyLabels(supabase, p.tenantId, movedIds);
+    return {
+      success: false,
+      error: 'Only part of the swap went through. Press Undo to put it back.',
+      changeId: claim.changeId,
+    };
+  }
+  await clearReplyLabels(supabase, p.tenantId, movedIds);
+
+  const savedB = await orderDayAfterSwap(supabase, p.tenantId, p.dayB, idsA);
+  const savedA = await orderDayAfterSwap(supabase, p.tenantId, p.dayA, idsB);
+  return {
+    success: true,
+    alreadyDone: false,
+    changeId: claim.changeId,
+    movedToB,
+    movedToA,
+    orderSaved: savedA && savedB,
+  };
 }
 
 export async function skipVisitWithLog(
@@ -971,12 +1310,18 @@ export async function undoVisitChangeCore(
   for (const snapshot of snapshots) {
     const loadedJob = await loadJobForUndo(supabase, p.tenantId, snapshot.job_id);
     if (!loadedJob.ok) return fail();
-    if (!loadedJob.job || !stillAsLeft(summary.kind, loadedJob.job, summary.toDate)) {
+    const expectedDate = expectedDateAfterChange(
+      summary.kind,
+      summary.fromDate,
+      summary.toDate,
+      snapshot.scheduled_date,
+    );
+    if (!loadedJob.job || !stillAsLeft(summary.kind, loadedJob.job, expectedDate)) {
       leftAlone += 1;
       continue;
     }
     const isSkip = summary.kind === 'skip' || summary.kind === 'skip_remaining';
-    if (!isSkip && !summary.toDate) {
+    if (!isSkip && !expectedDate) {
       leftAlone += 1;
       continue;
     }
@@ -986,7 +1331,7 @@ export async function undoVisitChangeCore(
           supabase,
           p.tenantId,
           snapshot,
-          summary.toDate as string,
+          expectedDate as string,
           loadedJob.job.status,
           p.actor,
         );
@@ -1035,6 +1380,70 @@ export async function latestUndoableChange(
   }
   if (!data || typeof data !== 'object') return null;
   return toSummary(data as ChangeRow);
+}
+
+export type UntoldMove = {
+  changeId: string;
+  kind: 'reschedule' | 'move_remaining' | 'swap_days';
+  fromDate: string | null;
+  toDate: string | null;
+  createdAt: string;
+  /** Each job in the change and the day it was on before (a swap sends jobs both ways). */
+  jobs: { jobId: string; fromDate: string | null }[];
+};
+
+/**
+ * Moves the customers have not been told about: not undone, not yet told, inside the undo
+ * window, and still ahead (a move to a day that has passed can't be told any more). The
+ * phone uses this to put a "Not told" tag on the cards that moved.
+ */
+export async function listUntoldMoves(
+  supabase: SupabaseClient,
+  tenantId: string,
+  opts: { today: Ymd; now?: Date },
+): Promise<UntoldMove[] | null> {
+  const now = opts.now ?? new Date();
+  const cutoff = new Date(now.getTime() - UNDO_WINDOW_DAYS * DAY_MS).toISOString();
+  const { data, error } = await supabase
+    .from('visit_changes')
+    .select(CHANGE_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .is('undone_at', null)
+    .is('notified_at', null)
+    .in('kind', ['reschedule', 'move_remaining', 'swap_days'])
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    console.error('[visit-changes] listUntoldMoves:', error);
+    return null;
+  }
+  const moves: UntoldMove[] = [];
+  for (const raw of data ?? []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as ChangeRow;
+    const summary = toSummary(row);
+    if (!summary) continue;
+    const kind = summary.kind;
+    if (kind !== 'reschedule' && kind !== 'move_remaining' && kind !== 'swap_days') continue;
+    const ahead =
+      kind === 'swap_days'
+        ? (summary.fromDate ?? '') >= opts.today || (summary.toDate ?? '') >= opts.today
+        : (summary.toDate ?? '') >= opts.today;
+    if (!ahead) continue;
+    moves.push({
+      changeId: summary.id,
+      kind,
+      fromDate: summary.fromDate,
+      toDate: summary.toDate,
+      createdAt: summary.createdAt,
+      jobs: parseSnapshots(row.before).map((snapshot) => ({
+        jobId: snapshot.job_id,
+        fromDate: snapshot.scheduled_date,
+      })),
+    });
+  }
+  return moves;
 }
 
 export async function getVisitChange(

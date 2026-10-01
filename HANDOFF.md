@@ -87,8 +87,40 @@ card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
 - Phase 4 (Direct Debit) code complete, verified in the sandbox, not released (steps 1–25 done; step 26 is for launch). Results and release checklist in the Phase 4 section below; 826 web / 97 phone tests pass.
 
 - Phase 5 spec written 2026-09-30 (not started): `../docs/specs/phase-5/` (30 cards). First: step 1 (owner: two env vars + test receipts/round sheet), then steps 2–4 migrations (Cursor drafts, Claude reviews), step 5 paste. Finish the Phase 4 walkthrough first or alongside.
+- **Calendar update micro-phase: CODE COMPLETE 2026-10-01, NOT RELEASED** (all 15 steps ticked; owner closed it without running the step 14 table). Full notes in the "Calendar update" section below; spec `../docs/specs/calendar-update/`. Ships with everything else: migration (already pasted) → web → one phone build. Independent of Phase 5.
 
 ---
+
+## Calendar update (micro-phase) — CODE COMPLETE, NOT RELEASED
+
+Spec folder: `../docs/specs/calendar-update/` (`README.md` = step index, `00-context.md` = decisions D1–D24; **D16–D24 came from the owner's feel test and override the older card text**). Branch `rounds-foundations`. **Nothing ships until everything is done**: migration → web → one phone build.
+
+**What it is:** "How they pay" removed from the customer page (web + phone; the invoice choice stays on the Done sheet). Calendar has **Day / Week / Month** on the dashboard and the phone. **Week** is a drag board (dashboard: day columns side by side with gaps between weeks; phone: day rows, jobs across). Drag a job within a day or to a spot on another day; drag a day by its ⠿ onto another to swap planned stops (**immediately, no confirm; Undo is the safety**); click/tap a job for Open job / Move to day…; a day's ⋯ → Swap with…. After a move or swap a **floating glass message** (10 s, then fades) offers **Tell them** and **Undo**. Nothing texts a customer unless Tell them or "Let customers know" is used. Moved stops whose customers aren't told carry a **Not told** tag. Dropping a stop on a day where the same house already has a visit joins it ("Join …'s visit", "2 jobs"); one job of a combined card can be moved on its own (laptop: Show N jobs ▾ rows; phone: Move just one…). The board scrolls to where a job landed and rings it; dropped cards glide into place. Every job date picker also shows where the job is **now** (grey / ringed) and today. The phone's Week is look-only without signal. Today's (phone) and the Day plan's (web) Undo bars only show a change from the last hour.
+
+**SQL pasted** (owner, 2026-10-01): `20261001120000_visit_changes_swap_days.sql` (adds kind `swap_days` + `client_key` unique index to `visit_changes`). Nothing else touches the database. Owner follow-up: refresh `supabase/schema_current.sql`.
+
+**Checks** (2026-10-01, step 13/14): web `tsc` clean · 899 tests pass · eslint on the step-14 paths: 0 errors, 9 warnings in files this work didn't change (`rounds-customers-table.tsx`, `lib/actions/rounds/agreements.ts`) · `npm run build` succeeds · `check-cards.mjs calendar-update` passes. Phone: `tsc` clean · 148 tests · `expo export --platform ios` OK (6.64 MB bundle) · `package.json` / `app.json` unchanged · `expo install --check` lists 7 older patch-level mismatches (not from this work, left alone). **No new phone dependency or native module** (dragging uses the existing gesture-handler + reanimated; no vibration).
+
+**Step 9 feel-test decision (owner, 2026-10-01): keep dragging.** `workwise-mobile/src/screens/rounds/calendar/boardConfig.ts`: `BOARD_DRAG_ENABLED = true`, `LIFT_DELAY_MS 450`, `GRIP_DELAY_MS 200`, `TAP_SLOP 10`, `FLOAT_ABOVE 24`, `LIFT_SCALE 1.06`, `EDGE_V 80`, `EDGE_H 48`, `MAX_V_SPEED 12`, `MAX_H_SPEED 10`, `GAP_ANIM_MS 120`, `GLIDE_MS 180`. Set `BOARD_DRAG_ENABLED = false` to ship the phone tap-only.
+
+**Walkthrough (step 14): not run as a table.** The owner closed the phase on 2026-10-01 after trying it by hand. Seen working by the owner: the phone Week board and its drags, a day swap, the floating message, "Not told", joining a same-house visit, moving one job, the new date pickers (laptop and phone), the laptop board's drag within/between days (after a bug fix, see below).
+
+**Not verified (do these at release or in the next test pass):**
+- Laptop drag **with a successful save signed in** (all my drag tests used fake data; the saves were rejected on purpose or read-only) — especially keyboard (Space/arrows) and touch (250 ms hold) dragging, and the day-grip swap on the laptop.
+- Tell them actually sending (one text logged for Tess) and "already told" on a second press; Undo of a told move sends the "all back" text.
+- Double-click on Swap (laptop menu path) → one swap; the phone's double-tap rule.
+- Phone: airplane mode banner + nothing movable; remembered view after closing the app; a phone move showing on the laptop.
+- Step 2 check: marking Done with "Send invoice" on remembers it for the next Done sheet (code untouched, just confirm).
+- **RS Locksmiths / Pro**: no Calendar change (the Week board is Rounds-only; the board actions now refuse non-Rounds businesses).
+- Dashboard board column heights at other window sizes; the initial scroll to this week's Monday on narrow windows.
+
+**Bugs found while testing and fixed:** laptop drag never started (dnd-kit reported no card position at drag start; now measured directly); dnd-kit hydration id mismatch (fixed id); board stayed locked until the weekly refresh finished (now locks only while saving); duplicate React keys in the phone "Move just one…" list.
+
+**At release:**
+1. Migration first (already pasted into the owner's database; paste into any other database before deploying web).
+2. Web deploy adds the dependency **`@dnd-kit/core` ^6.3.1** (`npm install` runs from the lockfile). No env vars.
+3. The phone ships in the one release build with everything else. Nothing here needs a new native module. (Vibration on pick-up needs `expo-haptics`, a native module; it can be added in the release build if wanted.)
+4. Owner follow-ups: refresh `schema_current.sql`; decide whether to apply the app-wide popup standard (memory `project-popup-standard`: floating message / sheet / dialog) to the other ~42 alerts and ~23 modals as its own job.
 
 ## Phase 4 — Direct Debit (GoCardless) + more ways to pay (branch `rounds-foundations`) — CODE COMPLETE, NOT RELEASED
 
