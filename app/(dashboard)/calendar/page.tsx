@@ -14,6 +14,9 @@ import { listUntoldMoves } from '@/lib/rounds/visit-changes';
 import { isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { listOneOffCustomerOptions } from '@/lib/rounds/one-off';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
+import { loadWeather } from '@/lib/data/weather';
+import { DayWeather } from '@/components/weather/day-weather';
+import { WeatherCredit } from '@/components/weather/weather-credit';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { RoundsMonthGrid } from '@/components/rounds/rounds-month-grid';
 import { RoundsDayPlan } from '@/components/rounds/rounds-day-plan';
@@ -80,6 +83,8 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
       contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
     };
 
+    const weather = await loadWeather(supabase, { tenantId, visitPoints: visits });
+
     return (
       <div className="space-y-6">
         <PageGradientHeader
@@ -89,6 +94,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
         />
         {error ? <p className="text-sm text-destructive">{error.message}</p> : null}
         <WeekBoard
+          weather={weather}
           initialVisits={visits}
           initialRange={range}
           today={today}
@@ -97,6 +103,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
           brand={brand}
           initialUntold={untold ?? []}
         />
+        {weather ? <WeatherCredit /> : null}
       </div>
     );
   }
@@ -112,12 +119,23 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
       businessName: messaging.businessName,
       contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
     };
+    const weather = await loadWeather(supabase, { tenantId, visitPoints: visits });
+    const dayWeather = weather?.[date];
 
     return (
       <div className="space-y-6">
         <PageGradientHeader
           title="Day plan"
-          subtitle="Reorder, optimise, done / skip / reschedule, or move remaining."
+          subtitle={
+            dayWeather ? (
+              <span className="flex flex-col gap-1">
+                <span>Reorder, optimise, done / skip / reschedule, or move remaining.</span>
+                <DayWeather weather={dayWeather} showLabel className="text-sm" />
+              </span>
+            ) : (
+              'Reorder, optimise, done / skip / reschedule, or move remaining.'
+            )
+          }
           actions={<CalendarViewPicker view="day" date={date} />}
         />
         {error ? (
@@ -132,6 +150,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
           brand={brand}
           undoable={undoable}
         />
+        {dayWeather ? <WeatherCredit /> : null}
       </div>
     );
   }

@@ -2,8 +2,6 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import {
   Upload,
@@ -39,8 +37,12 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { importJobs, type ImportAllocationFailure } from '@/lib/actions/import';
 import { createCustomerForImport } from '@/lib/actions/customers';
-import { spreadsheetCellToImportString } from '@/lib/import/parse-scheduled-date';
-import { normalizeHeaders, normalizeRowKeys } from '@/lib/import/normalize-import-headers';
+import {
+  isSpreadsheetImportFile,
+  parseSpreadsheetFile,
+  spreadsheetFailureMessage,
+} from '@/lib/import/parse-spreadsheet-file';
+import { SpreadsheetDropzone } from '@/components/import/spreadsheet-dropzone';
 import {
   EXTRACTION_BATCH_SIZE,
   blankExtractedRow,
@@ -61,31 +63,6 @@ import { SourceFieldsPeek, SourceFieldsPeekProvider } from '@/components/import/
 
 /** Extraction batches sent to the AI at once. */
 const EXTRACTION_CONCURRENCY = 4;
-
-function isSpreadsheetImportFile(fileName: string): boolean {
-  const lower = fileName.toLowerCase();
-  return lower.endsWith('.csv') || lower.endsWith('.xlsx');
-}
-
-function xlsxWorkbookToRowRecords(wb: XLSX.WorkBook): Record<string, string>[] {
-  const firstSheet = wb.SheetNames[0];
-  if (!firstSheet) return [];
-  const ws = wb.Sheets[firstSheet];
-  // raw + cellDates: date cells become Date/serial, not locale strings like "9/1/2026".
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
-    defval: '',
-    raw: true,
-  });
-  return json
-    .map((row) => {
-      const out: Record<string, string> = {};
-      for (const [k, v] of Object.entries(row)) {
-        out[k] = spreadsheetCellToImportString(v);
-      }
-      return out;
-    })
-    .filter((row) => Object.values(row).some((v) => v.trim() !== ''));
-}
 
 type ImportResultState = {
   ok: boolean;
@@ -148,7 +125,6 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedCount, setExtractedCount] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
   const [autoAllocate, setAutoAllocate] = useState(true);
   /** When false (default), any invalid row blocks the whole import. */
   const [allowPartialImport, setAllowPartialImport] = useState(false);
@@ -308,46 +284,18 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
       }
       setCsvFile(file);
 
-      const applyParsedRows = (rows: Record<string, string>[]) => {
-        if (!rows.length) {
-          toast.error('File has no data rows.', { duration: 8000 });
-          setCsvData([]);
-          return;
+      void (async () => {
+        try {
+          const normalizedRows = await parseSpreadsheetFile(file);
+          setCsvData(normalizedRows);
+          setAllowPartialImport(false);
+          void runExtraction(normalizedRows);
+          if (customerId) void runGroupingSuggestion(normalizedRows, customerId);
+        } catch (e) {
+          if (e instanceof Error && e.message === 'empty') setCsvData([]);
+          toast.error(spreadsheetFailureMessage(e, file.name), { duration: 8000 });
         }
-        const headers = normalizeHeaders(Object.keys(rows[0]!));
-        if (!headers.length) {
-          toast.error('File has no usable column headers.', { duration: 8000 });
-          return;
-        }
-        const normalizedRows = rows.map((row) => normalizeRowKeys(row, headers));
-        setCsvData(normalizedRows);
-        setAllowPartialImport(false);
-        void runExtraction(normalizedRows);
-        if (customerId) void runGroupingSuggestion(normalizedRows, customerId);
-      };
-
-      const lower = file.name.toLowerCase();
-      if (lower.endsWith('.xlsx')) {
-        void (async () => {
-          try {
-            const buf = await file.arrayBuffer();
-            const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-            applyParsedRows(xlsxWorkbookToRowRecords(wb));
-          } catch {
-            toast.error('Invalid Excel file.', { duration: 8000 });
-          }
-        })();
-        return;
-      }
-
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          applyParsedRows(results.data as Record<string, string>[]);
-        },
-        error: () => toast.error('Invalid CSV format.', { duration: 8000 }),
-      });
+      })();
     },
     [runExtraction, runGroupingSuggestion, customerId]
   );
@@ -575,44 +523,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                const f = e.dataTransfer.files[0];
-                if (f) handleFile(f);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-              }}
-              className={cn(
-                'flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8',
-                isDragging
-                  ? 'border-brand-primary bg-brand-primary/10'
-                  : 'border-muted-foreground/25 hover:border-brand-primary/50'
-              )}
-              onClick={() => document.getElementById('csv-file-input')?.click()}
-            >
-              <input
-                id="csv-file-input"
-                type="file"
-                accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFile(f);
-                }}
-              />
-              <Upload className="size-10 text-muted-foreground" />
-              <p className="mt-2 text-sm font-medium">
-                {csvFile ? csvFile.name : 'Drop file here or click to browse'}
-              </p>
-            </div>
+            <SpreadsheetDropzone file={csvFile} onFile={handleFile} />
           </CardContent>
           <CardFooter className="gap-2">
             <Button variant="outline" onClick={() => setStep(1)} className="gap-2">

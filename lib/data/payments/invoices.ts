@@ -50,7 +50,7 @@ export type InvoiceRecord = {
   isOverdue: boolean;
 };
 
-const INVOICE_COLUMNS = [
+export const INVOICE_COLUMNS = [
   'id',
   'tenant_id',
   'customer_id',
@@ -218,7 +218,15 @@ function mapInvoice(
   };
 }
 
-async function assemble(
+const ID_BATCH = 80;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+export async function assembleInvoices(
   supabase: SupabaseClient,
   rows: Record<string, unknown>[],
 ): Promise<InvoiceRecord[]> {
@@ -228,20 +236,24 @@ async function assemble(
     .map((row) => asString(row.id))
     .filter((id): id is string => id != null);
 
-  const { data: lineData, error: lineError } = await supabase
-    .from('invoice_lines')
-    .select('invoice_id, job_id, service_date, description, address, amount, sort_order')
-    .in('invoice_id', invoiceIds)
-    .order('sort_order', { ascending: true });
-
-  if (lineError) {
-    console.error('assemble invoices lines failed', lineError);
-    throw new Error('Could not load the invoice.');
+  // Read in small batches: a long id list in one request overflows the URL.
+  const lineData: unknown[] = [];
+  for (const ids of chunk(invoiceIds, ID_BATCH)) {
+    const { data, error: lineError } = await supabase
+      .from('invoice_lines')
+      .select('invoice_id, job_id, service_date, description, address, amount, sort_order')
+      .in('invoice_id', ids)
+      .order('sort_order', { ascending: true });
+    if (lineError) {
+      console.error('assemble invoices lines failed', lineError);
+      throw new Error('Could not load the invoice.');
+    }
+    lineData.push(...(data ?? []));
   }
 
   const linesByInvoice = new Map<string, LineDraft[]>();
   const jobIds = new Set<string>();
-  for (const raw of lineData ?? []) {
+  for (const raw of lineData) {
     const mapped = mapLine(raw as Record<string, unknown>);
     if (!mapped) continue;
     const list = linesByInvoice.get(mapped.invoiceId) ?? [];
@@ -252,22 +264,24 @@ async function assemble(
 
   const allocatedByJob = new Map<string, number>();
   if (jobIds.size > 0) {
-    const { data: allocs, error: allocError } = await supabase
-      .from('payment_allocations')
-      .select('job_id, amount')
-      .in('job_id', [...jobIds]);
-    if (allocError) {
-      console.error('assemble invoices allocations failed', allocError);
-      throw new Error('Could not load the invoice.');
-    }
-    for (const raw of allocs ?? []) {
-      const row = raw as Record<string, unknown>;
-      const jobId = asString(row.job_id);
-      if (!jobId) continue;
-      allocatedByJob.set(
-        jobId,
-        roundMoney((allocatedByJob.get(jobId) ?? 0) + (asFiniteNumber(row.amount) ?? 0)),
-      );
+    for (const ids of chunk([...jobIds], ID_BATCH)) {
+      const { data: allocs, error: allocError } = await supabase
+        .from('payment_allocations')
+        .select('job_id, amount')
+        .in('job_id', ids);
+      if (allocError) {
+        console.error('assemble invoices allocations failed', allocError);
+        throw new Error('Could not load the invoice.');
+      }
+      for (const raw of allocs ?? []) {
+        const row = raw as Record<string, unknown>;
+        const jobId = asString(row.job_id);
+        if (!jobId) continue;
+        allocatedByJob.set(
+          jobId,
+          roundMoney((allocatedByJob.get(jobId) ?? 0) + (asFiniteNumber(row.amount) ?? 0)),
+        );
+      }
     }
   }
 
@@ -300,7 +314,7 @@ export async function getInvoice(
   }
   if (!data) return null;
 
-  const [record] = await assemble(supabase, [data as unknown as Record<string, unknown>]);
+  const [record] = await assembleInvoices(supabase, [data as unknown as Record<string, unknown>]);
   return record ?? null;
 }
 
@@ -328,5 +342,5 @@ export async function listInvoices(
     throw new Error('Could not load invoices.');
   }
 
-  return assemble(supabase, (data ?? []) as unknown as Record<string, unknown>[]);
+  return assembleInvoices(supabase, (data ?? []) as unknown as Record<string, unknown>[]);
 }

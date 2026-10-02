@@ -30,6 +30,8 @@ describe('parseFrequencyDays — named phrases', () => {
     ['annual', 365],
     ['annually', 365],
     ['every year', 365],
+    ['every other week', 14],
+    ['every other month', 56],
   ] as const)('%s → %i days', (raw, days) => {
     expect(parseFrequencyDays(raw)).toBe(days);
   });
@@ -38,6 +40,9 @@ describe('parseFrequencyDays — named phrases', () => {
 describe('parseFrequencyDays — N weeks / days / months', () => {
   it.each([
     ['6w', 42],
+    ['4 wks', 28],
+    ['every 4 wks', 28],
+    ['1 wk', 7],
     ['6 w', 42],
     ['3 weeks', 21],
     ['1 week', 7],

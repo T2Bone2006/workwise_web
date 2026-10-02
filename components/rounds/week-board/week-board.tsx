@@ -51,6 +51,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { formatGbp } from '@/lib/money/pence';
+import type { WeatherByDay } from '@/lib/weather/met-norway';
 import { BoardDayColumn, type ColumnHighlight } from './board-day-column';
 import { BoardDragOverlay } from './board-drag-overlay';
 import { useBoardDnd, type DndActive, type DndTarget } from './use-board-dnd';
@@ -102,6 +103,8 @@ export function WeekBoard(props: {
   blackouts: string[];
   brand: SmsBrand;
   initialUntold: UntoldMove[];
+  /** Forecast by day for the next 9 days; null when there isn't one. */
+  weather?: WeatherByDay | null;
 }): JSX.Element {
   const { today, brand } = props;
   const [visits, setVisits] = useState(props.initialVisits);
@@ -593,6 +596,7 @@ export function WeekBoard(props: {
                   <BoardDayColumn
                     key={day.date}
                     day={day}
+                    weather={props.weather?.[day.date]}
                     flashIds={flashIds}
                     locked={locked}
                     gapHeight={dragging?.kind === 'card' ? dragging.height : 0}

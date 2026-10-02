@@ -31,6 +31,9 @@ const UNPROTECTED_PATHS = [
   // Public customer pages + Stripe return pages.
   '/pay',
   '/connect',
+  // Phase 5: the accountant's read-only pages. They have their own emailed-code
+  // sign-in and no Supabase user, so the dashboard session rules must not touch them.
+  '/accountant',
 ] as const;
 
 /** Paths workers may visit on the web (invite / password setup). */

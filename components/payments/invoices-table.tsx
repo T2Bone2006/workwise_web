@@ -10,7 +10,10 @@ import {
 import { MoneyRow, MONEY_ACCENT, type MoneyAccent } from '@/components/payments/money-row';
 import { Card, CardContent } from '@/components/ui/card';
 import type { InvoiceRecord } from '@/lib/data/payments/invoices';
+import { invoiceStatus } from '@/lib/invoices/status';
 import { formatGbp } from '@/lib/money/pence';
+
+export { invoiceStatus };
 
 function formatDay(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -20,13 +23,6 @@ function formatDay(ymd: string): string {
     month: 'short',
     timeZone: 'UTC',
   }).format(new Date(Date.UTC(y, m - 1, d)));
-}
-
-export function invoiceStatus(invoice: InvoiceRecord): 'Paid' | 'Overdue' | 'Unpaid' | 'Cancelled' {
-  if (invoice.status === 'void') return 'Cancelled';
-  if (invoice.balanceDue <= 0) return 'Paid';
-  if (invoice.isOverdue) return 'Overdue';
-  return 'Unpaid';
 }
 
 const INVOICE_ACCENT: Record<ReturnType<typeof invoiceStatus>, MoneyAccent> = {

@@ -41,6 +41,8 @@ const NAMED: [RegExp, number][] = [
   [/^(fortnightly|fortnight)$/, 14],
   [/^(two|2)\s+weekly$/, 14],
   [/^weekly$/, 7],
+  [/^other\s+week$/, 14], // "every other week" (the leading "every" is stripped)
+  [/^other\s+month$/, 56],
   [/^monthly$/, 28],
   [/^quarterly$/, 91],
   [/^twice\s+(yearly|annual|annually|a\s+year)$/, 182],
@@ -50,7 +52,7 @@ const NAMED: [RegExp, number][] = [
 
 const NUMERIC: [RegExp, (n: number) => number | null][] = [
   [/^(\d+)\s*weekly$/, fromWeeks],
-  [/^(\d+)\s*weeks?$/, fromWeeks],
+  [/^(\d+)\s*(?:weeks?|wks?)$/, fromWeeks],
   [/^(\d+)\s*w$/, fromWeeks],
   [/^(\d+)\s*days?$/, clampDays],
   [/^(\d+)\s*d$/, clampDays],

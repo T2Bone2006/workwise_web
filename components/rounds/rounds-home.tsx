@@ -1,241 +1,96 @@
-'use client';
-
-import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { format, parseISO } from 'date-fns';
-import {
-  CalendarDays,
-  CheckCircle2,
-  CircleDashed,
-  Loader2,
-  PoundSterling,
-  Route,
-  SkipForward,
-  Users,
-  Wallet,
-  Wrench,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { optimiseDay } from '@/lib/actions/rounds/visits';
+import { Users, Wrench } from 'lucide-react';
+import type { BooksSummary } from '@/lib/books/summary-pure';
+import type { TrendMonth } from '@/lib/books/trend';
 import type { RoundsHomeData } from '@/lib/data/rounds/home';
-import type { VisitRow } from '@/lib/data/rounds/visits';
-import type { SmsBrand } from '@/lib/messaging/templates';
-import type { VisitChangeSummary } from '@/lib/rounds/visit-changes';
-import { formatGbp } from '@/lib/money/pence';
-import { groupHouseStops } from '@/lib/rounds/house-stops';
+import type { NeedsYou } from '@/lib/data/rounds/needs-you';
+import type { LatestPayment, RoundValue } from '@/lib/data/rounds/overview';
+import type { ComingUp } from '@/lib/rounds/coming-up';
+import { summariseToday } from '@/lib/rounds/today-strip';
+import type { WeekGlance } from '@/lib/rounds/week-glance';
+import type { WeatherByDay } from '@/lib/weather/met-norway';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
-import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { Button } from '@/components/ui/button';
-import {
-  SummaryStrip,
-  type SummaryStripItem,
-} from '@/components/jobs/status-summary-strip';
-import { MoveRemainingDialog } from '@/components/rounds/visit-actions';
-import { SkipRemainingDialog } from '@/components/rounds/skip-remaining-dialog';
-import { UndoChangeBar } from '@/components/rounds/undo-change-bar';
-import { VisitStopCard } from '@/components/rounds/visit-stop-card';
+import { WeatherNow } from '@/components/weather/day-weather';
+import { WeatherCredit } from '@/components/weather/weather-credit';
+import { KpiTiles } from '@/components/rounds/overview/kpi-tiles';
+import { MoneyCard } from '@/components/rounds/overview/money-card';
+import { NeedsYouCard } from '@/components/rounds/overview/needs-you-card';
+import { RoomCard } from '@/components/rounds/overview/room-card';
+import { TodayCard } from '@/components/rounds/overview/today-card';
+import { WeekStrip } from '@/components/rounds/overview/week-strip';
 
-const priceFormat = new Intl.NumberFormat('en-GB', {
-  style: 'currency',
-  currency: 'GBP',
-  maximumFractionDigits: 0,
-});
-
-type HomeFilter = 'remaining' | 'done' | 'skipped';
-
-function isLeftover(status: string): boolean {
-  return !['completed', 'cancelled', 'declined', 'incomplete'].includes(status);
+function greeting(): string {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Europe/London' }).format(new Date()),
+  );
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
 }
 
-function repliesToReview(visits: VisitRow[]): number {
-  return visits.filter((visit) => visit.customer_confirmation_status != null).length;
-}
-
+/**
+ * The Rounds overview. It answers, in order: how's today going, what needs me,
+ * how's the week and the money, and have I got room for more work. The full stop
+ * list and the day's actions live in the Day plan.
+ */
 export function RoundsHome({
   tenantName,
   data,
-  brand,
-  undoable,
+  needs,
+  books,
+  trend,
+  lastMonthToDate,
+  latestPayments,
+  week,
+  comingUp,
+  workingDays,
+  roundValue,
+  weather,
 }: {
   tenantName: string;
   data: RoundsHomeData;
-  brand: SmsBrand;
-  undoable: VisitChangeSummary | null;
+  needs: NeedsYou;
+  /** This month's In & out; null when it couldn't be worked out. */
+  books: BooksSummary | null;
+  trend: TrendMonth[] | null;
+  lastMonthToDate: number | null;
+  latestPayments: LatestPayment[] | null;
+  week: WeekGlance | null;
+  /** The 4-week forward view; null when it couldn't be worked out. */
+  comingUp: ComingUp | null;
+  workingDays: number[];
+  roundValue: RoundValue | null;
+  /** Forecast for the next 9 days; null when there isn't one. */
+  weather: WeatherByDay | null;
 }) {
-  const router = useRouter();
-  const [optimising, setOptimising] = useState(false);
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [skipOpen, setSkipOpen] = useState(false);
-  const [listFilter, setListFilter] = useState<HomeFilter | null>(null);
-
-  const leftovers = data.todayVisits.filter((v) => isLeftover(v.status));
-  const replyCount = repliesToReview(data.todayVisits);
-  const skippedCount = data.todayVisits.filter((v) => v.status === 'cancelled').length;
-  const dayLabelLong = format(parseISO(data.today), 'EEEE d MMMM yyyy');
-  const dayLabelShort = format(parseISO(data.today), 'EEE d MMM');
-
-  const summaryItems: SummaryStripItem[] = [
-    {
-      key: 'remaining',
-      title: 'Remaining',
-      icon: CircleDashed,
-      glow: 'rgb(100 116 139)',
-      count: leftovers.length,
-    },
-    {
-      key: 'done',
-      title: 'Done',
-      icon: CheckCircle2,
-      glow: 'rgb(16 185 129)',
-      count: data.todayDone,
-    },
-    {
-      key: 'skipped',
-      title: 'Skipped',
-      icon: SkipForward,
-      glow: 'rgb(249 115 22)',
-      count: skippedCount,
-    },
-    {
-      key: 'planned_amount',
-      title: 'Planned £',
-      icon: PoundSterling,
-      glow: 'rgb(245 158 11)',
-      count: priceFormat.format(data.todayPlannedAmount),
-    },
-    {
-      key: 'week',
-      title: 'This week',
-      icon: CalendarDays,
-      glow: 'rgb(59 130 246)',
-      count: data.weekVisitCount,
-    },
-    {
-      key: 'customers',
-      title: 'Customers',
-      icon: Users,
-      glow: 'rgb(6 182 212)',
-      count: data.activeCustomers,
-    },
-    {
-      key: 'owed',
-      title: 'Owed',
-      icon: Wallet,
-      glow: 'rgb(225 29 72)',
-      count: `${formatGbp(data.owedTotal)} · ${data.owedCustomers} ${data.owedCustomers === 1 ? 'customer' : 'customers'}`,
-    },
-  ];
-
-  const visibleVisits =
-    listFilter === 'remaining'
-      ? data.todayVisits.filter((v) => isLeftover(v.status))
-      : listFilter === 'done'
-        ? data.todayVisits.filter((v) => v.status === 'completed')
-        : listFilter === 'skipped'
-          ? data.todayVisits.filter((v) => v.status === 'cancelled')
-          : data.todayVisits;
-
-  const onSummarySelect = (key: string) => {
-    if (key === 'week') {
-      router.push('/calendar?view=week');
-      return;
-    }
-    if (key === 'customers') {
-      router.push('/customers');
-      return;
-    }
-    if (key === 'owed') {
-      router.push('/payments?view=overdue');
-      return;
-    }
-    if (key === 'planned_amount') {
-      setListFilter(null);
-      return;
-    }
-    if (key === 'remaining' || key === 'done' || key === 'skipped') {
-      setListFilter((prev) => (prev === key ? null : key));
-    }
+  const round = summariseToday(data.todayVisits);
+  const todayWeather = weather?.[data.today] ?? null;
+  const owed = {
+    total: data.owedTotal,
+    customers: data.owedCustomers,
+    top: data.owedTop,
+    oldestDate: data.owedOldestDate,
   };
-
-  const runOptimise = async () => {
-    setOptimising(true);
-    const result = await optimiseDay(data.today);
-    setOptimising(false);
-    if (result.success) {
-      toast.success(
-        `Route optimised · ${result.stops} stops · ${result.distanceKm.toFixed(1)} km`,
-      );
-      router.refresh();
-    } else {
-      toast.error(result.error);
-    }
-  };
+  const nextWorkingDay = week?.days.find((d) => d.date > data.today && d.stops > 0) ?? null;
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-5">
       <PageGradientHeader
         eyebrow={tenantName}
-        title={data.isToday ? 'Today' : 'Day schedule'}
-        subtitle={
-          <>
-            <span className="sm:hidden">{dayLabelShort}</span>
-            <span className="hidden sm:inline">{dayLabelLong}</span>
-          </>
-        }
+        title={greeting()}
+        subtitle={format(parseISO(data.today), 'EEEE d MMMM yyyy')}
         actions={
-          <div className="flex w-full min-w-0 flex-col gap-2">
-            <DashboardDayNav selectedDate={data.today} />
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              <Button variant="outline" size="sm" className="min-w-0" asChild>
-                <Link href={`/calendar?view=day&date=${data.today}`}>
-                  <span className="sm:hidden">Day plan</span>
-                  <span className="hidden sm:inline">Open day plan</span>
-                </Link>
-              </Button>
-              {leftovers.length > 0 ? (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-w-0"
-                    onClick={() => setMoveOpen(true)}
-                  >
-                    <span className="sm:hidden">Move ({leftovers.length})</span>
-                    <span className="hidden sm:inline">
-                      Move remaining ({leftovers.length})
-                    </span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-w-0"
-                    onClick={() => setSkipOpen(true)}
-                  >
-                    <span className="sm:hidden">Skip ({leftovers.length})</span>
-                    <span className="hidden sm:inline">
-                      Skip remaining ({leftovers.length})
-                    </span>
-                  </Button>
-                </>
-              ) : null}
-              {data.unorderedToday ? (
-                <Button
-                  size="sm"
-                  className="col-span-2 min-w-0 sm:col-span-1"
-                  onClick={() => void runOptimise()}
-                  disabled={optimising || leftovers.length < 2}
-                >
-                  {optimising ? (
-                    <Loader2 className="mr-1.5 size-4 animate-spin" />
-                  ) : (
-                    <Route className="mr-1.5 size-4" />
-                  )}
-                  Optimise
-                </Button>
-              ) : null}
+          todayWeather ? (
+            <div className="flex items-center gap-3 rounded-xl border border-white/40 bg-white/40 px-3.5 py-2 dark:border-white/10 dark:bg-white/5">
+              <div className="text-right">
+                <p className="text-2xl font-semibold leading-none tabular-nums">{todayWeather.highC}°</p>
+                <p className="mt-1 text-xs text-muted-foreground">low {todayWeather.lowC}°</p>
+              </div>
+              <WeatherNow weather={todayWeather} />
             </div>
-          </div>
+          ) : null
         }
       />
 
@@ -260,9 +115,7 @@ export function RoundsHome({
             <Users className="size-6 text-muted-foreground" />
           </div>
           <p className="mt-4 text-sm font-medium text-foreground">No customers yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Add your first customer to start planning the round.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Add your first customer to start planning the round.</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Button asChild>
               <Link href="/customers/new">Add customer</Link>
@@ -271,73 +124,29 @@ export function RoundsHome({
         </div>
       ) : null}
 
-      <SummaryStrip
-        label="This day"
-        hint="· click to filter this day's list"
-        activeKey={listFilter}
-        onSelect={onSummarySelect}
-        items={summaryItems}
-        gridClassName="grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-7"
-      />
+      <KpiTiles today={round} week={week} trend={trend} monthToDateLast={lastMonthToDate} owed={owed} />
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-2 px-0.5">
-          <h2 className="text-sm font-semibold text-foreground">
-            {data.isToday ? "Today's stops" : 'Stops'}
-          </h2>
-          <Button variant="ghost" size="sm" className="shrink-0 px-2 sm:px-3" asChild>
-            <Link href={`/calendar?view=day&date=${data.today}`}>
-              <span className="sm:hidden">Calendar</span>
-              <span className="hidden sm:inline">Full day plan</span>
-            </Link>
-          </Button>
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-5">
+        <div className="min-w-0 lg:col-span-3">
+          <TodayCard date={data.today} round={round} weather={todayWeather} nextWorkingDay={nextWorkingDay} />
         </div>
-        {replyCount > 0 ? (
-          <Link
-            href="/messages"
-            className="block rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-foreground"
-          >
-            {replyCount} {replyCount === 1 ? 'reply' : 'replies'} about this day to review
-          </Link>
-        ) : null}
-        <UndoChangeBar change={undoable} brand={brand} />
-        {data.todayVisits.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-            Nothing planned for today. Open the calendar to check another day.
-          </div>
-        ) : visibleVisits.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-            No stops match this filter.
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {groupHouseStops(visibleVisits).map((group, index) => (
-              <VisitStopCard
-                key={group[0]!.id}
-                visit={group[0]!}
-                visits={group}
-                orderIndex={group[0]!.route_position ?? index + 1}
-                brand={brand}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
+        <div className="min-w-0 lg:col-span-2">
+          <NeedsYouCard needs={needs} owed={owed} />
+        </div>
+      </div>
 
-      <MoveRemainingDialog
-        fromDate={data.today}
-        leftoverCount={leftovers.length}
-        brand={brand}
-        open={moveOpen}
-        onOpenChange={setMoveOpen}
-      />
-      <SkipRemainingDialog
-        open={skipOpen}
-        onOpenChange={setSkipOpen}
-        date={data.today}
-        remainingCount={leftovers.length}
-        brand={brand}
-      />
+      <WeekStrip week={week} weather={weather} />
+
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-5">
+        <div className="min-w-0 lg:col-span-3">
+          <MoneyCard today={data.today} books={books} trend={trend} latest={latestPayments} />
+        </div>
+        <div className="min-w-0 lg:col-span-2">
+          <RoomCard comingUp={comingUp} workingDays={workingDays} roundValue={roundValue} />
+        </div>
+      </div>
+
+      {weather ? <WeatherCredit /> : null}
     </div>
   );
 }

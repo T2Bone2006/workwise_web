@@ -46,7 +46,7 @@ with it, before anything goes live. Pushing the branch is fine when they ask.
 | `../docs/specs/phase-2.md` | Phase 2 payments (done). §6.0 is the step index. |
 | `../docs/specs/phase-3/` | Phase 3 messaging (code complete). `README.md` is the step index; one card per step. |
 | `../docs/specs/phase-4/` | Phase 4 Direct Debit (Stripe Bacs). Spec written 2026-09-29; `README.md` is the step index. |
-| `../docs/specs/phase-5/` | Phase 5 running the business (expenses, In & out, accountant access, downloads, Coming up, import). Spec written 2026-09-30; `README.md` is the step index. |
+| `../docs/specs/phase-5/` | Phase 5 running the business. **Signed off by the owner 2026-10-02, not released.** `README.md` is the step index. |
 | `../docs/specs/parked/open-banking/` | Parked open-banking (Yapily) spec — for after revenue. Do not build from it. |
 | `../docs/WORKING-WITH-CLAUDE.md` | Which model does what, and how to keep sessions cheap. |
 | **This file** | What is actually in the repos right now, and which SQL still needs pasting. |
@@ -82,14 +82,65 @@ card. It does not read this whole file, `PRODUCT.md`, or the rest of the spec.
 
 ## IN PROGRESS
 
-- Phase 3 code complete (steps 3–31 done; step 31 phone checks run 2026-09-29: tsc clean, 75 tests pass, iOS export OK). Step 33 paperwork done. Branch pushed.
-- Phase 3 step 32 walkthrough still open (19 rows below). Phase 4 = Direct Debit through **GoCardless** (spec rewritten 2026-09-30 from Stripe Bacs): `../docs/specs/phase-4/` (35 cards; open banking and Stripe bank details parked).
-- Phase 4 (Direct Debit) code complete, verified in the sandbox, not released (steps 1–25 done; step 26 is for launch). Results and release checklist in the Phase 4 section below; 826 web / 97 phone tests pass.
-
-- Phase 5 spec written 2026-09-30 (not started): `../docs/specs/phase-5/` (30 cards). First: step 1 (owner: two env vars + test receipts/round sheet), then steps 2–4 migrations (Cursor drafts, Claude reviews), step 5 paste. Finish the Phase 4 walkthrough first or alongside.
-- **Calendar update micro-phase: CODE COMPLETE 2026-10-01, NOT RELEASED** (all 15 steps ticked; owner closed it without running the step 14 table). Full notes in the "Calendar update" section below; spec `../docs/specs/calendar-update/`. Ships with everything else: migration (already pasted) → web → one phone build. Independent of Phase 5.
+- Phase 5 (running the business) signed off by the owner 2026-10-02, not released. See the Phase 5 section below. Phases 1–4 and the calendar update stay code-complete and unreleased. Still open from earlier: Phase 3 step 32 walkthrough; Phase 4 step 26 (live GoCardless at launch).
+- Next: Phase 6 (Lite in the dashboard). No spec folder yet (`docs/ROUNDS-PLAN.md` Phase 6).
 
 ---
+
+## Phase 5 — Running the business — SIGNED OFF BY THE OWNER 2026-10-02, NOT RELEASED
+
+Spec folder: `../docs/specs/phase-5/` (`README.md` is the step index). **Nothing ships until the release**: the three migrations are already pasted → deploy web → one phone build.
+
+**What was built**
+- **A Database.** Pasted: `supabase/migrations/20261002100000_expenses.sql`, `20261002100100_accountant_access.sql`, `20261002100200_setup_requests.sql`.
+- **B Expenses.** `lib/books/categories.ts`, `lib/books/periods.ts`, `lib/expenses/read-receipt.ts`, `lib/expenses/expenses-core.ts`, `app/(dashboard)/expenses/page.tsx`, `components/expenses/`.
+- **C In & out.** `lib/books/summary.ts`, `components/books/in-and-out-panel.tsx`.
+- **D Accountant and downloads.** `lib/accountant/access.ts`, `app/accountant/[token]/`, Settings → Accountant & data, `lib/downloads/` (ZIP via `fflate`).
+- **E Overview.** `components/rounds/overview/`, `lib/data/rounds/overview.ts`, `lib/data/rounds/needs-you.ts`, weather `lib/weather/met-norway.ts`.
+- **F Import.** `lib/import/` (spreadsheet + `read-round-book.ts`), `components/import/rounds/`, `lib/actions/rounds/import.ts`, `lib/actions/rounds/setup-request.ts`.
+- **G Phone.** `/api/rounds/expenses`, `/api/rounds/books/summary`. Phone: `workwise-mobile/src/lib/expenses/`, `src/lib/offline/receiptQueue.ts` (`SCAN_RECEIPT`), `src/screens/rounds/money/ExpensesScreen.tsx`, `ExpenseCheckScreen.tsx`, `SnapReceiptButton.tsx`.
+
+**Decisions.** Accountant = own read-only access (email + code), money side only, invoices as issued, no customer list or phone numbers, no new role. No mileage. Fixed HMRC-shaped categories. Cash basis. "Stuck? Send us your file" is the last resort, one open request per 30 days. Making Tax Digital still to decide before April 2027. **Sonnet reads images** (owner, 2026-10-02): receipts (`RECEIPT_AI_MODEL` default `claude-sonnet-5-5`, no second read) and round-book photos (`ROUND_BOOK_AI_MODEL`). Spreadsheet imports stay on Haiku (`CUSTOMER_IMPORT_AI_MODEL`; Pro `EXTRACTION_AI_MODEL`). The walkthrough did not record how many receipts Sonnet got wrong.
+
+**Env (in `.env.local` now; Vercel at release):** `ACCOUNTANT_CODE_SECRET`, `SETUP_REQUEST_EMAIL`. Optional overrides: `RECEIPT_AI_MODEL`, `RECEIPT_ESCALATION_MODEL`, `ROUND_BOOK_AI_MODEL`. Do not set `RECEIPT_AI_MODEL` unless overriding the Sonnet default.
+
+**Dependency:** web `fflate` 0.8.3. No new phone native module. Phone `package.json` unchanged. `app.json` has an uncommitted change: `userInterfaceStyle` `light` → `automatic` (the app follows the phone's light/dark setting). Not a new module. The owner closed the phase without confirming it.
+
+**Phone checks (2026-10-02):** `tsc` clean, 170 tests, one iOS Hermes bundle 6.75 MB (Phase 4 was 6.42 MB), `expo install --check` still the same 7 patch updates (not applied). Web `tsc` / tests / eslint / `npm run build` were not re-run at this close.
+
+**Walkthrough: not run as a table.** The owner signed the phase off on 2026-10-02 without ticking these rows.
+
+| # | | Note |
+|---|---|---|
+| 1 | ☐ | 15–20 real receipts; Sonnet is already the default |
+| 2 | ☐ | PDF reads; HEIC refused |
+| 3 | ☐ | Not a receipt |
+| 4 | ☐ | To check does not count until Saved |
+| 5 | ☐ | Add, edit, delete (photo gone) |
+| 6 | ☐ | In & out matches payments and saved expenses |
+| 7 | ☐ | Tax year: 12 months add up |
+| 8 | ☐ | VAT on/off |
+| 9 | ☐ | Invite email |
+| 10 | ☐ | Code, then money pages |
+| 11 | ☐ | 5 wrong codes, then a new code |
+| 12 | ☐ | Accountant download has no contact details |
+| 13 | ☐ | Remove → link dead |
+| 14 | ☐ | Download all my data |
+| 15 | ☐ | Tax-year ZIP: receipts and invoice PDFs |
+| 16 | ☐ | Overview forward view |
+| 17 | ☐ | Spreadsheet import |
+| 18 | ☐ | Same file again |
+| 19 | ☐ | Round-book photos |
+| 20 | ☐ | Existing Direct Debit linked |
+| 21 | ☐ | Stuck? link, one request per 30 days |
+| 22 | ☐ | Phone snap → check → save |
+| 23 | ☐ | Phone offline → Waiting to scan → one expense |
+| 24 | ☐ | Worker login has no Expenses |
+| 25 | ☐ | RS Locksmiths unchanged |
+
+**Not in this phase:** mileage, Making Tax Digital, custom categories, supplier refunds, Squeegee/CleanerPlanner presets, undo a whole import, accountant editing, import/accountant/downloads/overview on the phone, bank feeds.
+
+**At release:** privacy-policy paragraph in `workwise_site/app/privacy/page.tsx` is NOT deployed. LAUNCH LIST: rewrite the whole privacy policy for Rounds (receipt and round-book photos are read by Anthropic's AI; an accountant can be given read-only access). A task chip exists for an app-wide Radix id hydration warning.
 
 ## Calendar update (micro-phase) — CODE COMPLETE, NOT RELEASED
 
@@ -183,7 +234,7 @@ Spec folder: `../docs/specs/phase-4/` (`README.md` is the step index). Steps 1�
 
 **Known gaps**: no automatic retries (by design); refunds are made in the GoCardless dashboard, not WorkWise; existing Direct Debits are matched on the dashboard only; Stripe bank details (recognised automatically) parked in `docs/specs/parked/stripe-bank-details/`; standing orders into the trader's own bank are ticked off by hand; other amounts owed not on invoices; no Direct Debit on invoice pay pages; open banking parked (`docs/specs/parked/open-banking/`). Both work trees also contain modified files that Phase 4 did not touch (phone: AddCustomer, Today and others; web: several Pro pages) — not reviewed here; look before committing.
 
-**Next — Phase 5 (Running the business):** `docs/specs/phase-5/` is written (30 cards); start at its README.
+**Next — Phase 5 is signed off** (2026-10-02, not released). See the Phase 5 section above. Next build phase is Phase 6.
 
 ---
 

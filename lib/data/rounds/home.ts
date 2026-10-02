@@ -15,6 +15,10 @@ export type RoundsHomeData = {
   activeCustomers: number;
   owedTotal: number;
   owedCustomers: number;
+  /** The customers who owe the most, up to 3. */
+  owedTop: Array<{ name: string; amount: number; oldestUnpaidDate: string | null }>;
+  /** The oldest unpaid visit date across everyone who owes. */
+  owedOldestDate: string | null;
   activeAgreements: number;
   unorderedToday: boolean;
   catalogEmpty: boolean;
@@ -28,6 +32,8 @@ const EMPTY: Omit<RoundsHomeData, 'today' | 'isToday'> = {
   activeCustomers: 0,
   owedTotal: 0,
   owedCustomers: 0,
+  owedTop: [],
+  owedOldestDate: null,
   activeAgreements: 0,
   unorderedToday: false,
   catalogEmpty: true,
@@ -132,6 +138,16 @@ export async function getRoundsHomeData(
       activeCustomers: countOrZero(customersResult.count),
       owedTotal: owedResult.totalOwed,
       owedCustomers: owedResult.rows.filter((row) => row.owedAmount > 0).length,
+      owedTop: owedResult.rows
+        .filter((row) => row.owedAmount > 0)
+        .sort((a, b) => b.owedAmount - a.owedAmount)
+        .slice(0, 3)
+        .map((row) => ({ name: row.name, amount: row.owedAmount, oldestUnpaidDate: row.oldestUnpaidDate })),
+      owedOldestDate:
+        owedResult.rows
+          .filter((row) => row.owedAmount > 0 && row.oldestUnpaidDate)
+          .map((row) => row.oldestUnpaidDate!.slice(0, 10))
+          .sort()[0] ?? null,
       activeAgreements: countOrZero(agreementsResult.count),
       unorderedToday: summary.unorderedToday,
       catalogEmpty: countOrZero(catalogResult.count) === 0,

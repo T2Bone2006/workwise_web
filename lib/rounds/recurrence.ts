@@ -322,3 +322,74 @@ export function buildVisitInsert(params: {
     },
   };
 }
+
+const FORECAST_GUARD = 800;
+
+/**
+ * Every visit an agreement will have between `today` and `until`, with no count
+ * cap (unlike `forecastVisits`, which stays as it is for the customer page).
+ * Used by the overview's "Coming up" card, so it works past the calendar horizon.
+ *
+ * - `fixed`: every occurrence on its rhythm from the agreement's cursor.
+ * - `after_completion`: the next date depends on when the last clean is done, so
+ *   it is an estimate: each visit is assumed done on its day, then due again a
+ *   frequency later. With a visit already booked it carries on from that one.
+ * - paused with an end date: from that date; paused with none, or ended: nothing.
+ * - occurrences already booked as visits (`bookedOccurrenceDates`) are skipped.
+ */
+export function forecastVisitsUntil(
+  agreement: AgreementSchedule,
+  settings: RoundsSettings,
+  today: Ymd,
+  until: Ymd,
+  bookedOccurrenceDates: ReadonlySet<Ymd> = new Set(),
+): PlannedVisit[] {
+  if (agreement.status === 'ended' || agreement.frequency_days < 1) return [];
+
+  let floor = today;
+  if (agreement.status === 'paused') {
+    if (!agreement.paused_until) return [];
+    if (compareYmd(agreement.paused_until, floor) > 0) floor = agreement.paused_until;
+  }
+  if (compareYmd(floor, until) > 0) return [];
+
+  const freq = agreement.frequency_days;
+  const reach = addDays(until, 7); // a date can snap back up to 3 days, so look a little past the end
+  const place = (occurrence: Ymd) =>
+    placeOnCalendar(occurrence, agreement.preferred_weekday, settings);
+  const visits: PlannedVisit[] = [];
+
+  if (agreement.schedule_mode === 'after_completion') {
+    let latestBooked: Ymd | null = null;
+    for (const d of bookedOccurrenceDates) {
+      if (latestBooked == null || compareYmd(d, latestBooked) > 0) latestBooked = d;
+    }
+    let occurrence = latestBooked ? addDays(latestBooked, freq) : agreement.next_due_date;
+    for (let guard = 0; guard < FORECAST_GUARD && compareYmd(occurrence, reach) <= 0; guard += 1) {
+      let scheduled = place(occurrence);
+      if (compareYmd(scheduled, floor) < 0) {
+        scheduled = shiftForWorkingDaysAndBlackouts(floor, settings);
+      }
+      if (compareYmd(scheduled, until) <= 0 && !bookedOccurrenceDates.has(occurrence)) {
+        visits.push({ occurrenceDate: occurrence, scheduledDate: scheduled });
+      }
+      occurrence = addDays(scheduled, freq);
+    }
+    return visits;
+  }
+
+  let cursor =
+    compareYmd(agreement.next_due_date, floor) < 0
+      ? firstOccurrenceOnOrAfter(agreement.next_due_date, freq, floor)
+      : agreement.next_due_date;
+  for (let guard = 0; guard < FORECAST_GUARD && compareYmd(cursor, reach) <= 0; guard += 1) {
+    if (!bookedOccurrenceDates.has(cursor)) {
+      const scheduled = place(cursor);
+      if (compareYmd(scheduled, floor) >= 0 && compareYmd(scheduled, until) <= 0) {
+        visits.push({ occurrenceDate: cursor, scheduledDate: scheduled });
+      }
+    }
+    cursor = addDays(cursor, freq);
+  }
+  return visits;
+}

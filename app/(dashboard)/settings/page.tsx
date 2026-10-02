@@ -4,6 +4,10 @@ import { getTenantSkills } from '@/lib/actions/skills';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { getMessagingSettings } from '@/lib/data/messaging/settings';
+import { listAccess, type AccessSummary } from '@/lib/accountant/access';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { taxYearFor } from '@/lib/books/periods';
+import { todayInLondon } from '@/lib/rounds/dates';
 import { getCardPanelData } from '@/lib/data/payments/card-panel';
 import { getPaymentSettings } from '@/lib/data/payments/settings';
 import { goCardlessConfig, isGoCardlessConfigured } from '@/lib/gocardless/config';
@@ -58,6 +62,15 @@ export default async function SettingsPage({
     };
   }
 
+  // Accountant access is for the account owner of a Rounds business only.
+  let accountant: { accountants: AccessSummary[] | null; currentTaxYear: number } | null = null;
+  if (products.hasRounds && data.tenantId && data.user?.role === 'admin') {
+    accountant = {
+      accountants: await listAccess(createAdminClient(), data.tenantId).catch(() => null),
+      currentTaxYear: taxYearFor(todayInLondon()),
+    };
+  }
+
   const verifyUrl = isGoCardlessConfigured() ? goCardlessConfig().verifyUrl : null;
   const companyLogoUrl = data.tenant?.settings?.company?.logo_url ?? null;
 
@@ -75,6 +88,7 @@ export default async function SettingsPage({
             billing={billing}
             rounds={rounds}
             payments={payments}
+            accountant={accountant}
             companyLogoUrl={companyLogoUrl}
             showSkills={products.isPro}
             defaultTab={raw.tab}
@@ -89,6 +103,7 @@ export default async function SettingsPage({
           billing={billing}
           rounds={rounds}
           payments={payments}
+          accountant={accountant}
           companyLogoUrl={companyLogoUrl}
           showSkills={products.isPro}
           defaultTab={raw.tab}

@@ -24,11 +24,16 @@ import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banne
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
-import { getMessagingSettings } from '@/lib/data/messaging/settings';
-import { getLatestUndoableChange } from '@/lib/actions/rounds/visits';
+import { loadBooksSummary } from '@/lib/books/summary';
+import { currentMonth } from '@/lib/books/periods';
 import { getRoundsHomeData } from '@/lib/data/rounds/home';
+import { loadComingUp } from '@/lib/data/rounds/coming-up';
+import { loadNeedsYou } from '@/lib/data/rounds/needs-you';
+import { loadWeather } from '@/lib/data/weather';
+import { getRoundsSettings } from '@/lib/data/rounds/settings';
+import { loadLatestPayments, loadMoneyTrend, loadRoundValue, loadWeekGlance } from '@/lib/data/rounds/overview';
+import { todayInLondon } from '@/lib/rounds/dates';
 import { createClient } from '@/lib/supabase/server';
-import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { RoundsHome } from '@/components/rounds/rounds-home';
 import { NoProducts } from '@/components/dashboard/no-products';
 
@@ -145,25 +150,36 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // Non-Pro tenants get their product's home here; /dashboard stays the one
   // URL every login lands on.
   if (products.primary === 'rounds') {
-    const rawParams = await searchParams;
-    const day = parseDayParam(rawParams.date);
     const supabase = await createClient();
-    const [data, messaging, undoable] = await Promise.all([
-      getRoundsHomeData(tenantId, day),
-      getMessagingSettings(supabase, tenantId),
-      getLatestUndoableChange(day),
+    const today = todayInLondon();
+    // The overview is always today; other days live in the calendar. Each card's
+    // read fails on its own (that card says so) and never breaks the page.
+    const settings = await getRoundsSettings(supabase, tenantId);
+    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue] = await Promise.all([
+      getRoundsHomeData(tenantId),
+      loadNeedsYou(supabase, { tenantId, today }),
+      loadBooksSummary(supabase, { tenantId, period: currentMonth(today) }).catch(() => null),
+      loadComingUp(supabase, { tenantId, weeks: 4 }).catch(() => null),
+      loadWeekGlance({ tenantId, today, settings }).catch(() => null),
+      loadMoneyTrend(supabase, { tenantId, today }),
+      loadLatestPayments(supabase, tenantId).catch(() => null),
+      loadRoundValue(supabase, tenantId).catch(() => null),
     ]);
-    const brand = {
-      businessName: messaging.businessName,
-      contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
-    };
+    const weather = await loadWeather(supabase, { tenantId, visitPoints: data.todayVisits });
     return (
       <RoundsHome
-        key={day}
         tenantName={tenantName}
         data={data}
-        brand={brand}
-        undoable={undoable}
+        needs={needs}
+        books={books}
+        trend={trend?.months ?? null}
+        lastMonthToDate={trend?.lastMonthToDate ?? null}
+        latestPayments={latestPayments}
+        week={week}
+        comingUp={comingUp}
+        workingDays={settings.working_days}
+        roundValue={roundValue}
+        weather={weather}
       />
     );
   }

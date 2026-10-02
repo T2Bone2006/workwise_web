@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Building2,
+  Calculator,
   User,
   AlertTriangle,
   CreditCard,
@@ -21,6 +22,8 @@ import type { PaymentSettings } from '@/lib/data/payments/settings';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import { SettingsCompanyTab } from './settings-company-tab';
 import { SettingsPaymentsTab } from './settings-payments-tab';
+import { SettingsAccountantTab } from './settings-accountant-tab';
+import type { AccessSummary } from '@/lib/accountant/access';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 import { SettingsBillingTab } from './settings-billing-tab';
@@ -36,6 +39,8 @@ interface SettingsViewProps {
   billing: BillingSummary;
   rounds?: { settings: RoundsSettings } | null;
   payments?: { settings: PaymentSettings; cardPanel: CardPanelData } | null;
+  /** Rounds account owner only: their accountants (null inside = couldn't load). */
+  accountant?: { accountants: AccessSummary[] | null; currentTaxYear: number } | null;
   companyLogoUrl?: string | null;
   showSkills: boolean;
   defaultTab?: string;
@@ -58,6 +63,7 @@ export function SettingsView({
   billing,
   rounds = null,
   payments = null,
+  accountant = null,
   companyLogoUrl = null,
   showSkills,
   defaultTab,
@@ -76,6 +82,9 @@ export function SettingsView({
           : []),
         ...(payments
           ? [{ value: 'payments', label: 'Payments', icon: Wallet }]
+          : []),
+        ...(accountant
+          ? [{ value: 'accountant', label: 'Accountant & data', icon: Calculator }]
           : []),
         ...baseTabs.slice(1),
       ]
@@ -173,6 +182,11 @@ export function SettingsView({
               onSaved={onSaved}
               onDirtyChange={setFormDirty}
             />
+          </TabsContent>
+        )}
+        {accountant && (
+          <TabsContent value="accountant" className="mt-0 outline-none">
+            <SettingsAccountantTab accountants={accountant.accountants} currentTaxYear={accountant.currentTaxYear} />
           </TabsContent>
         )}
         <TabsContent value="billing" className="mt-0 outline-none">

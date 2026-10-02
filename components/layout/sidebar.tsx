@@ -69,7 +69,7 @@ function buildNavSections(features: TenantFeatures): NavSection[] {
     { href: '/customers', label: 'Customers', icon: Users, show: true },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays, show: true },
     { href: '/services', label: 'Services', icon: Wrench, show: true },
-    // Import deferred — early customers onboarded manually as a service.
+    { href: '/import', label: 'Import', icon: Upload, show: true },
     { href: '/payments', label: 'Payments', icon: Wallet, show: true },
     { href: '/bank', label: 'Bank', icon: Landmark, show: true },
     { href: '/messages', label: 'Messages', icon: MessageSquare, show: true },

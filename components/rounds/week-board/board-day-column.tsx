@@ -13,6 +13,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DayWeather } from '@/components/weather/day-weather';
+import type { DayWeather as DayWeatherData } from '@/lib/weather/met-norway';
 import { BoardStopCard } from './board-stop-card';
 
 export type ColumnHighlight = 'drop' | 'swap' | 'denied' | 'swap-source' | null;
@@ -34,6 +36,8 @@ export function BoardDayColumn(props: {
   /** The stop here that a dragged card would join (same house), if any. */
   joinStopId: string | null;
   highlight: ColumnHighlight;
+  /** The forecast for this day, when there is one (today and the next 8 days). */
+  weather?: DayWeatherData;
   /** Dragging is off while a move is saving. */
   locked: boolean;
   onOpen: (stop: BoardStop, date: string) => void;
@@ -121,6 +125,7 @@ export function BoardDayColumn(props: {
           {narrow ? null : (
             <p className="truncate text-xs text-muted-foreground">{summary}</p>
           )}
+          {narrow || !props.weather ? null : <DayWeather weather={props.weather} className="mt-0.5" />}
         </div>
         {narrow ? null : (
           <DropdownMenu>
