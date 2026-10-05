@@ -68,7 +68,8 @@ function useCustomerSave(customerId: string) {
   };
 }
 
-export function CustomerDetailsCard(props: {
+/** The customer's own details, opened from the Edit button in the page header. */
+export function CustomerEditFields(props: {
   customer: RoundsCustomerDetail;
   house: { address: string | null; postcode: string | null };
 }): JSX.Element {
@@ -82,128 +83,108 @@ export function CustomerDetailsCard(props: {
   const hasAccess = Boolean(customer.access_notes?.trim());
 
   return (
-    <Card className="glass-card border-border/80">
-      <CardHeader className="pb-2">
-        <CustomerSectionTitle
-          icon={UserRound}
-          title="About them"
-          tone="sky"
-          hint="Tap a line to change it"
-        />
-      </CardHeader>
-      <CardContent>
-        <InlineEditGroup>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FieldIcon icon={UserRound}>
-              <InlineText
-                label="Name"
-                value={customer.name}
-                onSave={async (value) => {
-                  const result = await save({ field: 'name', value });
-                  return result.success
-                    ? { success: true, value: result.value }
-                    : { success: false, error: result.error };
-                }}
-              />
-            </FieldIcon>
-            <FieldIcon icon={Phone}>
-              <InlineText
-                label="Phone"
-                value={phone}
-                inputMode="tel"
-                emptyText="Add phone"
-                placeholder="07700 900123"
-                onSave={async (value) => {
-                  const result = await save({ field: 'phone', value });
-                  if (!result.success) return { success: false, error: result.error };
-                  setPhone(savedText(result.value, value));
-                  return { success: true, value: result.value };
-                }}
-              />
-              {hasMobile ? null : (
-                <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
-                  No mobile — texts can&apos;t be sent
-                </p>
-              )}
-            </FieldIcon>
-            <FieldIcon icon={Mail}>
-              <InlineText
-                label="Email"
-                value={customer.email}
-                inputMode="email"
-                emptyText="Add email"
-                placeholder="name@example.com"
-                onSave={(value) => save({ field: 'email', value })}
-              />
-            </FieldIcon>
-            <FieldIcon icon={MapPin}>
-              <InlineAddress
-                label="Address"
-                address={address}
-                postcode={postcode}
-                onSave={async (value) => {
-                  const result = await save({ field: 'house', value });
-                  if (!result.success) return result;
-                  if (
-                    result.value &&
-                    typeof result.value === 'object' &&
-                    'address' in result.value &&
-                    'postcode' in result.value
-                  ) {
-                    const saved = result.value as { address: string; postcode: string };
-                    setAddress(saved.address);
-                    setPostcode(saved.postcode);
-                  }
-                  return { success: true };
-                }}
-              />
-            </FieldIcon>
-          </div>
+    <InlineEditGroup>
+      <p className="mb-3 text-xs text-muted-foreground">Tap a line to change it</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FieldIcon icon={UserRound}>
+          <InlineText
+            label="Name"
+            value={customer.name}
+            onSave={async (value) => {
+              const result = await save({ field: 'name', value });
+              return result.success
+                ? { success: true, value: result.value }
+                : { success: false, error: result.error };
+            }}
+          />
+        </FieldIcon>
+        <FieldIcon icon={Phone}>
+          <InlineText
+            label="Phone"
+            value={phone}
+            inputMode="tel"
+            emptyText="Add phone"
+            placeholder="07700 900123"
+            onSave={async (value) => {
+              const result = await save({ field: 'phone', value });
+              if (!result.success) return { success: false, error: result.error };
+              setPhone(savedText(result.value, value));
+              return { success: true, value: result.value };
+            }}
+          />
+          {hasMobile ? null : (
+            <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+              No mobile — texts can&apos;t be sent
+            </p>
+          )}
+        </FieldIcon>
+        <FieldIcon icon={Mail}>
+          <InlineText
+            label="Email"
+            value={customer.email}
+            inputMode="email"
+            emptyText="Add email"
+            placeholder="name@example.com"
+            onSave={(value) => save({ field: 'email', value })}
+          />
+        </FieldIcon>
+        <FieldIcon icon={MapPin}>
+          <InlineAddress
+            label="Address"
+            address={address}
+            postcode={postcode}
+            onSave={async (value) => {
+              const result = await save({ field: 'house', value });
+              if (!result.success) return result;
+              if (
+                result.value &&
+                typeof result.value === 'object' &&
+                'address' in result.value &&
+                'postcode' in result.value
+              ) {
+                const saved = result.value as { address: string; postcode: string };
+                setAddress(saved.address);
+                setPostcode(saved.postcode);
+              }
+              return { success: true };
+            }}
+          />
+        </FieldIcon>
+      </div>
 
-          <div
-            className={cn(
-              'mt-4 rounded-xl border px-3 py-3',
-              hasAccess
-                ? 'border-amber-400/40 bg-amber-500/10'
-                : 'border-dashed border-border bg-muted/30',
-            )}
-          >
-            <FieldIcon icon={KeyRound}>
-              <InlineText
-                label="Access notes"
-                value={customer.access_notes}
-                multiline
-                emptyText="Gate code, dog, where to park…"
-                placeholder="Gate code, dog, park on the left…"
-                onSave={(value) => save({ field: 'access_notes', value })}
-              />
-            </FieldIcon>
-          </div>
-
-          <div className="mt-4">
-            <div className="rounded-xl border border-border/70 bg-muted/40 p-3">
-              <CustomerSectionTitle
-                as="h3"
-                icon={StickyNote}
-                title="Notes"
-                tone="amber"
-                hint="Only you see this"
-              />
-              <div className="mt-3">
-                <InlineText
-                  label="Notes"
-                  value={customer.notes}
-                  multiline
-                  hideLabel
-                  emptyText="Add a private note"
-                  onSave={(value) => save({ field: 'notes', value })}
-                />
-              </div>
-            </div>
-          </div>
-        </InlineEditGroup>
-      </CardContent>
-    </Card>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div
+          className={cn(
+            'rounded-xl border px-3 py-3',
+            hasAccess
+              ? 'border-amber-400/40 bg-amber-500/10'
+              : 'border-dashed border-border bg-muted/30',
+          )}
+        >
+          <FieldIcon icon={KeyRound}>
+            <InlineText
+              label="Access notes"
+              value={customer.access_notes}
+              multiline
+              emptyText="Gate code, dog, where to park…"
+              placeholder="Gate code, dog, park on the left…"
+              onSave={(value) => save({ field: 'access_notes', value })}
+            />
+          </FieldIcon>
+        </div>
+        <div className="rounded-xl border border-border/70 bg-muted/40 px-3 py-3">
+          <FieldIcon icon={StickyNote}>
+            <InlineText
+              label="Notes (only you see this)"
+              value={customer.notes}
+              multiline
+              emptyText="Add a private note"
+              onSave={(value) => save({ field: 'notes', value })}
+            />
+          </FieldIcon>
+        </div>
+      </div>
+    </InlineEditGroup>
   );
 }
 

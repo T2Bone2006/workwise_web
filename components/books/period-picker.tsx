@@ -45,7 +45,7 @@ export function PeriodPicker({ value, basePath, earliestTaxYear, today }: Period
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div className="inline-flex rounded-lg bg-muted p-[3px]" role="group" aria-label="Period type">
+      <div className="inline-flex rounded-lg bg-look-segment p-[3px]" role="group" aria-label="Period type">
         <button
           type="button"
           className={segment(value.kind === 'month')}

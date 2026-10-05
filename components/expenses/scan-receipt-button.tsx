@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState, type DragEvent } from 'react';
-import { Camera, Loader2 } from 'lucide-react';
+import { Camera, Loader2, UploadCloud } from 'lucide-react';
+import { IconChip } from '@/components/look';
 import { toast } from 'sonner';
 import { scanReceipt } from '@/lib/actions/expenses';
 import {
@@ -81,8 +82,8 @@ export function ScanReceiptButton({ onScanned }: { onScanned: (last: ScanOutcome
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
       className={cn(
-        'flex flex-wrap items-center gap-3 rounded-xl border border-dashed px-4 py-3 transition-colors',
-        dragging ? 'border-primary bg-primary/5' : 'border-border/80',
+        'flex flex-wrap items-center gap-3 rounded-2xl border border-dashed bg-card px-4 py-3 shadow-(--look-card-shadow) transition-colors',
+        dragging ? 'border-primary bg-(--tone-rounds-soft)' : 'border-(--tone-violet-line)',
       )}
     >
       <input
@@ -93,6 +94,7 @@ export function ScanReceiptButton({ onScanned }: { onScanned: (last: ScanOutcome
         accept="image/jpeg,image/png,image/webp,application/pdf"
         onChange={(e) => void scanAll(Array.from(e.target.files ?? []))}
       />
+      <IconChip icon={UploadCloud} tone="violet" />
       <Button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
         {busy

@@ -1,14 +1,15 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Paperclip } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Paperclip, Receipt } from 'lucide-react';
 import { EXPENSE_CATEGORY_LABELS } from '@/lib/books/categories';
 import { periodParam, periodRange, type Period } from '@/lib/books/periods';
 import type { ExpenseRow } from '@/lib/data/expenses';
 import { formatGbp, fromPence, toPence } from '@/lib/money/pence';
 import { formatMoney, formatShortDay } from '@/components/expenses/format';
+import { EmptyState, IconChip, LookCard, Tag } from '@/components/look';
+import { EXPENSE_CATEGORY_ICON } from '@/components/books/category-style';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 type MonthPeriod = Extract<Period, { kind: 'month' }>;
 
@@ -39,7 +40,7 @@ export function ExpensesList({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-(--look-card-shadow)">
         <div className="flex items-center gap-1">
           <Button size="icon" variant="outline" aria-label="Previous month" onClick={() => go(shiftMonth(period, -1))}>
             <ChevronLeft className="size-4" />
@@ -56,57 +57,63 @@ export function ExpensesList({
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          <span className="text-base font-semibold text-foreground">{formatGbp(total, { always2dp: true })}</span> spent
+          <span className="text-xl font-semibold tabular-nums text-foreground">{formatGbp(total, { always2dp: true })}</span> spent
         </p>
       </div>
 
       {expenses.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-          Nothing spent in {label}. Scan a receipt or add one.
-        </div>
+        <EmptyState icon={Receipt} title={`Nothing spent in ${label}`} body="Scan a receipt or add an expense and it shows up here." />
       ) : (
-        <div className="rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Supplier</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                {vatRegistered ? <TableHead className="text-right">VAT</TableHead> : null}
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {expenses.map((expense) => (
-                <TableRow key={expense.id} className="cursor-pointer" onClick={() => onOpen(expense)}>
-                  <TableCell className="whitespace-nowrap">{formatShortDay(expense.spentOn)}</TableCell>
-                  <TableCell>{expense.merchant || <span className="text-muted-foreground">—</span>}</TableCell>
-                  <TableCell>{expense.category ? EXPENSE_CATEGORY_LABELS[expense.category] : ''}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(expense.amount)}</TableCell>
-                  {vatRegistered ? (
-                    <TableCell className="text-right tabular-nums">{formatMoney(expense.vatAmount)}</TableCell>
+        <LookCard>
+          <ul className="divide-y divide-border">
+            {expenses.map((expense) => {
+              const CategoryIcon = EXPENSE_CATEGORY_ICON[expense.category ?? 'other'];
+              return (
+                <li key={expense.id} className="relative flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <button
+                    type="button"
+                    aria-label={`Open ${expense.merchant || 'expense'}`}
+                    onClick={() => onOpen(expense)}
+                    className="absolute inset-0 rounded-lg focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  />
+                  <span className="pointer-events-none">
+                    <IconChip icon={CategoryIcon} tone="violet" />
+                  </span>
+                  <span className="pointer-events-none min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-medium tracking-tight">
+                      {expense.merchant || <span className="text-muted-foreground">No supplier</span>}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+                      <span>{formatShortDay(expense.spentOn)}</span>
+                      {expense.category ? <Tag tone="violet">{EXPENSE_CATEGORY_LABELS[expense.category]}</Tag> : null}
+                    </span>
+                  </span>
+                  {expense.hasReceipt ? (
+                    <button
+                      type="button"
+                      aria-label="View receipt"
+                      title="View receipt"
+                      className="relative z-10 flex size-8 items-center justify-center rounded-lg text-(--tone-violet-text) transition-colors hover:bg-(--tone-violet-soft)"
+                      onClick={() => onOpen(expense)}
+                    >
+                      <Paperclip className="size-4" />
+                    </button>
                   ) : null}
-                  <TableCell>
-                    {expense.hasReceipt ? (
-                      <button
-                        type="button"
-                        aria-label="View receipt"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpen(expense);
-                        }}
-                      >
-                        <Paperclip className="size-4" />
-                      </button>
+                  <span className="pointer-events-none text-right">
+                    <span className="block text-base font-semibold text-(--tone-rose-solid) tabular-nums">
+                      {formatMoney(expense.amount)}
+                    </span>
+                    {vatRegistered && expense.vatAmount != null ? (
+                      <span className="block text-xs text-muted-foreground tabular-nums">
+                        VAT {formatMoney(expense.vatAmount)}
+                      </span>
                     ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </LookCard>
       )}
     </div>
   );

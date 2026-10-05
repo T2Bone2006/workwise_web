@@ -10,6 +10,8 @@ import type { PaymentSettings } from '@/lib/data/payments/settings';
 import { formatSortCode } from '@/lib/payments/bank-format';
 import { paymentSettingsSchema } from '@/lib/validations/payments';
 import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
+import { SettingsWaysToPay } from '@/components/settings/settings-ways-to-pay';
+import { useLook } from '@/components/look/use-look';
 import {
   Card,
   CardContent,
@@ -84,6 +86,7 @@ export function SettingsPaymentsTab({
   onSaved: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const fresh = useLook() === 'new';
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
   const [baseline, setBaseline] = useState(() => savedSnapshot(settings));
@@ -166,6 +169,13 @@ export function SettingsPaymentsTab({
 
   return (
     <div className="space-y-6">
+    {fresh ? (
+      <SettingsWaysToPay
+        card={cardPanel.status}
+        directDebit={settings.directDebit.state}
+        bankSet={Boolean(settings.bankAccountName && settings.bankSortCode && settings.bankAccountNumber)}
+      />
+    ) : null}
     <form onSubmit={handleSubmit} className="space-y-6">
       <Card className="glass-card rounded-xl border border-border/60 bg-card/80">
         <CardHeader>

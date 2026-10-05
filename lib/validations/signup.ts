@@ -4,7 +4,8 @@ const ukPhoneRegex = /^(\+44|0)[0-9\s]{9,13}$/;
 const ukPostcodeRegex = /^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$/i;
 
 export const signupSchema = z.object({
-  product: z.enum(['rounds', 'lite']),
+  plan: z.enum(['rounds', 'lite', 'both']),
+  interval: z.enum(['month', 'year']),
   businessName: z.string().trim().min(2, 'Business name must be at least 2 characters').max(120),
   fullName: z.string().trim().min(2, 'Please enter your name').max(120),
   email: z.string().trim().min(1, 'Email is required').email('Please enter a valid email'),
@@ -19,8 +20,10 @@ export const signupSchema = z.object({
     .trim()
     .regex(ukPostcodeRegex, 'Please enter a valid UK postcode')
     .transform((val) => val.toUpperCase()),
-  /** Lite only: what the business does, for the chatbot. */
+  /** Lite only: what the business does, for the chatbot. Shown when the plan includes Lite. */
   trade: z.string().trim().max(80).optional().or(z.literal('')),
+  /** From ?ref=; the referral cookie is read server-side. */
+  ref: z.string().trim().max(16).optional().or(z.literal('')),
 });
 
 export type SignupInput = z.input<typeof signupSchema>;

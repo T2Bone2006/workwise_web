@@ -1,13 +1,12 @@
-import { Card, CardContent } from '@/components/ui/card';
+import { CircleAlert } from 'lucide-react';
+import { EmptyState } from '@/components/look';
 
 export default function AccountantLinkNotFound() {
   return (
-    <div className="mx-auto w-full max-w-md py-16">
-      <Card>
-        <CardContent className="text-center text-sm text-muted-foreground">
-          This link no longer works. Ask the business that invited you to send a new one.
-        </CardContent>
-      </Card>
-    </div>
+    <EmptyState
+      icon={CircleAlert}
+      title="This link no longer works"
+      body="Ask the business that invited you to send a new one."
+    />
   );
 }

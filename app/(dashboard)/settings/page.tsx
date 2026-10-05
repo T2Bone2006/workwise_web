@@ -1,7 +1,10 @@
+import { Suspense } from 'react';
 import { getSettingsPageData } from '@/lib/data/settings';
-import { getBillingSummary } from '@/lib/data/billing';
+import { getBillingSummary, type BillingSummary } from '@/lib/data/billing';
+import { getPlanSummary } from '@/lib/billing/manage';
+import { getReferralData } from '@/lib/data/referral-page';
 import { getTenantSkills } from '@/lib/actions/skills';
-import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantProducts, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { listAccess, type AccessSummary } from '@/lib/accountant/access';
@@ -12,7 +15,14 @@ import { getCardPanelData } from '@/lib/data/payments/card-panel';
 import { getPaymentSettings } from '@/lib/data/payments/settings';
 import { goCardlessConfig, isGoCardlessConfigured } from '@/lib/gocardless/config';
 import { createClient } from '@/lib/supabase/server';
+import { SettingsBillingTab } from '@/components/settings/settings-billing-tab';
 import { SettingsView } from '@/components/settings/settings-view';
+import {
+  PlanBillingLoadError,
+  PlanBillingOwnerNotice,
+  PlanBillingSkeleton,
+  PlanBillingTab,
+} from '@/components/settings/plan-billing/plan-billing-tab';
 import { MessagingSectionProvider } from '@/components/settings/settings-messages-section';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
@@ -73,6 +83,19 @@ export default async function SettingsPage({
 
   const verifyUrl = isGoCardlessConfigured() ? goCardlessConfig().verifyUrl : null;
   const companyLogoUrl = data.tenant?.settings?.company?.logo_url ?? null;
+  const selfServeBilling = isSelfServeBilling(billing, products.isPro);
+  const hasRoundsAccount =
+    products.hasRounds || billing.subscriptions.some((sub) => sub.product === 'rounds');
+  const billingPanel =
+    selfServeBilling && data.user?.role === 'admin' && data.tenantId ? (
+      <Suspense fallback={<PlanBillingSkeleton />}>
+        <SelfServeBilling tenantId={data.tenantId} billing={billing} />
+      </Suspense>
+    ) : selfServeBilling ? (
+      <PlanBillingOwnerNotice />
+    ) : (
+      <SettingsBillingTab billing={billing} />
+    );
 
   return (
     <div className="space-y-6">
@@ -85,7 +108,9 @@ export default async function SettingsPage({
           <SettingsView
             initialData={data}
             initialTenantSkills={initialTenantSkills}
-            billing={billing}
+            billingPanel={billingPanel}
+            selfServeBilling={selfServeBilling}
+            hasRounds={hasRoundsAccount}
             rounds={rounds}
             payments={payments}
             accountant={accountant}
@@ -100,7 +125,9 @@ export default async function SettingsPage({
         <SettingsView
           initialData={data}
           initialTenantSkills={initialTenantSkills}
-          billing={billing}
+          billingPanel={billingPanel}
+          selfServeBilling={selfServeBilling}
+          hasRounds={hasRoundsAccount}
           rounds={rounds}
           payments={payments}
           accountant={accountant}
@@ -113,4 +140,25 @@ export default async function SettingsPage({
       )}
     </div>
   );
+}
+
+/** Pro and hand-set-up businesses stay on the managed billing tab. */
+function isSelfServeBilling(billing: BillingSummary, isPro: boolean): boolean {
+  if (isPro) return false;
+  if (!billing.hasStripeCustomer) return false;
+  const proTiers = new Set<string>(PRO_TIER_PRODUCTS);
+  return !billing.subscriptions.some((sub) => sub.source === 'manual' || proTiers.has(sub.product));
+}
+
+async function SelfServeBilling({ tenantId, billing }: { tenantId: string; billing: BillingSummary }) {
+  let summary: Awaited<ReturnType<typeof getPlanSummary>> | null = null;
+  try {
+    summary = await getPlanSummary(tenantId);
+  } catch (err) {
+    console.error('[billing] summary', err instanceof Error ? err.name : 'Error');
+  }
+  if (!summary) return <PlanBillingLoadError />;
+  if (summary.kind === 'managed') return <SettingsBillingTab billing={billing} />;
+  const referral = summary.kind === 'stripe' ? await getReferralData(tenantId, summary.choice.plan) : null;
+  return <PlanBillingTab summary={summary} referral={referral} />;
 }

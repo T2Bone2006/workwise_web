@@ -1,7 +1,7 @@
 import { format, isValid, parseISO } from 'date-fns';
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
-import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantProducts, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { getWorkersForTenant } from '@/lib/data/workers';
 import {
@@ -33,12 +33,16 @@ import { loadWeather } from '@/lib/data/weather';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { loadLatestPayments, loadMoneyTrend, loadRoundValue, loadWeekGlance } from '@/lib/data/rounds/overview';
 import { todayInLondon } from '@/lib/rounds/dates';
+import { getAuthUser } from '@/lib/supabase/auth-user';
 import { createClient } from '@/lib/supabase/server';
 import { RoundsHome } from '@/components/rounds/rounds-home';
 import { NoProducts } from '@/components/dashboard/no-products';
+import { PlanEnded } from '@/components/dashboard/plan-ended';
+import { parsePlanChoice, type PlanChoice } from '@/lib/billing/plans';
 
 interface DashboardPageProps {
   searchParams: Promise<{
+    restarted?: string;
     date?: string;
     search?: string;
     status?: string;
@@ -75,6 +79,35 @@ const VALID_STATUS: JobStatus[] = [
   'declined',
 ];
 const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+
+/** Last self-serve plan, or null when this login should keep the old "no subscription" box (no rows, Pro, or managed). */
+async function restartChoice(tenantId: string): Promise<PlanChoice | null> {
+  try {
+    const supabase = await createClient();
+    const [{ data, error }, { data: tenant, error: tenantError }] = await Promise.all([
+      supabase
+        .from('subscriptions')
+        .select('plan, billing_interval, source, product, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false }),
+      supabase.from('tenants').select('stripe_customer_id').eq('id', tenantId).maybeSingle(),
+    ]);
+    if (error || tenantError || !data || data.length === 0 || !tenant?.stripe_customer_id) return null;
+    const pro = new Set<string>(PRO_TIER_PRODUCTS);
+    if (data.some((row) => row.source === 'manual' || (row.product != null && pro.has(row.product)))) return null;
+    const latest = data[0];
+    return parsePlanChoice({ plan: latest?.plan, interval: latest?.billing_interval });
+  } catch (err) {
+    console.error('[dashboard] restart', err instanceof Error ? err.name : 'Error');
+    return null;
+  }
+}
+
+function firstNameOf(fullName: unknown): string | null {
+  if (typeof fullName !== 'string') return null;
+  const first = fullName.trim().split(/\s+/)[0] ?? '';
+  return first.length > 0 ? first : null;
+}
 
 function todayParam(): string {
   return format(new Date(), 'yyyy-MM-dd');
@@ -146,16 +179,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   const products = await getTenantProducts();
+  const rawParams = await searchParams;
 
   // Non-Pro tenants get their product's home here; /dashboard stays the one
   // URL every login lands on.
   if (products.primary === 'rounds') {
     const supabase = await createClient();
+    const { user } = await getAuthUser();
     const today = todayInLondon();
     // The overview is always today; other days live in the calendar. Each card's
     // read fails on its own (that card says so) and never breaks the page.
     const settings = await getRoundsSettings(supabase, tenantId);
-    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue] = await Promise.all([
+    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow] = await Promise.all([
       getRoundsHomeData(tenantId),
       loadNeedsYou(supabase, { tenantId, today }),
       loadBooksSummary(supabase, { tenantId, period: currentMonth(today) }).catch(() => null),
@@ -164,11 +199,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       loadMoneyTrend(supabase, { tenantId, today }),
       loadLatestPayments(supabase, tenantId).catch(() => null),
       loadRoundValue(supabase, tenantId).catch(() => null),
+      user?.id
+        ? supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .maybeSingle()
+            .then(
+              (row) => row,
+              () => ({ data: null }),
+            )
+        : Promise.resolve({ data: null }),
     ]);
+    const firstName = firstNameOf(nameRow.data?.full_name) ?? firstNameOf(user?.user_metadata?.full_name);
     const weather = await loadWeather(supabase, { tenantId, visitPoints: data.todayVisits });
     return (
       <RoundsHome
         tenantName={tenantName}
+        firstName={firstName}
         data={data}
         needs={needs}
         books={books}
@@ -184,13 +232,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     );
   }
   if (products.primary === 'lite') {
-    redirect('/lite');
+    redirect(rawParams.restarted === '1' ? '/lite?restarted=1' : '/lite');
   }
   if (products.primary === null) {
+    const choice = await restartChoice(tenantId);
+    if (choice) return <PlanEnded defaultChoice={choice} />;
     return <NoProducts tenantName={tenantName} />;
   }
 
-  const rawParams = await searchParams;
   const day = parseDayParam(rawParams.date);
   const filters = parseSearchParams(rawParams, day);
 

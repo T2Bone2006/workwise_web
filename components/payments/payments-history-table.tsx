@@ -2,60 +2,30 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Banknote, CreditCard, Landmark, Receipt, Wallet } from 'lucide-react';
+import { SearchX, Wallet } from 'lucide-react';
+import { EmptyState, IconChip, LookCard, toneClasses } from '@/components/look';
+import { METHODS, methodIcon, methodTone } from '@/components/payments/method-style';
+import { PaymentFeed } from '@/components/payments/payment-feed';
 import {
   PaymentsListFilters,
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
-import { MoneyRow, MONEY_ACCENT } from '@/components/payments/money-row';
 import type { PaymentHistoryRow } from '@/lib/data/payments/history';
 import { formatGbp } from '@/lib/money/pence';
 import { paymentMethodLabel } from '@/lib/payments/method-labels';
-
-const METHODS: { value: string; label: string }[] = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'bank_transfer', label: 'Bank transfer' },
-  { value: 'card', label: 'Card' },
-  { value: 'direct_debit', label: 'Direct Debit' },
-  { value: 'pay_by_bank', label: 'Pay by Bank' },
-  { value: 'other', label: 'Other' },
-];
-
-const METHOD_ICON: Record<string, typeof Banknote> = {
-  cash: Banknote,
-  cheque: Receipt,
-  bank_transfer: Landmark,
-  card: CreditCard,
-  direct_debit: Landmark,
-  pay_by_bank: Landmark,
-  other: Wallet,
-};
+import { cn } from '@/lib/utils';
 
 const HISTORY_LIMIT = 200;
 
-function formatReceived(iso: string): string {
-  const day = iso.slice(0, 10);
-  const [y, m, d] = day.split('-').map(Number);
-  if (!y || !m || !d) return iso;
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(y, m - 1, d)));
-}
-
+/** Money that has come in: how it arrived (the bar), then every payment by day. */
 export function PaymentsHistoryTable({
   rows,
-  view,
   filters,
-  compact = false,
+  today,
 }: {
   rows: PaymentHistoryRow[];
-  view: 'received';
   filters: { from?: string; to?: string };
-  compact?: boolean;
+  today: string;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
@@ -88,63 +58,101 @@ export function PaymentsHistoryTable({
     router.push(`/payments?${params.toString()}`);
   };
 
+  const total = shown.reduce((sum, row) => sum + row.amount, 0);
+  // Cash, cheque and other are all slate, so they share one slice: a colour never means two things.
+  const groupOf = (method: string) => (['cash', 'cheque', 'other'].includes(method) ? 'cash' : method);
+  const mix = [...new Set(shown.map((row) => groupOf(row.method)))]
+    .map((group) => {
+      const inGroup = shown.filter((row) => groupOf(row.method) === group);
+      return {
+        value: group,
+        label: group === 'cash' ? 'Cash, cheque, other' : paymentMethodLabel(group),
+        count: inGroup.length,
+        amount: inGroup.reduce((sum, row) => sum + row.amount, 0),
+      };
+    })
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
   return (
     <div className="space-y-4">
-      {view === 'received' && !compact ? (
-        <PaymentsListFilters
-          search={search}
-          onSearch={setSearch}
-          searchPlaceholder="Customer name…"
-          dateLabel="Received"
-          dateFrom={filters.from}
-          dateTo={filters.to}
-          onDateChange={({ date_from, date_to }) => pushDates(date_from, date_to)}
-          fields={[
-            { key: 'customer', label: 'Customer', options: customerOptions },
-            {
-              key: 'method',
-              label: 'How they paid',
-              options: METHODS.map((opt) => ({ value: opt.value, label: opt.label })),
-            },
-          ]}
-          wheres={wheres}
-          onWheresChange={setWheres}
-          hasFilters={needle.length > 0 || Boolean(filters.from || filters.to) || whereActive}
-          onClear={() => {
-            setSearch('');
-            setWheres([]);
-            pushDates();
-          }}
-        />
+      {shown.length > 0 ? (
+        <section className="rounded-2xl border border-border bg-card p-4 shadow-(--look-card-shadow) sm:p-5">
+          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Came in</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-(--tone-emerald-solid) tabular-nums sm:text-[28px]">
+                {formatGbp(total)}
+              </p>
+            </div>
+            <p className="pb-1 text-sm text-muted-foreground">
+              from {shown.length === 1 ? '1 payment' : `${shown.length} payments`}, by how they paid
+            </p>
+          </div>
+          <div className="mt-3.5 flex h-2 gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Money in, by how it was paid">
+            {mix.map((item) => (
+              <span
+                key={item.value}
+                className={cn('h-full min-w-1.5', toneClasses(methodTone(item.value)).solid)}
+                style={{ width: `${(item.amount / total) * 100}%` }}
+              />
+            ))}
+          </div>
+          <ul className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+            {mix.map((item) => (
+              <li key={item.value} className="flex items-center gap-2.5">
+                <IconChip icon={methodIcon(item.value)} tone={methodTone(item.value)} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{item.label}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {item.count === 1 ? '1 payment' : `${item.count} payments`}
+                  </span>
+                </span>
+                <span className="font-semibold tabular-nums">{formatGbp(item.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
+      <PaymentsListFilters
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Customer name…"
+        dateLabel="Received"
+        dateFrom={filters.from}
+        dateTo={filters.to}
+        onDateChange={({ date_from, date_to }) => pushDates(date_from, date_to)}
+        fields={[
+          { key: 'customer', label: 'Customer', options: customerOptions },
+          {
+            key: 'method',
+            label: 'How they paid',
+            options: METHODS.map((opt) => ({ value: opt.value, label: opt.label })),
+          },
+        ]}
+        wheres={wheres}
+        onWheresChange={setWheres}
+        hasFilters={needle.length > 0 || Boolean(filters.from || filters.to) || whereActive}
+        onClear={() => {
+          setSearch('');
+          setWheres([]);
+          pushDates();
+        }}
+      />
+
       {shown.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-          {compact
-            ? 'Nothing has come in lately.'
-            : needle
-              ? 'Nothing matches.'
-              : 'Nothing has come in for these dates.'}
-        </div>
+        <EmptyState
+          icon={needle ? SearchX : Wallet}
+          title={needle ? 'Nothing matches' : 'Nothing has come in for these dates'}
+          body={needle ? 'Try a different name or clear the filters.' : 'Try a wider date range.'}
+        />
       ) : (
-        <ul className="space-y-3">
-          {shown.map((row) => {
-            const Icon = METHOD_ICON[row.method] ?? Wallet;
-            return (
-              <MoneyRow
-                key={row.id}
-                accent={MONEY_ACCENT.received}
-                icon={Icon}
-                title={row.customerName}
-                detail={`${formatReceived(row.receivedAt)} · ${paymentMethodLabel(row.method)}`}
-                amount={formatGbp(row.amount)}
-                onClick={() => router.push(`/customers/${row.customerId}`)}
-              />
-            );
-          })}
-        </ul>
+        <LookCard>
+          <PaymentFeed rows={shown} today={today} />
+        </LookCard>
       )}
-      {!compact && rows.length >= HISTORY_LIMIT ? (
+      {rows.length >= HISTORY_LIMIT ? (
         <p className="text-sm text-muted-foreground">Showing the latest 200</p>
       ) : null}
     </div>

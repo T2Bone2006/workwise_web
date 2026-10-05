@@ -258,7 +258,7 @@ export function CompleteVisitDialog({
             <p className="text-sm text-muted-foreground">Remembered for this customer.</p>
           </div>
           {customerHasEmail ? null : (
-            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <p className="rounded-md border border-(--tone-amber-line) bg-(--tone-amber-soft) px-3 py-2 text-sm text-(--tone-amber-text)">
               No email — they&apos;ll get a text instead if they have a mobile and texts are left.
             </p>
           )}
@@ -338,7 +338,7 @@ export function SkipVisitDialog({
                 className={cn(
                   'rounded-lg border px-3 py-2 text-left text-sm transition-colors',
                   reason === value
-                    ? 'border-emerald-400/50 bg-emerald-500/10'
+                    ? 'border-(--tone-emerald-line) bg-(--tone-emerald-soft)'
                     : 'border-border/80 hover:bg-muted/40',
                 )}
               >

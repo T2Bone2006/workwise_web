@@ -1,11 +1,15 @@
 import Link from 'next/link';
-import { BellRing, CalendarX2, CheckCircle2, ChevronRight, MessageCircle, Receipt, Wallet, type LucideIcon } from 'lucide-react';
+import { CalendarX2, CheckCircle2, ChevronRight, MessageCircle, Receipt, Wallet, type LucideIcon } from 'lucide-react';
 import type { NeedsYou } from '@/lib/data/rounds/needs-you';
 import { formatGbp } from '@/lib/money/pence';
-import { cn } from '@/lib/utils';
-import { formatDayMonth, formatShortDate, IconChip, plural, SectionCard, TONE, type Tone } from './shared';
+import { formatDayMonth, formatShortDate, plural, SectionCard } from './shared';
 
-type Need = { key: string; icon: LucideIcon; tone: Tone; count: string; title: string; detail: string; href: string };
+type Need = { key: string; icon: LucideIcon; colour: string; count: string; title: string; detail: string; href: string };
+
+/** The drawing's three icon colours: amber for replies and visits, rose for money owed, purple for receipts. */
+const AMBER = '#d4920c';
+const ROSE = 'var(--tone-rose-solid)';
+const PURPLE = '#9b30d9';
 
 function needsFrom(
   needs: NeedsYou,
@@ -17,10 +21,10 @@ function needsFrom(
     out.push({
       key: 'replies',
       icon: MessageCircle,
-      tone: 'sky',
+      colour: AMBER,
       count: String(needs.repliesToReview),
       title: needs.repliesToReview === 1 ? 'Customer reply to read' : 'Customer replies to read',
-      detail: `${needs.replyNames.join(', ')}${more > 0 ? ` and ${more} more` : ''} · about upcoming visits`,
+      detail: `${needs.replyNames.join(', ')}${more > 0 ? ` and ${more} more` : ''}`,
       href: '/messages',
     });
   }
@@ -29,7 +33,7 @@ function needsFrom(
     out.push({
       key: 'owed',
       icon: Wallet,
-      tone: 'rose',
+      colour: ROSE,
       count: formatGbp(owed.total),
       title: `Owed by ${plural(owed.customers, 'customer', 'customers')}`,
       detail: [
@@ -45,7 +49,7 @@ function needsFrom(
     out.push({
       key: 'missed',
       icon: CalendarX2,
-      tone: 'amber',
+      colour: AMBER,
       count: String(needs.missedVisits),
       title: needs.missedVisits === 1 ? 'Visit left from an earlier day' : 'Visits left from earlier days',
       detail: `Not marked done or skipped${needs.oldestMissedDate ? ` · oldest ${formatShortDate(needs.oldestMissedDate)}` : ''}`,
@@ -56,7 +60,7 @@ function needsFrom(
     out.push({
       key: 'receipts',
       icon: Receipt,
-      tone: 'violet',
+      colour: PURPLE,
       count: String(needs.receiptsToCheck),
       title: needs.receiptsToCheck === 1 ? 'Receipt to check' : 'Receipts to check',
       detail: `Scanned, waiting for you to save${needs.receiptsAmount > 0 ? ` · ${formatGbp(needs.receiptsAmount)}` : ''}`,
@@ -78,36 +82,41 @@ export function NeedsYouCard({
 
   return (
     <SectionCard
-      icon={BellRing}
-      tone={list.length > 0 ? 'amber' : 'emerald'}
       title="Needs you"
-      summary={list.length > 0 ? `${plural(list.length, 'thing', 'things')} waiting` : 'Nothing waiting'}
+      summary={list.length > 0 ? `${plural(list.length, 'thing', 'things')} waiting` : undefined}
+      aside={
+        list.length > 0 ? (
+          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900 tabular-nums dark:bg-amber-500/20 dark:text-amber-200">
+            {list.length}
+          </span>
+        ) : null
+      }
       labelledBy="needs-heading"
       className="h-full"
     >
       {list.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/[0.07] px-4 py-8 text-center">
-          <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-          <p className="mt-2 text-sm font-semibold">All clear</p>
+        <div className="flex flex-1 flex-col items-center justify-center rounded-xl bg-(--tone-emerald-soft) px-4 py-8 text-center">
+          <CheckCircle2 className="size-8 text-(--tone-emerald-text)" aria-hidden="true" />
+          <p className="mt-2 text-sm font-semibold">Nothing needs you. Nice.</p>
           <p className="mt-0.5 text-sm text-muted-foreground">No replies, money owed, missed visits or receipts waiting.</p>
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-1">
           {list.map((need) => (
             <li key={need.key}>
               <Link
                 href={need.href}
-                className={cn(
-                  'group flex items-center gap-3 rounded-xl border p-3 transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-                  TONE[need.tone].border,
-                  TONE[need.tone].soft,
-                  'hover:bg-muted/60',
-                )}
+                className="group flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
-                <IconChip icon={need.icon} tone={need.tone} />
+                <span
+                  className="flex size-9 shrink-0 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: `color-mix(in srgb, ${need.colour} 13%, transparent)`, color: need.colour }}
+                >
+                  <need.icon className="size-[17px]" aria-hidden="true" />
+                </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold">
-                    <span className={cn('tabular-nums', TONE[need.tone].text)}>{need.count}</span> {need.title.toLowerCase()}
+                    <span className="tabular-nums">{need.count}</span> {need.title.toLowerCase()}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">{need.detail}</p>
                 </div>

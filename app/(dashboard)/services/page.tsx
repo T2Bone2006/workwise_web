@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
-import { getServiceCatalog, getServicePresetGroups } from '@/lib/data/rounds/service-catalog';
+import { getServiceCatalog, getServicePresetGroups, getServiceUsage } from '@/lib/data/rounds/service-catalog';
 import { ServiceCatalogTable } from '@/components/rounds/service-catalog-table';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 
@@ -29,10 +29,11 @@ export default async function ServicesPage() {
     return <NoTenantMessage />;
   }
 
-  const [{ services, error }, { groups: presetGroups, error: presetError }] =
+  const [{ services, error }, { groups: presetGroups, error: presetError }, usage] =
     await Promise.all([
       getServiceCatalog(tenantId, { includeInactive: true }),
       getServicePresetGroups(),
+      getServiceUsage(tenantId),
     ]);
 
   return (
@@ -46,6 +47,7 @@ export default async function ServicesPage() {
         presetGroups={presetGroups}
         fetchError={error?.message ?? null}
         presetError={presetError?.message ?? null}
+        usage={usage}
       />
     </div>
   );

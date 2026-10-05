@@ -6,7 +6,9 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { format, parseISO } from 'date-fns';
-import { ArrowLeft, CalendarIcon, Loader2 } from 'lucide-react';
+import { ArrowLeft, CalendarIcon, ClipboardList, Loader2 } from 'lucide-react';
+import { Avatar, LookCard } from '@/components/look';
+import { formatGbp } from '@/lib/money/pence';
 import { toast } from 'sonner';
 import {
   createAgreement,
@@ -157,6 +159,11 @@ export function AgreementForm({
 
   const watchScheduleMode = form.watch('schedule_mode');
   const watchPrice = form.watch('price');
+  const watchTitle = form.watch('title');
+  const watchFrequency = form.watch('frequency_days');
+  const watchAnchor = form.watch('anchor_date');
+  const watchWeekday = form.watch('preferred_weekday');
+  const watchTime = form.watch('preferred_time');
   const originalPrice = agreement?.price;
 
   const activeServices = useMemo(
@@ -253,385 +260,63 @@ export function AgreementForm({
         </div>
       ) : null}
 
-      <Card className="glass-card overflow-hidden border-border/80">
-        <CardHeader className="pb-2">
-          <h2 className="text-lg font-semibold">
-            {mode === 'create' ? 'New agreement' : 'Edit agreement'}
-          </h2>
-          <p className="text-sm text-muted-foreground">For {customerName}</p>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-              <FormField
-                control={form.control}
-                name="service_catalog_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Service</FormLabel>
-                    <Select
-                      value={field.value ?? 'custom'}
-                      onValueChange={applyService}
-                      disabled={isSubmitting}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Pick from your catalog" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="custom">
-                          New custom service (type a title below)
-                        </SelectItem>
-                        {activeServices.map((service) => (
-                          <SelectItem key={service.id} value={service.id}>
-                            {service.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {activeServices.length === 0 ? (
-                      <FormDescription>
-                        No services in the catalog yet.{' '}
-                        <Link
-                          href="/services"
-                          className="underline underline-offset-2"
-                        >
-                          Add presets or a service
-                        </Link>
-                        , or choose custom and type a title below.
-                      </FormDescription>
-                    ) : (
-                      <FormDescription>
-                        Pick one service for this agreement. Choosing a catalog
-                        row fills title, price, duration, and frequency — you
-                        can still change them. Another service = another
-                        agreement after you save.
-                      </FormDescription>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Title</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Window clean"
-                        {...field}
-                        disabled={isSubmitting}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {house ? (
-                <p className="text-sm text-muted-foreground">
-                  {house.address}, {house.postcode}
-                </p>
-              ) : (
-              <>
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{unhookChromeAddressFill('Address')}</FormLabel>
-                    <FormControl>
-                      <AddressAutocompleteInput
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        onAddressSelect={({ address, postcode }) => {
-                          field.onChange(address);
-                          if (postcode) {
-                            form.setValue('postcode', postcode, {
-                              shouldValidate: true,
-                            });
-                          }
-                        }}
-                        placeholder="Start typing a postcode or address…"
-                        disabled={isSubmitting}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="postcode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{unhookChromeAddressFill('Postcode')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={unhookChromeAddressFill('Filled in when you pick an address')}
-                        {...field}
-                        name="outward"
-                        autoComplete="off"
-                        disabled={isSubmitting}
-                        className="uppercase"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              </>
-              )}
-
-              <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+        <Card className="glass-card overflow-hidden border-border/80">
+          <CardHeader className="pb-2">
+            <h2 className="text-lg font-semibold">
+              {mode === 'create' ? 'New agreement' : 'Edit agreement'}
+            </h2>
+            <p className="text-sm text-muted-foreground">For {customerName}</p>
+          </CardHeader>
+          <CardContent>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
                 <FormField
                   control={form.control}
-                  name="price"
+                  name="service_catalog_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Price (£)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
-                          value={
-                            field.value === undefined || field.value === null
-                              ? ''
-                              : String(field.value)
-                          }
-                          onChange={(e) =>
-                            field.onChange(
-                              e.target.value === '' ? '' : e.target.value,
-                            )
-                          }
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="duration_minutes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Duration (minutes)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={5}
-                          max={600}
-                          value={
-                            field.value === undefined || field.value === null
-                              ? ''
-                              : String(field.value)
-                          }
-                          onChange={(e) => field.onChange(e.target.value)}
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <FormLabel>How often</FormLabel>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Select
-                    value={String(frequencyMonths)}
-                    onValueChange={(value) =>
-                      applyFrequencyParts(Number(value), frequencyWeeks)
-                    }
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 13 }, (_, months) => (
-                        <SelectItem key={months} value={String(months)}>
-                          {months} {months === 1 ? 'month' : 'months'}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={String(frequencyWeeks)}
-                    onValueChange={(value) =>
-                      applyFrequencyParts(frequencyMonths, Number(value))
-                    }
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 4 }, (_, weeks) => (
-                        <SelectItem key={weeks} value={String(weeks)}>
-                          {weeks} {weeks === 1 ? 'week' : 'weeks'}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {frequencyLabel(
-                    Number(form.watch('frequency_days') ?? 28) || 28,
-                  )}
-                  . A month
-                  here is 4 weeks, so 1 month and 2 weeks is every 6 weeks.
-                </p>
-                {form.formState.errors.frequency_days ? (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.frequency_days.message}
-                  </p>
-                ) : null}
-              </div>
-
-              <FormField
-                control={form.control}
-                name="anchor_date"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>
-                      {watchScheduleMode === 'after_completion'
-                        ? 'First / next visit from'
-                        : 'Anchor date'}
-                    </FormLabel>
-                    <Popover open={anchorOpen} onOpenChange={setAnchorOpen}>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isSubmitting}
-                            className={cn(
-                              'w-full justify-start gap-2 font-normal sm:max-w-xs',
-                              !field.value && 'text-muted-foreground',
-                            )}
-                          >
-                            <CalendarIcon className="size-4" />
-                            {field.value
-                              ? format(parseYmd(field.value), 'EEE d MMM yyyy')
-                              : 'Pick a date'}
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={
-                            field.value ? parseYmd(field.value) : undefined
-                          }
-                          onSelect={(d) => {
-                            if (!d) return;
-                            field.onChange(toYmd(d));
-                            setAnchorOpen(false);
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormDescription>
-                      {watchScheduleMode === 'fixed'
-                        ? 'Visits are planned from this date on the calendar. Delays do not move later dates.'
-                        : 'Completing a visit sets the next one from that day.'}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="schedule_mode"
-                render={({ field }) => (
-                  <FormItem className="rounded-xl border border-border/80 px-4 py-3">
-                    <div className="flex flex-row items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <FormLabel className="text-base">
-                          Shift later visits if this one runs late
-                        </FormLabel>
-                        <FormDescription>
-                          {field.value === 'after_completion' ? (
-                            <>
-                              <span className="font-medium text-foreground">
-                                On — count from the day you finished.
-                              </span>{' '}
-                              Example: due Friday, done Thursday → next visit is
-                              counted from Thursday (about every{' '}
-                              {form.watch('frequency_days') || 28} days from
-                              then).
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-medium text-foreground">
-                                Off — keep the planned dates (recommended).
-                              </span>{' '}
-                              Example: booked every other Friday stays on those
-                              Fridays even if you do one early or skip one.
-                              What most window cleaners want.
-                            </>
-                          )}
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={field.value === 'after_completion'}
-                          onCheckedChange={(checked) =>
-                            field.onChange(
-                              checked ? 'after_completion' : 'fixed',
-                            )
-                          }
-                          disabled={isSubmitting}
-                          aria-label="Shift later visits if this one runs late"
-                        />
-                      </FormControl>
-                    </div>
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid gap-5 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="preferred_weekday"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Preferred weekday</FormLabel>
+                      <FormLabel>Service</FormLabel>
                       <Select
-                        value={
-                          field.value == null ? 'any' : String(field.value)
-                        }
-                        onValueChange={(v) =>
-                          field.onChange(v === 'any' ? null : Number(v))
-                        }
+                        value={field.value ?? 'custom'}
+                        onValueChange={applyService}
                         disabled={isSubmitting}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            <SelectValue />
+                            <SelectValue placeholder="Pick from your catalog" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {WEEKDAY_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
+                          <SelectItem value="custom">
+                            New custom service (type a title below)
+                          </SelectItem>
+                          {activeServices.map((service) => (
+                            <SelectItem key={service.id} value={service.id}>
+                              {service.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {activeServices.length === 0 ? (
+                        <FormDescription>
+                          No services in the catalog yet.{' '}
+                          <Link
+                            href="/services"
+                            className="underline underline-offset-2"
+                          >
+                            Add presets or a service
+                          </Link>
+                          , or choose custom and type a title below.
+                        </FormDescription>
+                      ) : (
+                        <FormDescription>
+                          Pick one service for this agreement. Choosing a catalog
+                          row fills title, price, duration, and frequency — you
+                          can still change them. Another service = another
+                          agreement after you save.
+                        </FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -639,96 +324,453 @@ export function AgreementForm({
 
                 <FormField
                   control={form.control}
-                  name="preferred_time"
+                  name="title"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Preferred time</FormLabel>
+                      <FormLabel>Title</FormLabel>
                       <FormControl>
                         <Input
-                          type="time"
-                          value={
-                            typeof field.value === 'string' ? field.value : ''
-                          }
-                          onChange={(e) => field.onChange(e.target.value)}
+                          placeholder="Window clean"
+                          {...field}
                           disabled={isSubmitting}
                         />
                       </FormControl>
-                      <FormDescription>Optional</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
 
-              <FormField
-                control={form.control}
-                name="access_notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Access notes</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Gate code, side gate, dog…"
-                        rows={3}
-                        maxLength={NOTES_MAX}
-                        disabled={isSubmitting}
-                        className="resize-none"
-                        {...field}
-                        value={field.value ?? ''}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+                {house ? (
+                  <p className="text-sm text-muted-foreground">
+                    {house.address}, {house.postcode}
+                  </p>
+                ) : (
+                <>
+                <FormField
+                  control={form.control}
+                  name="address"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{unhookChromeAddressFill('Address')}</FormLabel>
+                      <FormControl>
+                        <AddressAutocompleteInput
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          onAddressSelect={({ address, postcode }) => {
+                            field.onChange(address);
+                            if (postcode) {
+                              form.setValue('postcode', postcode, {
+                                shouldValidate: true,
+                              });
+                            }
+                          }}
+                          placeholder="Start typing a postcode or address…"
+                          disabled={isSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="postcode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{unhookChromeAddressFill('Postcode')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder={unhookChromeAddressFill('Filled in when you pick an address')}
+                          {...field}
+                          name="outward"
+                          autoComplete="off"
+                          disabled={isSubmitting}
+                          className="uppercase"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                </>
                 )}
-              />
 
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Anything else for this property"
-                        rows={3}
-                        maxLength={NOTES_MAX}
-                        disabled={isSubmitting}
-                        className="resize-none"
-                        {...field}
-                        value={field.value ?? ''}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="price"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Price (£)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.01"
+                            value={
+                              field.value === undefined || field.value === null
+                                ? ''
+                                : String(field.value)
+                            }
+                            onChange={(e) =>
+                              field.onChange(
+                                e.target.value === '' ? '' : e.target.value,
+                              )
+                            }
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <div className="flex flex-wrap items-center gap-3 pt-2">
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  <FormField
+                    control={form.control}
+                    name="duration_minutes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Duration (minutes)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={5}
+                            max={600}
+                            value={
+                              field.value === undefined || field.value === null
+                                ? ''
+                                : String(field.value)
+                            }
+                            onChange={(e) => field.onChange(e.target.value)}
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FormLabel>How often</FormLabel>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Select
+                      value={String(frequencyMonths)}
+                      onValueChange={(value) =>
+                        applyFrequencyParts(Number(value), frequencyWeeks)
+                      }
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 13 }, (_, months) => (
+                          <SelectItem key={months} value={String(months)}>
+                            {months} {months === 1 ? 'month' : 'months'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={String(frequencyWeeks)}
+                      onValueChange={(value) =>
+                        applyFrequencyParts(frequencyMonths, Number(value))
+                      }
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 4 }, (_, weeks) => (
+                          <SelectItem key={weeks} value={String(weeks)}>
+                            {weeks} {weeks === 1 ? 'week' : 'weeks'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {frequencyLabel(
+                      Number(form.watch('frequency_days') ?? 28) || 28,
+                    )}
+                    . A month
+                    here is 4 weeks, so 1 month and 2 weeks is every 6 weeks.
+                  </p>
+                  {form.formState.errors.frequency_days ? (
+                    <p className="text-sm text-destructive">
+                      {form.formState.errors.frequency_days.message}
+                    </p>
                   ) : null}
-                  {mode === 'create' ? 'Add service' : 'Save changes'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => leaveViaHistory(router, cancelHref)}
-                >
-                  <ArrowLeft className="mr-2 size-4" />
-                  Cancel
-                </Button>
-                {mode === 'create' && watchPrice != null ? (
-                  <span className="text-sm text-muted-foreground">
-                    {priceString(Number(watchPrice) || 0)} per visit
-                  </span>
-                ) : null}
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="anchor_date"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>
+                        {watchScheduleMode === 'after_completion'
+                          ? 'First / next visit from'
+                          : 'Anchor date'}
+                      </FormLabel>
+                      <Popover open={anchorOpen} onOpenChange={setAnchorOpen}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={isSubmitting}
+                              className={cn(
+                                'w-full justify-start gap-2 font-normal sm:max-w-xs',
+                                !field.value && 'text-muted-foreground',
+                              )}
+                            >
+                              <CalendarIcon className="size-4" />
+                              {field.value
+                                ? format(parseYmd(field.value), 'EEE d MMM yyyy')
+                                : 'Pick a date'}
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={
+                              field.value ? parseYmd(field.value) : undefined
+                            }
+                            onSelect={(d) => {
+                              if (!d) return;
+                              field.onChange(toYmd(d));
+                              setAnchorOpen(false);
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormDescription>
+                        {watchScheduleMode === 'fixed'
+                          ? 'Visits are planned from this date on the calendar. Delays do not move later dates.'
+                          : 'Completing a visit sets the next one from that day.'}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="schedule_mode"
+                  render={({ field }) => (
+                    <FormItem className="rounded-xl border border-border/80 px-4 py-3">
+                      <div className="flex flex-row items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <FormLabel className="text-base">
+                            Shift later visits if this one runs late
+                          </FormLabel>
+                          <FormDescription>
+                            {field.value === 'after_completion' ? (
+                              <>
+                                <span className="font-medium text-foreground">
+                                  On — count from the day you finished.
+                                </span>{' '}
+                                Example: due Friday, done Thursday → next visit is
+                                counted from Thursday (about every{' '}
+                                {form.watch('frequency_days') || 28} days from
+                                then).
+                              </>
+                            ) : (
+                              <>
+                                <span className="font-medium text-foreground">
+                                  Off — keep the planned dates (recommended).
+                                </span>{' '}
+                                Example: booked every other Friday stays on those
+                                Fridays even if you do one early or skip one.
+                                What most window cleaners want.
+                              </>
+                            )}
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={field.value === 'after_completion'}
+                            onCheckedChange={(checked) =>
+                              field.onChange(
+                                checked ? 'after_completion' : 'fixed',
+                              )
+                            }
+                            disabled={isSubmitting}
+                            aria-label="Shift later visits if this one runs late"
+                          />
+                        </FormControl>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="preferred_weekday"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Preferred weekday</FormLabel>
+                        <Select
+                          value={
+                            field.value == null ? 'any' : String(field.value)
+                          }
+                          onValueChange={(v) =>
+                            field.onChange(v === 'any' ? null : Number(v))
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {WEEKDAY_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="preferred_time"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Preferred time</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="time"
+                            value={
+                              typeof field.value === 'string' ? field.value : ''
+                            }
+                            onChange={(e) => field.onChange(e.target.value)}
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormDescription>Optional</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="access_notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Access notes</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Gate code, side gate, dog…"
+                          rows={3}
+                          maxLength={NOTES_MAX}
+                          disabled={isSubmitting}
+                          className="resize-none"
+                          {...field}
+                          value={field.value ?? ''}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Notes</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Anything else for this property"
+                          rows={3}
+                          maxLength={NOTES_MAX}
+                          disabled={isSubmitting}
+                          className="resize-none"
+                          {...field}
+                          value={field.value ?? ''}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : null}
+                    {mode === 'create' ? 'Add service' : 'Save changes'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => leaveViaHistory(router, cancelHref)}
+                  >
+                    <ArrowLeft className="mr-2 size-4" />
+                    Cancel
+                  </Button>
+                  {mode === 'create' && watchPrice != null ? (
+                    <span className="text-sm text-muted-foreground">
+                      {priceString(Number(watchPrice) || 0)} per visit
+                    </span>
+                  ) : null}
+                </div>
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
+
+        <aside className="lg:sticky lg:top-0">
+          <LookCard title="What you're setting up" icon={ClipboardList} tone="rounds">
+            <div className="flex items-center gap-3">
+              <Avatar name={customerName} tone="rounds" />
+              <p className="min-w-0 truncate text-sm font-medium">{customerName}</p>
+            </div>
+            <p className="mt-4 text-[15px] font-semibold">{watchTitle?.trim() || 'Pick a service or give it a title'}</p>
+            <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">
+              {formatGbp(Number(watchPrice) || 0)}
+              <span className="text-sm font-medium text-muted-foreground"> {frequencyLabel(Number(watchFrequency) || 28).toLowerCase()}</span>
+            </p>
+            <dl className="mt-4 space-y-2 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">First visit from</dt>
+                <dd className="text-right font-medium">{watchAnchor ? format(parseYmd(watchAnchor), 'EEE d MMM') : '—'}</dd>
               </div>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Day</dt>
+                <dd className="text-right font-medium">
+                  {WEEKDAY_OPTIONS.find((o) => o.value === (watchWeekday == null ? 'any' : String(watchWeekday)))?.label ?? 'Any day'}
+                  {watchTime ? ` · ${watchTime}` : ''}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Worth about</dt>
+                <dd className="text-right font-medium tabular-nums">
+                  {formatGbp(((Number(watchPrice) || 0) * (365 / (Number(watchFrequency) || 28))) / 12)} a month
+                </dd>
+              </div>
+            </dl>
+          </LookCard>
+        </aside>
+      </div>
 
       <Dialog open={priceDialogOpen} onOpenChange={setPriceDialogOpen}>
         <DialogContent className="sm:max-w-md">

@@ -23,6 +23,8 @@ import type { TenantSkillRow } from '@/lib/actions/skills';
 import { CompanyLogoUpload } from './company-logo-upload';
 import { SettingsSkillsSection } from './settings-skills-section';
 import { cn } from '@/lib/utils';
+import { Tag } from '@/components/look';
+import { useLook } from '@/components/look/use-look';
 
 interface SettingsCompanyTabProps {
   data: SettingsPageData;
@@ -46,6 +48,7 @@ export function SettingsCompanyTab({
 }: SettingsCompanyTabProps) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
+  const fresh = useLook() === 'new';
   const tenant = data.tenant;
   const company = tenant?.settings?.company ?? {};
 
@@ -109,7 +112,8 @@ export function SettingsCompanyTab({
 
   return (
     <div className="space-y-6">
-      {/* Read-only account overview */}
+      {/* Read-only account overview (classic look only; the new look shows a quiet card at the end) */}
+      {fresh ? null : (
       <Card className="rounded-xl border border-border/50 bg-muted/30">
         <CardHeader>
           <CardTitle className="text-base">Account overview</CardTitle>
@@ -144,6 +148,7 @@ export function SettingsCompanyTab({
           </div>
         </CardContent>
       </Card>
+      )}
 
     <form onSubmit={handleSubmit}>
       <Card
@@ -227,6 +232,26 @@ export function SettingsCompanyTab({
       </Card>
       <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
     </form>
+
+      {fresh ? (
+        <section className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-(--look-card-shadow)">
+          <span className="flex items-center gap-2">
+            <span className="font-medium">Account</span>
+            <Tag tone={tenant.subscription_status === 'active' ? 'emerald' : 'slate'}>
+              {tenant.subscription_status ? tenant.subscription_status.replace(/_/g, ' ') : 'No plan'}
+            </Tag>
+          </span>
+          <span className="text-muted-foreground">
+            Created{' '}
+            {tenant.created_at
+              ? new Date(tenant.created_at).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })
+              : '—'}
+          </span>
+          <span className="min-w-0 text-xs text-muted-foreground">
+            ID <span className="font-mono break-all">{tenant.id}</span>
+          </span>
+        </section>
+      ) : null}
 
       {showSkills ? (
         <SettingsSkillsSection

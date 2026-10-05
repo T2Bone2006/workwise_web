@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { CheckCircle2, Clock, MapPin, Navigation, PartyPopper, Route, SkipForward } from 'lucide-react';
+import { Check, CheckCircle2, PartyPopper, Route, SkipForward } from 'lucide-react';
+import { Tag } from '@/components/look';
 import { formatGbp } from '@/lib/money/pence';
-import type { StopPreview, TodayRound } from '@/lib/rounds/today-strip';
+import type { StopRow, TodayRound } from '@/lib/rounds/today-strip';
 import type { GlanceDay } from '@/lib/rounds/week-glance';
 import type { DayWeather as DayWeatherData } from '@/lib/weather/met-norway';
 import { DayWeather } from '@/components/weather/day-weather';
@@ -13,92 +14,104 @@ function Progress({ round }: { round: TodayRound }) {
   const total = round.stops + round.skipped;
   const pct = (n: number) => `${total > 0 ? (n / total) * 100 : 0}%`;
   return (
-    <div>
-      <div className="flex items-end justify-between gap-3">
-        <p className="text-3xl font-semibold tracking-tight tabular-nums">
-          {round.done}
-          <span className="text-lg font-medium text-muted-foreground"> / {round.stops}</span>
-        </p>
-        <p className="text-right text-sm text-muted-foreground">
-          <span className="font-semibold text-foreground tabular-nums">{formatGbp(round.doneAmount)}</span> of{' '}
-          {formatGbp(round.plannedAmount)}
-        </p>
-      </div>
-      <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-        <span className="h-full bg-emerald-500" style={{ width: pct(round.done) }} />
-        <span className="h-full bg-orange-400" style={{ width: pct(round.skipped) }} />
-      </div>
-      <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
-          {round.done} done
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-muted-foreground/30" aria-hidden="true" />
-          {round.toGo} to go
-        </span>
-        {round.skipped > 0 ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-orange-400" aria-hidden="true" />
-            {round.skipped} skipped
-          </span>
-        ) : null}
-      </p>
+    <div
+      className="flex h-2 overflow-hidden rounded-full bg-muted"
+      role="progressbar"
+      aria-valuenow={round.done}
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-label="Stops done today"
+    >
+      <span className="h-full bg-(--tone-rounds-solid)" style={{ width: pct(round.done) }} />
+      <span className="h-full bg-(--tone-rose-solid)" style={{ width: pct(round.skipped) }} />
     </div>
   );
 }
 
-function NextStop({ stop, href }: { stop: StopPreview; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="block rounded-xl border border-sky-500/30 bg-sky-500/[0.07] p-3.5 transition-colors hover:bg-sky-500/[0.12] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
-            <Navigation className="size-3" aria-hidden="true" /> Next stop
-          </p>
-          <p className="mt-1 truncate text-base font-semibold">{stop.customerName ?? stop.street}</p>
-          <p className="mt-0.5 flex items-center gap-1 truncate text-sm text-muted-foreground">
-            <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
-            {stop.street}
-          </p>
-          {stop.work ? <p className="mt-1 truncate text-xs text-muted-foreground">{stop.work}</p> : null}
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="text-lg font-semibold tabular-nums">{formatGbp(stop.amount)}</p>
-          {stop.time ? (
-            <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="size-3" aria-hidden="true" />
-              {stop.time}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </Link>
-  );
+const ROW_LIMIT = 7;
+
+const STATE_TAG: Record<'done' | 'skipped' | 'next' | 'todo', { tone: 'rose' | 'rounds'; label: string } | null> = {
+  done: null,
+  skipped: { tone: 'rose', label: 'Skipped' },
+  next: { tone: 'rounds', label: 'Next' },
+  todo: null,
+};
+
+function StateDot({ state }: { state: StopRow['state'] }) {
+  if (state === 'done') {
+    return (
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-(--tone-emerald-solid) text-white">
+        <Check className="size-3" strokeWidth={3} aria-hidden="true" />
+        <span className="sr-only">Done</span>
+      </span>
+    );
+  }
+  if (state === 'skipped') {
+    return (
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-(--tone-rose-soft) text-(--tone-rose-text)">
+        <SkipForward className="size-3" aria-hidden="true" />
+        <span className="sr-only">Skipped</span>
+      </span>
+    );
+  }
+  if (state === 'next') {
+    return (
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full border-2 border-(--tone-rounds-solid) text-(--tone-rounds-text)">
+        <span className="size-2 rounded-full bg-(--tone-rounds-solid)" />
+        <span className="sr-only">Next</span>
+      </span>
+    );
+  }
+  return <span className="size-5 shrink-0 rounded-full border-2 border-border" aria-hidden="true" />;
 }
 
-function UpNext({ stops }: { stops: StopPreview[] }) {
-  if (stops.length === 0) return null;
+/** The stops in order: done ticked off, the next one picked out, the rest waiting. Long rounds show a window around "next". */
+function StopList({ stops, href }: { stops: StopRow[]; href: string }) {
+  const focus = Math.max(0, stops.findIndex((s) => s.state === 'next'));
+  const lastFocus = stops.some((s) => s.state === 'next') ? focus : stops.length - 1;
+  const start = Math.max(0, Math.min(lastFocus - 2, stops.length - ROW_LIMIT));
+  const shown = stops.slice(start, start + ROW_LIMIT);
+  const before = start;
+  const after = stops.length - (start + shown.length);
+
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Then</p>
-      <ol className="divide-y divide-border/60 rounded-xl border border-border/60">
-        {stops.map((stop, i) => (
-          <li key={`${stop.street}-${i}`} className="flex items-center gap-3 px-3 py-2 text-sm">
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
-              {i + 2}
-            </span>
-            <span className="min-w-0 flex-1 truncate">
-              <span className="font-medium">{stop.customerName ?? stop.street}</span>
-              {stop.customerName ? <span className="text-muted-foreground"> · {stop.street}</span> : null}
-            </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{formatGbp(stop.amount)}</span>
-          </li>
-        ))}
+      {before > 0 ? <p className="mb-1.5 px-1 text-xs text-muted-foreground">{plural(before, 'earlier stop', 'earlier stops')}</p> : null}
+      <ol className="flex flex-col gap-1.5">
+        {shown.map((stop, i) => {
+          const tag = STATE_TAG[stop.state];
+          return (
+            <li key={`${stop.street}-${start + i}`}>
+              <Link
+                href={href}
+                className={cn(
+                  'flex items-center gap-3 rounded-xl px-3.5 py-2.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  stop.state === 'next' ? 'bg-(--tone-rounds-soft) ring-1 ring-(--tone-rounds-solid)/40' : 'bg-background hover:bg-muted',
+                )}
+              >
+                <StateDot state={stop.state} />
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={cn(
+                      'block truncate text-sm font-medium',
+                      (stop.state === 'done' || stop.state === 'skipped') && 'text-muted-foreground line-through decoration-1',
+                    )}
+                  >
+                    {stop.customerName ?? stop.street}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {stop.street}
+                    {stop.work ? ` · ${stop.work}` : ''}
+                  </span>
+                </span>
+                {tag ? <Tag tone={tag.tone}>{stop.state === 'next' && stop.time ? `Next · ${stop.time}` : tag.label}</Tag> : stop.time && stop.state === 'todo' ? <span className="text-xs text-muted-foreground tabular-nums">{stop.time}</span> : null}
+                <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums">{formatGbp(stop.amount)}</span>
+              </Link>
+            </li>
+          );
+        })}
       </ol>
+      {after > 0 ? <p className="mt-1.5 px-1 text-xs text-muted-foreground">+ {plural(after, 'more stop', 'more stops')} after these</p> : null}
     </div>
   );
 }
@@ -110,11 +123,14 @@ function UpNext({ stops }: { stops: StopPreview[] }) {
 export function TodayCard({
   date,
   round,
+  stops,
   weather,
   nextWorkingDay,
 }: {
   date: string;
   round: TodayRound;
+  /** Every house on the round, in order, with its state. */
+  stops: StopRow[];
   weather: DayWeatherData | null;
   /** When nothing is booked today: the next day this week that has stops. */
   nextWorkingDay: GlanceDay | null;
@@ -134,9 +150,17 @@ export function TodayCard({
       title="Today's round"
       summary={
         <span className="inline-flex flex-wrap items-center gap-x-2">
+          {round.stops > 0 ? `${round.done} of ${plural(round.stops, 'stop', 'stops')} done · ` : ''}
           {summary}
           {weather ? <DayWeather weather={weather} showLabel /> : null}
         </span>
+      }
+      aside={
+        round.stops > 0 ? (
+          <span className="text-[13px] font-semibold text-(--tone-emerald-text) tabular-nums">
+            {formatGbp(round.doneAmount)} of {formatGbp(round.plannedAmount)}
+          </span>
+        ) : null
       }
       action={{ href: dayPlan, label: 'Day plan' }}
       labelledBy="today-heading"
@@ -156,21 +180,18 @@ export function TodayCard({
           ) : null}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <Progress round={round} />
           {round.next ? (
-            <>
-              <NextStop stop={round.next} href={dayPlan} />
-              <UpNext stops={round.upNext} />
-            </>
+            <StopList stops={stops} href={dayPlan} />
           ) : (
             <div
               className={cn(
                 'flex items-center gap-3 rounded-xl border px-4 py-3',
-                'border-emerald-500/30 bg-emerald-500/[0.07]',
+                'border-(--tone-emerald-line) bg-(--tone-emerald-soft)',
               )}
             >
-              <PartyPopper className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <PartyPopper className="size-5 shrink-0 text-(--tone-emerald-text)" aria-hidden="true" />
               <div className="text-sm">
                 <p className="font-semibold">All done for today</p>
                 <p className="text-muted-foreground">
@@ -179,9 +200,9 @@ export function TodayCard({
                 </p>
               </div>
               {round.skipped > 0 ? (
-                <SkipForward className="ml-auto size-4 text-orange-500" aria-hidden="true" />
+                <SkipForward className="ml-auto size-4 text-(--tone-rose-text)" aria-hidden="true" />
               ) : (
-                <CheckCircle2 className="ml-auto size-4 text-emerald-600" aria-hidden="true" />
+                <CheckCircle2 className="ml-auto size-4 text-(--tone-emerald-text)" aria-hidden="true" />
               )}
             </div>
           )}

@@ -125,14 +125,14 @@ describe('the guard', () => {
     expect(tenantHasRounds).not.toHaveBeenCalled();
   });
 
-  it('no tenant → 403 Forbidden; a Pro login → 403 Rounds only.', async () => {
+  it('no tenant → 403 Forbidden; a business without Rounds → 403 plan_ended', async () => {
     resolveTenantForUser.mockResolvedValueOnce(null);
     expect((await stateRoute(req('GET'))).status).toBe(403);
 
     tenantHasRounds.mockResolvedValue(false);
     const pro = await stateRoute(req('GET'));
     expect(pro.status).toBe(403);
-    expect(await pro.json()).toEqual({ error: 'Rounds only.' });
+    expect(await pro.json()).toEqual({ error: 'plan_ended' });
   });
 
   it('a worker can read but every action is 403', async () => {

@@ -1,4 +1,9 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Plus, Upload } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { formatGbp } from '@/lib/money/pence';
+import type { RoundsCustomerListRow } from '@/lib/data/rounds/customers';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import {
@@ -43,6 +48,17 @@ interface CustomersPageProps {
     f3?: string;
     v3?: string;
   }>;
+}
+
+/** "42 on the round · 9 owe £516.50", from the list already loaded. */
+function roundsSubtitle(customers: RoundsCustomerListRow[], search?: string): string {
+  if (search) return `${customers.length} matching “${search}”`;
+  const active = customers.filter((c) => c.is_active);
+  const owing = active.filter((c) => c.owed_amount > 0);
+  const owed = owing.reduce((sum, c) => sum + c.owed_amount, 0);
+  const parts = [`${active.length} on the round`];
+  if (owing.length > 0) parts.push(`${owing.length} owe ${formatGbp(owed)}`);
+  return parts.join(' · ');
 }
 
 function NoTenantMessage() {
@@ -90,7 +106,23 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
       <div className="space-y-6">
         <PageGradientHeader
           title="Customers"
-          subtitle="People on your round — agreements, visits, and notes live here."
+          subtitle={roundsSubtitle(customers, search)}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link href="/customers/new">
+                  <Plus className="mr-1.5 size-4" />
+                  Add customer
+                </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/import">
+                  <Upload className="mr-1.5 size-4" />
+                  Import
+                </Link>
+              </Button>
+            </div>
+          }
         />
         <RoundsCustomersTable
           key={`${status}:${search ?? ''}`}

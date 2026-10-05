@@ -2,90 +2,25 @@
 
 import { useState, type JSX } from 'react';
 import Link from 'next/link';
-import { formatDistanceToNow } from 'date-fns';
-import {
-  CalendarClock,
-  CalendarOff,
-  MessageCircle,
-  Send,
-  type LucideIcon,
-} from 'lucide-react';
-import {
-  SummaryStrip,
-  type SummaryStripItem,
-} from '@/components/jobs/status-summary-strip';
-import {
-  PaymentsListFilters,
-  type PaymentsFilterField,
-  type PaymentsWhere,
-} from '@/components/payments/payments-filter-bar';
+import { CalendarDays, MessageSquare, Search, SearchX, X } from 'lucide-react';
+import { JobsDateRangeFilter } from '@/components/jobs/jobs-date-range-filter';
+import { Avatar, EmptyState, Tag, type Tone } from '@/components/look';
+import { Input } from '@/components/ui/input';
 import type { ThreadListItem } from '@/lib/data/messaging/threads';
+import { formatVisitDay } from '@/lib/payments/messages';
+import { isValidYmd } from '@/lib/rounds/dates';
 import { cn } from '@/lib/utils';
 
 type GroupKey = 'cancel' | 'reschedule' | 'message' | 'sent';
+type PillKey = 'all' | 'needs' | GroupKey;
 
-const TOPICS: {
-  key: GroupKey;
-  title: string;
-  icon: LucideIcon;
-  bar: string;
-  washStrong: string;
-  washQuiet: string;
-  glow: string;
-}[] = [
-  {
-    key: 'cancel',
-    title: 'Cancel',
-    icon: CalendarOff,
-    bar: 'bg-rose-500',
-    washStrong: 'from-rose-500/25 via-rose-500/5 to-transparent dark:from-rose-400/30',
-    washQuiet: 'from-rose-500/[0.08] via-transparent to-transparent dark:from-rose-400/15',
-    glow: 'rgb(244 63 94)',
-  },
-  {
-    key: 'reschedule',
-    title: 'Reschedule',
-    icon: CalendarClock,
-    bar: 'bg-amber-500',
-    washStrong: 'from-amber-500/25 via-amber-500/5 to-transparent dark:from-amber-400/30',
-    washQuiet: 'from-amber-500/[0.08] via-transparent to-transparent dark:from-amber-400/15',
-    glow: 'rgb(245 158 11)',
-  },
-  {
-    key: 'message',
-    title: 'A message',
-    icon: MessageCircle,
-    bar: 'bg-sky-500',
-    washStrong: 'from-sky-500/25 via-sky-500/5 to-transparent dark:from-sky-400/30',
-    washQuiet: 'from-sky-500/[0.08] via-transparent to-transparent dark:from-sky-400/15',
-    glow: 'rgb(14 165 233)',
-  },
-  {
-    key: 'sent',
-    title: 'Sent',
-    icon: Send,
-    bar: 'bg-slate-400',
-    washStrong: 'from-slate-500/20 via-transparent to-transparent dark:from-slate-400/25',
-    washQuiet: 'from-slate-500/[0.06] via-transparent to-transparent dark:from-slate-400/10',
-    glow: 'rgb(100 116 139)',
-  },
-];
-
-const TOPIC_BY_KEY = Object.fromEntries(TOPICS.map((topic) => [topic.key, topic])) as Record<
-  GroupKey,
-  (typeof TOPICS)[number]
->;
-
-const FILTER_FIELDS: PaymentsFilterField[] = [
-  {
-    key: 'state',
-    label: 'State',
-    options: [
-      { value: 'needs', label: 'Needs a choice' },
-      { value: 'unread', label: 'New' },
-    ],
-  },
-];
+/** What each kind of conversation is called and coloured, here and on the phone. */
+const TOPICS: Record<GroupKey, { title: string; tone: Tone }> = {
+  cancel: { title: 'Cancel', tone: 'rose' },
+  reschedule: { title: 'Reschedule', tone: 'amber' },
+  message: { title: 'A message', tone: 'rounds' },
+  sent: { title: 'Sent', tone: 'slate' },
+};
 
 const HANDLED_LABEL = {
   skipped: 'Skipped',
@@ -98,14 +33,6 @@ function needsChoice(item: ThreadListItem): boolean {
   return item.status === 'needs_attention' && !item.handled;
 }
 
-function rowStatus(item: ThreadListItem): string | null {
-  if (needsChoice(item) && item.unread > 0) return 'New';
-  if (needsChoice(item)) return 'Needs a choice';
-  if (item.handled) return HANDLED_LABEL[item.handled];
-  if (item.unread > 0) return 'New';
-  return null;
-}
-
 function groupKey(item: ThreadListItem): GroupKey {
   if (item.topic === 'said_no') return 'cancel';
   if (item.topic === 'asked_move') return 'reschedule';
@@ -113,171 +40,294 @@ function groupKey(item: ThreadListItem): GroupKey {
   return 'sent';
 }
 
-function relativeTime(iso: string | null): string | null {
-  if (!iso) return null;
+function londonParts(iso: string): { ymd: string; time: string; weekday: string } | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  return formatDistanceToNow(date, { addSuffix: true });
-}
-
-function londonYmd(iso: string | null): string | null {
-  if (!iso) return null;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(date);
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+  return {
+    ymd: `${get('year')}-${get('month')}-${get('day')}`,
+    time: `${get('hour')}:${get('minute')}`,
+    weekday: get('weekday'),
+  };
 }
 
-export function ThreadList(props: { items: ThreadListItem[]; emptyText: string }): JSX.Element {
-  const { items, emptyText } = props;
+/** "14:02" today, "Yesterday", "Mon" this week, then "12 Oct". */
+function shortWhen(iso: string | null): string | null {
+  if (!iso) return null;
+  const then = londonParts(iso);
+  const now = londonParts(new Date().toISOString());
+  if (!then || !now) return null;
+  if (then.ymd === now.ymd) return then.time;
+  const dayMs = 86_400_000;
+  const days = Math.round((Date.parse(`${now.ymd}T00:00:00Z`) - Date.parse(`${then.ymd}T00:00:00Z`)) / dayMs);
+  if (days === 1) return 'Yesterday';
+  if (days > 1 && days < 7) return then.weekday;
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(
+    new Date(`${then.ymd}T00:00:00Z`),
+  );
+}
+
+function dayWords(ymd: string | null): string | null {
+  return ymd && isValidYmd(ymd) ? formatVisitDay(ymd) : null;
+}
+
+/** The one-line label under a conversation: what they said, or what you chose. */
+function rowTag(item: ThreadListItem): { tone: Tone; text: string } | null {
+  if (item.handled) return { tone: 'slate', text: HANDLED_LABEL[item.handled] };
+  const label = item.label;
+  if (!label) return null;
+  if (label.kind === 'said_no') {
+    const visit = dayWords(label.visitDate);
+    return { tone: 'rose', text: visit ? `Said no · ${visit}` : 'Said no' };
+  }
+  if (label.kind === 'asked_move') {
+    const asked = dayWords(label.requestedDate);
+    return { tone: 'amber', text: asked ? `Asked for ${asked}` : 'Asked to move' };
+  }
+  return { tone: 'rounds', text: 'Sent a message' };
+}
+
+export function ThreadList(props: {
+  items: ThreadListItem[];
+  activeId: string | null;
+  emptyText: string;
+}): JSX.Element {
+  const { items, activeId, emptyText } = props;
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState<string | undefined>();
   const [dateTo, setDateTo] = useState<string | undefined>();
-  const [wheres, setWheres] = useState<PaymentsWhere[]>([]);
-  const [kind, setKind] = useState<GroupKey | null>(null);
-
-  const summary: SummaryStripItem[] = TOPICS.map((topic) => ({
-    key: topic.key,
-    title: topic.title,
-    icon: topic.icon,
-    glow: topic.glow,
-    count: items.filter((item) => groupKey(item) === topic.key).length,
-  }));
+  const [showDates, setShowDates] = useState(false);
+  const [pill, setPill] = useState<PillKey>('all');
 
   const needle = search.trim().toLowerCase();
-  const whereActive = wheres.some((where) => where.field && where.value);
-  const hasFilters = needle.length > 0 || Boolean(dateFrom || dateTo) || whereActive || kind != null;
+  const hasFilters = needle.length > 0 || Boolean(dateFrom || dateTo) || pill !== 'all';
 
   const filtered = items.filter((item) => {
     if (needle) {
       const haystack = [item.customerName, item.preview].join(' ').toLowerCase();
       if (!haystack.includes(needle)) return false;
     }
-    const day = londonYmd(item.lastAt) ?? '';
+    const day = item.lastAt ? (londonParts(item.lastAt)?.ymd ?? '') : '';
     if (dateFrom && (!day || day < dateFrom)) return false;
     if (dateTo && (!day || day > dateTo)) return false;
-    if (kind && groupKey(item) !== kind) return false;
-    for (const where of wheres) {
-      if (!where.field || !where.value) continue;
-      if (where.field === 'state' && where.value === 'unread' && item.unread <= 0) return false;
-      if (where.field === 'state' && where.value === 'needs' && !needsChoice(item)) return false;
-    }
+    if (pill === 'needs' && !needsChoice(item)) return false;
+    if (pill !== 'all' && pill !== 'needs' && groupKey(item) !== pill) return false;
     return true;
   });
 
-  return (
-    <div className="space-y-4">
-      <SummaryStrip
-        label="Messages"
-        hint="· click to filter"
-        activeKey={kind}
-        onSelect={(key) => {
-          setKind((current) => (current === key ? null : (key as GroupKey)));
-        }}
-        items={summary}
-        gridClassName="grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3"
-      />
+  const waiting = filtered.filter(needsChoice);
+  const rest = filtered.filter((item) => !needsChoice(item));
+  const needsCount = items.filter(needsChoice).length;
+  const pills: { key: PillKey; label: string; count: number; tone?: Tone }[] = [
+    { key: 'all', label: 'All', count: items.length },
+    { key: 'needs', label: 'Needs you', count: needsCount, tone: 'amber' },
+    ...(['cancel', 'reschedule', 'message', 'sent'] as GroupKey[]).map((key) => ({
+      key,
+      label: TOPICS[key].title,
+      tone: TOPICS[key].tone,
+      count: items.filter((item) => groupKey(item) === key).length,
+    })),
+  ];
 
-      {items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-          {emptyText}
+  return (
+    <section
+      aria-label="Conversations"
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-(--look-card-shadow) lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto"
+    >
+      <div className="sticky top-0 z-10 space-y-2.5 border-b border-border bg-card p-3">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Customer or message…"
+              aria-label="Search conversations"
+              className="pr-9 pl-9"
+            />
+            {search.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="size-4" />
+              </button>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDates((value) => !value)}
+            aria-pressed={showDates || Boolean(dateFrom || dateTo)}
+            aria-label="Filter by date"
+            title="Filter by date"
+            className={cn(
+              'flex size-10 shrink-0 items-center justify-center rounded-lg border border-input bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+              (showDates || dateFrom || dateTo) && 'border-primary text-primary',
+            )}
+          >
+            <CalendarDays className="size-4" />
+          </button>
         </div>
-      ) : (
-        <>
-          <PaymentsListFilters
-            search={search}
-            onSearch={setSearch}
-            searchPlaceholder="Customer or message…"
-            dateLabel="Last message"
+        {showDates || dateFrom || dateTo ? (
+          <JobsDateRangeFilter
             dateFrom={dateFrom}
             dateTo={dateTo}
-            onDateChange={({ date_from, date_to }) => {
+            onChange={({ date_from, date_to }) => {
               setDateFrom(date_from);
               setDateTo(date_to);
             }}
-            fields={FILTER_FIELDS}
-            wheres={wheres}
-            onWheresChange={setWheres}
-            hasFilters={hasFilters}
-            onClear={() => {
+          />
+        ) : null}
+        <div
+          role="group"
+          aria-label="Kind of conversation"
+          className="-mx-3 flex gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {pills.map((item) => {
+            const active = pill === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setPill(active && item.key !== 'all' ? 'all' : item.key)}
+                className={cn(
+                  'flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                  active
+                    ? 'border-primary bg-(--tone-rounds-soft) text-(--tone-rounds-text)'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {item.label}
+                <span className={cn('tabular-nums', item.key === 'needs' && item.count > 0 && !active && 'text-(--tone-amber-text)')}>
+                  {item.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {hasFilters ? (
+          <button
+            type="button"
+            onClick={() => {
               setSearch('');
               setDateFrom(undefined);
               setDateTo(undefined);
-              setWheres([]);
-              setKind(null);
+              setShowDates(false);
+              setPill('all');
             }}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            Clear filters
+          </button>
+        ) : null}
+      </div>
+
+      {items.length === 0 ? (
+        <div className="p-3">
+          <EmptyState
+            icon={MessageSquare}
+            title={emptyText}
+            body="Replies from customers land here, and so do the texts WorkWise sends for you."
           />
-          {filtered.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border/80 px-4 py-10 text-center text-sm text-muted-foreground">
-              Nothing matches.
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="p-3">
+          <EmptyState icon={SearchX} title="Nothing matches" body="Try a different name or clear the filters." />
+        </div>
+      ) : (
+        <div>
+          {waiting.length > 0 ? (
+            <div className="bg-(--tone-amber-soft)">
+              <h2 className="flex items-center gap-2 px-4 pt-3 pb-1 text-[13px] font-semibold">
+                Needs you
+                <Tag tone="amber" className="tabular-nums">
+                  {waiting.length}
+                </Tag>
+              </h2>
+              <ul className="px-1.5 pb-1.5">
+                {waiting.map((item) => (
+                  <ThreadRow key={item.id} item={item} active={item.id === activeId} />
+                ))}
+              </ul>
             </div>
-          ) : (
-            <ul className="space-y-3">
-              {filtered.map((item) => (
-                <ThreadRow key={item.id} item={item} />
-              ))}
-            </ul>
-          )}
-        </>
+          ) : null}
+          {rest.length > 0 ? (
+            <div>
+              {waiting.length > 0 ? (
+                <h2 className="px-4 pt-3 pb-1 text-[13px] font-semibold text-muted-foreground">Everything else</h2>
+              ) : null}
+              <ul className="px-1.5 py-1.5">
+                {rest.map((item) => (
+                  <ThreadRow key={item.id} item={item} active={item.id === activeId} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function ThreadRow({ item }: { item: ThreadListItem }) {
-  const topic = TOPIC_BY_KEY[groupKey(item)];
-  const Icon = topic.icon;
+function ThreadRow({ item, active }: { item: ThreadListItem; active: boolean }) {
+  const topic = TOPICS[groupKey(item)];
   const unseen = item.unread > 0;
-  const when = relativeTime(item.lastAt);
+  const when = shortWhen(item.lastAt);
   const preview =
     item.previewDirection === 'outbound' && item.preview ? `You: ${item.preview}` : item.preview;
-  const status = rowStatus(item);
+  const tag = rowTag(item);
+  const sample = item.id.startsWith('sample-');
 
   return (
-    <li
-      className="group relative list-none overflow-hidden rounded-2xl border border-border/70 bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)] transition-all duration-200 sm:hover:-translate-y-0.5 dark:border-white/[0.06]"
-    >
-      <div className={cn('pointer-events-none absolute inset-y-0 left-0 w-1', topic.bar)} aria-hidden />
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-0 bg-gradient-to-r',
-          unseen ? topic.washStrong : topic.washQuiet,
-        )}
-        aria-hidden
-      />
+    <li className="list-none">
       <Link
-        href={item.id.startsWith('sample-') ? '#' : `/messages/${item.id}`}
-        onClick={item.id.startsWith('sample-') ? (event) => event.preventDefault() : undefined}
-        className="relative flex items-start gap-3 p-3 pl-4 sm:p-4 sm:pl-5"
+        href={sample ? '#' : `/messages/${item.id}`}
+        onClick={sample ? (event) => event.preventDefault() : undefined}
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'flex items-start gap-3 rounded-xl px-2.5 py-2.5 transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+          active ? 'bg-(--tone-rounds-soft)' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]',
+        )}
       >
-        <span
-          className="flex size-9 shrink-0 items-center justify-center rounded-full border"
-          style={{
-            borderColor: topic.glow.replace(')', ' / 0.45)'),
-            backgroundColor: topic.glow.replace(')', ' / 0.12)'),
-            color: topic.glow,
-          }}
-        >
-          <Icon className="size-4" />
-        </span>
+        <Avatar
+          name={item.customerName}
+          tone={topic.tone}
+          className={needsChoice(item) ? 'bg-card ring-1 ring-(--tone-amber-line)' : undefined}
+        />
         <span className="min-w-0 flex-1">
-          <span className={cn('block truncate text-[15px] tracking-tight', unseen ? 'font-semibold' : 'font-medium')}>
-            {item.customerName}
+          <span className="flex items-baseline justify-between gap-2">
+            <span className={cn('truncate text-[15px] tracking-tight', unseen ? 'font-semibold' : 'font-medium')}>
+              {item.customerName}
+            </span>
+            {when ? <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when}</span> : null}
           </span>
           {preview ? (
-            <span className="mt-1 block truncate text-sm text-foreground/80">{preview}</span>
+            <span className={cn('mt-0.5 block truncate text-[13px]', unseen ? 'text-foreground' : 'text-muted-foreground')}>
+              {preview}
+            </span>
+          ) : null}
+          {tag || unseen ? (
+            <span className="mt-1.5 flex items-center gap-2">
+              {tag ? <Tag tone={tag.tone}>{tag.text}</Tag> : null}
+              {unseen ? (
+                <span className="size-2 rounded-full bg-(--tone-rose-solid)" role="img" aria-label="New" />
+              ) : null}
+            </span>
           ) : null}
         </span>
-        {status || when ? (
-          <span className="flex shrink-0 flex-col items-end gap-1 text-right">
-            {status ? <span className="text-xs font-medium text-foreground">{status}</span> : null}
-            {when ? <span className="text-xs text-muted-foreground">{when}</span> : null}
-          </span>
-        ) : null}
       </Link>
     </li>
   );

@@ -26,6 +26,7 @@ import {
   ensureThread,
   isOptedOut,
 } from '@/lib/messaging/threads';
+import { listRoundsTenantIds } from '@/lib/messaging/rounds-tenants';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export type EmailAttempt = () => Promise<{ sent: boolean; error?: string }>;
@@ -545,6 +546,44 @@ async function reminderJobsStillAssigned(
   });
 }
 
+/** Held or failed rows for a business with no entitled Rounds plan. Conditional on the
+ *  status still being held or failed, so a row another runner already claimed is left alone.
+ *  Does not refund. sendHeldMessages refunds a held row after this wins: those credits
+ *  were taken when the text was held. A failed row already had its credits returned
+ *  when the send failed, so retryFailedTexts must not refund again. */
+async function skipBecausePlanEnded(
+  admin: SupabaseClient,
+  id: string,
+  status: 'held' | 'failed',
+): Promise<'skipped' | 'missed' | 'error'> {
+  const { data, error } = await admin
+    .from('messages')
+    .update({ status: 'skipped', error: 'plan_ended' })
+    .eq('id', id)
+    .eq('status', status)
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    console.error('[plan_ended]', id, error.message);
+    return 'error';
+  }
+  return data ? 'skipped' : 'missed';
+}
+
+/** Entitled Rounds tenants for this run. Null means the lookup failed: send nothing. */
+async function entitledRoundsTenants(
+  admin: SupabaseClient,
+  label: string,
+): Promise<Set<string> | null> {
+  try {
+    return new Set(await listRoundsTenantIds(admin));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[${label}] tenant list`, message);
+    return null;
+  }
+}
+
 /** Morning cron: send every held text whose hold_until has passed (max 300 per run). Never throws. */
 export async function sendHeldMessages(
   now?: Date,
@@ -553,6 +592,8 @@ export async function sendHeldMessages(
   try {
     const at = now ?? new Date();
     const admin = createAdminClient();
+    const entitled = await entitledRoundsTenants(admin, 'sendHeldMessages');
+    if (!entitled) return counts;
 
     const { data: rows, error } = await admin
       .from('messages')
@@ -587,6 +628,24 @@ export async function sendHeldMessages(
       };
 
       try {
+        if (!entitled.has(row.tenant_id)) {
+          const marked = await skipBecausePlanEnded(admin, row.id, 'held');
+          if (marked === 'skipped') {
+            // Credits were taken when the text was held. Only the runner that won
+            // the skip refunds, so a second morning run cannot return them twice.
+            if (row.segments && row.billed_from && row.billed_month) {
+              await refundCredits(admin, {
+                tenantId: row.tenant_id,
+                segments: row.segments,
+                from: row.billed_from,
+                month: row.billed_month,
+              });
+            }
+            counts.skipped += 1;
+          } else if (marked === 'error') counts.failed += 1;
+          continue;
+        }
+
         // Claim held → queued so two cron runners cannot send the same text.
         const { data: claimed, error: claimError } = await admin
           .from('messages')
@@ -738,6 +797,9 @@ export async function retryFailedTexts(
   try {
     const at = now ?? new Date();
     const admin = createAdminClient();
+    const entitled = await entitledRoundsTenants(admin, 'retryFailedTexts');
+    if (!entitled) return counts;
+
     const { data: rows, error } = await admin
       .from('messages')
       .select(
@@ -771,6 +833,13 @@ export async function retryFailedTexts(
         provider_status: string;
       };
       try {
+        if (!entitled.has(row.tenant_id)) {
+          const marked = await skipBecausePlanEnded(admin, row.id, 'failed');
+          if (marked === 'skipped') counts.skipped += 1;
+          else if (marked === 'error') counts.failed += 1;
+          continue;
+        }
+
         // Rows from before this change have no text saved; nothing to resend.
         if (!row.body || !isUkMobileE164(row.to_address)) continue;
         const stage = RETRY_STAGES.indexOf(row.provider_status as (typeof RETRY_STAGES)[number]);

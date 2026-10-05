@@ -1,43 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { CircleAlert, Phone } from 'lucide-react';
-import { CopyPayLinkButton } from '@/components/payments/copy-pay-link-button';
+import { CircleCheck, SearchX } from 'lucide-react';
+import { EmptyState, LookCard } from '@/components/look';
+import { ChaseList } from '@/components/payments/chase-list';
+import { FilterChips, type FilterChip } from '@/components/payments/filter-chips';
 import {
   PaymentsListFilters,
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
-import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
-import { MoneyRow, MONEY_ACCENT } from '@/components/payments/money-row';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { owedBandOf, summariseOwedBands, type OwedBand } from '@/components/payments/owed-age';
 import type { OwedCustomerRow } from '@/lib/data/payments/owed';
 import { formatGbp } from '@/lib/money/pence';
-import { diffDays } from '@/lib/rounds/dates';
 
-function formatSince(ymd: string | null): string {
-  if (!ymd) return '—';
-  const [y, m, d] = ymd.split('-').map(Number);
-  if (!y || !m || !d) return ymd;
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(y, m - 1, d)));
-}
-
-function waitingLabel(oldest: string | null, today: string): string {
-  if (!oldest) return '—';
-  const days = diffDays(oldest, today);
-  if (days < 0) return formatSince(oldest);
-  if (days === 0) return 'Today';
-  if (days === 1) return '1 day';
-  return `${days} days`;
-}
-
-export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: string }) {
-  const router = useRouter();
+export function OwedTable({
+  rows,
+  today,
+  initialBand = 'all',
+}: {
+  rows: OwedCustomerRow[];
+  today: string;
+  initialBand?: OwedBand | 'all';
+}) {
+  const [band, setBand] = useState<OwedBand | 'all'>(initialBand);
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState<string | undefined>();
   const [dateTo, setDateTo] = useState<string | undefined>();
@@ -45,6 +30,7 @@ export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: str
   const needle = search.trim().toLowerCase();
   const owingAll = rows.filter((row) => row.owedAmount > 0);
   const owing = owingAll.filter((row) => {
+    if (band !== 'all' && owedBandOf(row.oldestUnpaidDate, today) !== band) return false;
     if (needle) {
       const haystack = [row.name, row.phone, row.email].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(needle)) return false;
@@ -70,8 +56,6 @@ export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: str
       label: count === 1 ? '1 visit' : `${count} visits`,
     }));
   const whereActive = wheres.some((where) => where.field && where.value);
-  const [payingId, setPayingId] = useState<string | null>(null);
-  const paying = owing.find((row) => row.customerId === payingId) ?? null;
 
   const filters = (
     <PaymentsListFilters
@@ -103,90 +87,43 @@ export function OwedTable({ rows, today }: { rows: OwedCustomerRow[]; today: str
 
   if (owingAll.length === 0) {
     return (
-      <Card className="glass-card border-border/80">
-        <CardContent className="flex min-h-[180px] flex-col items-center justify-center p-8 text-center">
-          <p className="text-sm font-medium text-foreground">Nobody is overdue</p>
-          <p className="mt-1 text-sm text-muted-foreground">Every customer is paid up.</p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={CircleCheck}
+        title="Nobody owes you anything"
+        body="Every finished visit is paid for. New ones show up here as soon as they are done and not paid."
+      />
     );
   }
 
+  const totalOwed = owingAll.reduce((sum, row) => sum + row.owedAmount, 0);
+  const summary = summariseOwedBands(owingAll, today);
+  const customers = (n: number) => (n === 1 ? '1 customer' : `${n} customers`);
+  const chips: FilterChip<OwedBand | 'all'>[] = [
+    { key: 'all', label: 'Everyone owing', detail: `${formatGbp(totalOwed)} · ${customers(owingAll.length)}` },
+    ...summary.map((item) => ({
+      key: item.key,
+      label: item.label,
+      tone: item.tone,
+      detail: `${formatGbp(item.amount)} · ${customers(item.count)}`,
+    })),
+  ];
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <FilterChips
+        ariaLabel="How long they have waited"
+        chips={chips}
+        value={band}
+        onChange={(key) => setBand(key === band ? 'all' : key)}
+      />
       {filters}
       {owing.length === 0 ? (
-        <Card className="glass-card border-border/80">
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            Nothing matches.
-          </CardContent>
-        </Card>
+        <EmptyState icon={SearchX} title="Nothing matches" body="Try a different name or clear the filters." />
       ) : (
-        <ul className="space-y-3">
-          {owing.map((row) => (
-            <MoneyRow
-              key={row.customerId}
-              accent={MONEY_ACCENT.overdue}
-              icon={CircleAlert}
-              title={row.name}
-              detail={`${waitingLabel(row.oldestUnpaidDate, today)} · since ${formatSince(row.oldestUnpaidDate)} · ${row.unpaidVisitCount === 1 ? '1 visit' : `${row.unpaidVisitCount} visits`}`}
-              amount={formatGbp(row.owedAmount)}
-              tags={
-                row.collectingAmount > 0 || row.hasDirectDebit || row.failedDirectDebits > 0 ? (
-                  <>
-                    {row.collectingAmount > 0 ? (
-                      <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
-                        Collecting {formatGbp(row.collectingAmount)}
-                      </span>
-                    ) : null}
-                    {row.hasDirectDebit ? (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        DD
-                      </span>
-                    ) : null}
-                    {row.failedDirectDebits > 0 ? (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-300">
-                        DD failed
-                      </span>
-                    ) : null}
-                  </>
-                ) : undefined
-              }
-              status={row.chaseStage === 2 ? 'Chase' : row.chaseStage === 1 ? 'Reminded' : undefined}
-              onClick={() => router.push(`/customers/${row.customerId}`)}
-              actions={
-                <>
-                  {row.phone ? (
-                    <a
-                      href={`tel:${row.phone}`}
-                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                    >
-                      <Phone className="size-3.5" />
-                      Call
-                    </a>
-                  ) : null}
-                  <Button variant="outline" size="sm" onClick={() => setPayingId(row.customerId)}>
-                    Mark as paid
-                  </Button>
-                  <CopyPayLinkButton customerId={row.customerId} available />
-                </>
-              }
-            />
-          ))}
-        </ul>
+        <LookCard>
+          <ChaseList rows={owing} today={today} />
+        </LookCard>
       )}
-      {paying ? (
-        <RecordPaymentDialog
-          key={paying.customerId}
-          customerId={paying.customerId}
-          defaultAmount={paying.owedAmount}
-          unpaidVisits={[]}
-          open
-          onOpenChange={(open) => {
-            if (!open) setPayingId(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

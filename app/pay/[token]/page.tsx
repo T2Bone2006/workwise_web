@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { CircleCheck } from 'lucide-react';
+import { IconChip } from '@/components/look';
 import { BankTransferCard } from '@/components/pay/bank-transfer-card';
 import { CardPayButton, payCheckoutErrorMessage } from '@/components/pay/card-pay-button';
 import { DirectDebitOffer } from '@/components/pay/direct-debit-offer';
@@ -96,28 +97,22 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
   return (
     <PayShell business={page.business}>
       {query.paid === '1' ? (
-        <p className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-          Thanks — your payment went through. It can take a minute to show below.
-        </p>
+        <PayBanner tone="good">Thanks, your payment went through. It can take a minute to show below.</PayBanner>
       ) : null}
       {ddBanner ? <PayBanner tone={ddBanner.tone}>{ddBanner.text}</PayBanner> : null}
       {bankBanner ? <PayBanner tone={bankBanner.tone}>{bankBanner.text}</PayBanner> : null}
       {errorMessage ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-          {errorMessage}
-        </p>
+        <PayBanner tone="warn">{errorMessage}</PayBanner>
       ) : null}
       {page.customerFirstName ? (
         <p className="text-sm text-muted-foreground">Hi {page.customerFirstName},</p>
       ) : null}
-      <section className="rounded-xl border border-border/80 bg-card/60 p-4">
+      <section className="rounded-2xl bg-muted/60 p-4 sm:p-5">
         {allPaid ? (
           <>
-            <p className="flex items-center gap-2 text-lg font-semibold tracking-tight text-emerald-700 dark:text-emerald-300">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
-                <CircleCheck className="size-3.5" />
-              </span>
-              You&apos;re all paid up — thank you.
+            <p className="flex items-center gap-2.5 text-lg font-semibold tracking-tight text-(--tone-emerald-text)">
+              <IconChip icon={CircleCheck} tone="emerald" size="sm" />
+              You&apos;re all paid up. Thank you.
             </p>
             {page.creditAmount > 0 ? (
               <p className="mt-1 text-sm text-muted-foreground">
@@ -128,7 +123,7 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
         ) : (
           <>
             <p className="text-sm text-muted-foreground">You owe</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-300">
+            <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight text-(--tone-emerald-solid)">
               {formatGbp(owed)}
             </p>
             {page.otherOwed.length > 0 || shownVisits.length > 0 ? (
@@ -174,7 +169,7 @@ export default async function CustomerPayPage({ params, searchParams }: PayPageP
       {offer}
       {otherWays ? <p className="text-sm font-medium text-muted-foreground">Want to pay another way?</p> : null}
       {showPayByBank ? <PayByBankButton token={token} from="customer" amount={owed} /> : null}
-      {showCard ? <CardPayButton token={token} kind="customer" amount={owed} /> : null}
+      {showCard ? <CardPayButton token={token} kind="customer" amount={owed} secondary={showPayByBank} /> : null}
       {page.bank ? (
         <BankTransferCard
           bank={page.bank}

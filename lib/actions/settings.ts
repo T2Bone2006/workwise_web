@@ -2,6 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { closeAccount, type CloseResult } from '@/lib/billing/close-account';
+import { PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import {
   INDUSTRIES,
   type TenantSettings,
@@ -343,8 +345,61 @@ export async function dangerDeleteTenant(companyName: string, password: string):
   });
   if (signInError) return { success: false, error: 'Password incorrect' };
 
+  const { data: billingTenant, error: billingTenantError } = await supabase
+    .from('tenants')
+    .select('stripe_customer_id')
+    .eq('id', tenantId)
+    .maybeSingle();
+  const { data: subs, error: subsError } = await supabase
+    .from('subscriptions')
+    .select('source, product')
+    .eq('tenant_id', tenantId);
+  if (billingTenantError || subsError) {
+    return { success: false, error: 'Could not check this account.' };
+  }
+  const proTiers = new Set<string>(PRO_TIER_PRODUCTS);
+  const managed =
+    !billingTenant?.stripe_customer_id ||
+    (subs ?? []).some(
+      (row: { source: string | null; product: string | null }) =>
+        row.source === 'manual' || (row.product != null && proTiers.has(row.product)),
+    );
+  if (!managed) return { success: false, error: 'Use Close my account instead.' };
+
   const { error } = await supabase.from('tenants').delete().eq('id', tenantId);
   if (error) return { success: false, error: error.message };
   revalidatePath('/settings');
   return { success: true };
+}
+
+export async function closeAccountAction(businessName: string, password: string): Promise<CloseResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not authenticated' };
+  const tenantId = await getTenantId();
+  if (!tenantId) return { ok: false, error: 'No tenant found' };
+
+  const { data: profile, error: profileError } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (profileError || profile?.role !== 'admin') {
+    return { ok: false, error: 'Only the account owner can do this.' };
+  }
+
+  const { data: tenant } = await supabase.from('tenants').select('name').eq('id', tenantId).maybeSingle();
+  if (!tenant || (tenant.name ?? '').trim() !== businessName.trim()) {
+    return { ok: false, error: 'Company name does not match' };
+  }
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: user.email!,
+    password,
+  });
+  if (signInError) return { ok: false, error: 'Password incorrect' };
+
+  return closeAccount(tenantId, user.id);
 }

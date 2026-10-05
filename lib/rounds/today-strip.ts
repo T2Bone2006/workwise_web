@@ -90,3 +90,35 @@ export function summariseToday(visits: RoundVisit[]): TodayRound {
     upNext: todo.slice(1, 1 + UP_NEXT).map(preview),
   };
 }
+
+export type StopState = 'done' | 'skipped' | 'next' | 'todo';
+
+export type StopRow = StopPreview & { state: StopState };
+
+/**
+ * Every house on today's round in route order, each with where it stands:
+ * done, skipped, the next one to do, or still to do. Same grouping and
+ * sums as summariseToday, so the list and the totals always agree.
+ */
+export function listTodayStops(visits: RoundVisit[]): StopRow[] {
+  let nextTaken = false;
+  return groupHouseStops(visits).map((group) => {
+    const live = group.filter((v) => v.status !== 'cancelled');
+    const shown = live.length > 0 ? live : group;
+    const first = group[0]!;
+    const row: StopPreview = {
+      customerName: first.customer_name,
+      street: first.address.split(',')[0]?.trim() || first.address,
+      time: friendlyTime(first.scheduled_time),
+      work: [...new Set(shown.map((v) => v.job_description?.trim()).filter(Boolean))].join(', '),
+      amount: fromPence(shown.reduce((sum, v) => sum + price(v), 0)),
+    };
+    if (live.length === 0) return { ...row, state: 'skipped' as const };
+    if (live.every((v) => v.status === 'completed')) return { ...row, state: 'done' as const };
+    if (live.some((v) => LEFTOVER.has(v.status)) && !nextTaken) {
+      nextTaken = true;
+      return { ...row, state: 'next' as const };
+    }
+    return { ...row, state: 'todo' as const };
+  });
+}

@@ -4,8 +4,8 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import type { TrendMonth } from '@/lib/books/trend';
 import { formatGbp } from '@/lib/money/pence';
 
-const IN = 'rgb(16 185 129)';
-const OUT = 'rgb(244 63 94)';
+const IN = 'var(--tone-emerald-solid)';
+const OUT = 'var(--tone-rose-solid)';
 
 /** Money in against money out for the last six months, the current month last. */
 export function MoneyChart({ months }: { months: TrendMonth[] }) {
@@ -30,8 +30,8 @@ export function MoneyChart({ months }: { months: TrendMonth[] }) {
               return (
                 <div className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-sm">
                   <p className="font-medium">{label}</p>
-                  <p className="text-emerald-600 dark:text-emerald-300">In {formatGbp(value('moneyIn'))}</p>
-                  <p className="text-rose-600 dark:text-rose-300">Out {formatGbp(value('moneyOut'))}</p>
+                  <p className="text-(--tone-emerald-text)">In {formatGbp(value('moneyIn'))}</p>
+                  <p className="text-(--tone-rose-text)">Out {formatGbp(value('moneyOut'))}</p>
                   <p>Left {formatGbp(value('moneyIn') - value('moneyOut'))}</p>
                 </div>
               );

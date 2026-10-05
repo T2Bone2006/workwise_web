@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAuthorisedCronRequest } from '@/lib/cron/auth';
+import { sweepStuckReferralRewards } from '@/lib/billing/referrals';
 
 const ABANDON_AFTER_DAYS = 7;
 
@@ -17,15 +18,19 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const cutoff = new Date(Date.now() - ABANDON_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: stale, error } = await admin
+  const { data: pending, error } = await admin
     .from('signup_intents')
-    .select('id, auth_user_id')
-    .eq('status', 'pending')
-    .lt('created_at', cutoff);
+    .select('id, auth_user_id, created_at, last_checkout_at')
+    .eq('status', 'pending');
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const stale = (pending ?? []).filter((intent) => {
+    const stamp = intent.last_checkout_at ?? intent.created_at;
+    return typeof stamp === 'string' && stamp < cutoff;
+  });
 
   let abandoned = 0;
   for (const intent of stale ?? []) {
@@ -41,5 +46,6 @@ export async function GET(request: Request) {
     abandoned += 1;
   }
 
-  return NextResponse.json({ abandoned });
+  const referralRewards = await sweepStuckReferralRewards();
+  return NextResponse.json({ abandoned, referralRewards });
 }

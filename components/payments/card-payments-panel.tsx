@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import Link from 'next/link';
-import { CircleCheck, CreditCard } from 'lucide-react';
+import { CircleCheck, CreditCard, Landmark } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { IconChip, KeyFigure, LookCard, Tag } from '@/components/look';
 import type { CardPanelData } from '@/lib/data/payments/card-panel';
 import { requirementLabel } from '@/lib/payments/requirement-label';
 import { openStripeDashboard, startCardPaymentsSetup } from '@/lib/actions/stripe-connect';
 import { fromPence, formatGbp } from '@/lib/money/pence';
-import { cn } from '@/lib/utils';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -58,9 +58,28 @@ function uniqueLabels(keys: string[]): string[] {
 
 export function CardPaymentsPanel(props: {
   data: CardPanelData;
+  /** Live Stripe balance that is still on its way; fills in payouts when it lands. */
+  payoutsPromise?: Promise<Pick<CardPanelData, 'payouts' | 'payoutsError'>> | null;
   compact?: boolean;
 }): JSX.Element {
-  const { data } = props;
+  const { payoutsPromise } = props;
+  const [late, setLate] = useState<{
+    promise: Promise<unknown>;
+    result: Pick<CardPanelData, 'payouts' | 'payoutsError'>;
+  } | null>(null);
+  useEffect(() => {
+    if (!payoutsPromise) return;
+    let cancelled = false;
+    void payoutsPromise.then((result) => {
+      if (!cancelled) setLate({ promise: payoutsPromise, result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [payoutsPromise]);
+  const arrived = payoutsPromise != null && late?.promise === payoutsPromise ? late.result : null;
+  const payoutsLoading = payoutsPromise != null && arrived == null;
+  const data: CardPanelData = arrived ? { ...props.data, ...arrived } : props.data;
   const compact = props.compact === true && data.status === 'active' && data.disputes.length === 0;
   const [busy, setBusy] = useState<'setup' | 'stripe' | null>(null);
 
@@ -100,7 +119,11 @@ export function CardPaymentsPanel(props: {
           Card payments are on
         </span>
         <span className="text-muted-foreground">·</span>
-        <span>{nextLine ? `next payout ${nextLine}` : 'No payout scheduled'}</span>
+        {payoutsLoading ? (
+          <span aria-hidden className="skeleton inline-block h-4 w-28 rounded-md align-middle" />
+        ) : (
+          <span>{nextLine ? `next payout ${nextLine}` : 'No payout scheduled'}</span>
+        )}
         <span className="text-muted-foreground">·</span>
         <button
           type="button"
@@ -114,16 +137,27 @@ export function CardPaymentsPanel(props: {
     );
   }
 
+  const headline =
+    data.status === 'none'
+      ? 'Take card payments'
+      : data.status === 'in_progress'
+        ? 'Finish setting up card payments'
+        : data.status === 'restricted'
+          ? 'Stripe needs more details'
+          : 'Card payments are on';
+  const tone = data.status === 'active' ? 'emerald' : data.status === 'restricted' ? 'amber' : 'rounds';
+
   return (
-    <Card
-      className={cn(
-        'glass-card border-border/80',
-        data.status === 'restricted' && 'border-amber-500/40 bg-amber-500/5',
-      )}
+    <LookCard
+      className={data.status === 'restricted' ? 'border-(--tone-amber-line) bg-(--tone-amber-soft)' : undefined}
+      aside={data.status === 'active' ? <Tag tone="emerald">On</Tag> : undefined}
+      title={headline}
+      icon={data.status === 'active' ? CircleCheck : CreditCard}
+      tone={tone}
     >
       {disputeCount > 0 ? (
-        <div className="space-y-3 border-b border-red-500/30 bg-red-500/10 px-6 py-4 text-sm text-red-800 dark:text-red-200">
-          <p>
+        <div className="-mx-1 mb-4 space-y-3 rounded-xl border border-(--tone-rose-line) bg-(--tone-rose-soft) px-4 py-3 text-sm text-(--tone-rose-text)">
+          <p className="font-medium">
             {disputeCount} disputed card payment{disputeCount === 1 ? '' : 's'}. Respond in Stripe
             before the deadline or the money goes back to the customer.
           </p>
@@ -141,44 +175,33 @@ export function CardPaymentsPanel(props: {
               </li>
             ))}
           </ul>
-          <Button type="button" variant="outline" disabled={busy === 'stripe'} onClick={() => void openStripe()}>
+          <Button type="button" variant="outline" size="sm" disabled={busy === 'stripe'} onClick={() => void openStripe()}>
             Open Stripe
           </Button>
         </div>
       ) : null}
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          {data.status === 'active' ? (
-            <CircleCheck className="size-5 text-emerald-600" />
-          ) : (
-            <CreditCard className="size-5" />
-          )}
-          {data.status === 'none' ? 'Take card payments' : null}
-          {data.status === 'in_progress' ? 'Finish setting up card payments' : null}
-          {data.status === 'restricted' ? 'Stripe needs more details' : null}
-          {data.status === 'active' ? 'Card payments are on' : null}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
+      <div className="space-y-4 text-sm">
         {data.status === 'none' ? (
           <>
-            <p>
+            <p className="text-muted-foreground">
               Customers pay by card, Apple Pay or Google Pay from your pay link and invoices. The
               money goes straight into your own Stripe account and on to your bank — usually within
               a few days. Stripe charges its standard card fee; WorkWise takes nothing.
             </p>
-            <Button type="button" disabled={busy === 'setup'} onClick={() => void beginSetup()}>
-              Set up card payments
-            </Button>
-            <p className="text-muted-foreground">
-              Takes about 5 minutes. Stripe will ask for your details, your bank account and
-              sometimes ID.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" disabled={busy === 'setup'} onClick={() => void beginSetup()}>
+                Set up card payments
+              </Button>
+              <span className="text-muted-foreground">
+                Takes about 5 minutes. Stripe will ask for your details, your bank account and
+                sometimes ID.
+              </span>
+            </div>
           </>
         ) : null}
         {data.status === 'in_progress' ? (
           <>
-            <p>Stripe needs a few more details before you can take cards.</p>
+            <p className="text-muted-foreground">Stripe needs a few more details before you can take cards.</p>
             <Button type="button" disabled={busy === 'setup'} onClick={() => void beginSetup()}>
               Finish setting up
             </Button>
@@ -198,36 +221,36 @@ export function CardPaymentsPanel(props: {
         ) : null}
         {data.status === 'active' ? (
           <>
-            {data.payoutsError ? (
-              <p>Couldn&apos;t load your Stripe balance just now.</p>
+            {payoutsLoading ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Skeleton className="h-16 rounded-xl" />
+                <Skeleton className="h-16 rounded-xl" />
+                <Skeleton className="h-16 rounded-xl" />
+              </div>
+            ) : data.payoutsError ? (
+              <p className="text-muted-foreground">Couldn&apos;t load your Stripe balance just now.</p>
             ) : (
               <>
-                <p className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span>
-                    <span className="text-muted-foreground">Available </span>
-                    <span className="font-semibold tabular-nums">
-                      {formatGbp(fromPence(data.payouts?.available ?? 0))}
-                    </span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">On the way </span>
-                    <span className="font-semibold tabular-nums">
-                      {formatGbp(fromPence(data.payouts?.pending ?? 0))}
-                    </span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">Next payout </span>
-                    <span className="font-semibold">{nextLine ?? 'No payout scheduled'}</span>
-                  </span>
-                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <KeyFigure label="Available" value={formatGbp(fromPence(data.payouts?.available ?? 0))} tone="emerald" />
+                  <KeyFigure label="On the way" value={formatGbp(fromPence(data.payouts?.pending ?? 0))} />
+                  <KeyFigure label="Next payout" value={nextLine ?? 'No payout scheduled'} />
+                </div>
                 {(data.payouts?.recent.length ?? 0) > 0 ? (
-                  <div className="space-y-1">
-                    <p className="font-medium">Recent payouts</p>
-                    <ul>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Recent payouts</p>
+                    <ul className="divide-y divide-border rounded-xl border border-border">
                       {data.payouts?.recent.slice(0, 3).map((row) => (
-                        <li key={`${row.arrivalDate}-${row.amount}-${row.status}`}>
-                          {payoutDay(row.arrivalDate)} · {formatGbp(fromPence(row.amount))} ·{' '}
-                          {payoutStatusLabel(row.status)}
+                        <li
+                          key={`${row.arrivalDate}-${row.amount}-${row.status}`}
+                          className="flex items-center gap-3 px-3 py-2"
+                        >
+                          <IconChip icon={Landmark} tone="slate" size="sm" />
+                          <span className="flex-1">{payoutDay(row.arrivalDate)}</span>
+                          <span className="font-medium tabular-nums">{formatGbp(fromPence(row.amount))}</span>
+                          <Tag tone={row.status === 'paid' ? 'emerald' : row.status === 'failed' ? 'rose' : 'slate'}>
+                            {payoutStatusLabel(row.status)}
+                          </Tag>
                         </li>
                       ))}
                     </ul>
@@ -235,12 +258,12 @@ export function CardPaymentsPanel(props: {
                 ) : null}
               </>
             )}
-            <Button type="button" disabled={busy === 'stripe'} onClick={() => void openStripe()}>
+            <Button type="button" variant="outline" disabled={busy === 'stripe'} onClick={() => void openStripe()}>
               Open Stripe
             </Button>
           </>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </LookCard>
   );
 }

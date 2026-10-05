@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
+import { useLook } from '@/components/look/use-look';
+import { LookTopbar } from './look-topbar';
 
 interface TopbarProps {
   tenantName: string;
@@ -36,12 +38,24 @@ export function Topbar({
   onMenuClick,
   viewAsActive = false,
 }: TopbarProps) {
+  const look = useLook();
   const handleLogout = async () => {
     if (viewAsActive) {
       await fetch('/api/admin/view-as/stop', { method: 'POST' });
     }
     await logout();
   };
+
+  if (look === 'new') {
+    return (
+      <LookTopbar
+        tenantName={tenantName}
+        userEmail={userEmail}
+        onMenuClick={onMenuClick}
+        viewAsActive={viewAsActive}
+      />
+    );
+  }
 
   return (
     <header

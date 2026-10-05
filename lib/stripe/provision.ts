@@ -2,6 +2,7 @@ import 'server-only';
 import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/client';
+import { choiceForPriceId } from '@/lib/billing/plans';
 import { snapshotSubscription } from '@/lib/stripe/sync-subscription';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 
@@ -34,6 +35,16 @@ export async function provisionFromCheckoutSession(session: Stripe.Checkout.Sess
     typeof session.customer === 'string' ? session.customer : session.customer?.id ?? snap.stripeCustomerId;
 
   const admin = createAdminClient();
+
+  const { data: intent } = await admin
+    .from('signup_intents')
+    .select('product, billing_interval')
+    .eq('id', intentId)
+    .maybeSingle();
+  const paid = choiceForPriceId(snap.stripePriceId);
+  if (intent && (paid?.plan !== intent.product || paid?.interval !== intent.billing_interval)) {
+    console.warn(`[provision] plan mismatch intent=${intentId}`);
+  }
 
   // Remember which session paid for this intent (idempotency + support lookups).
   await admin

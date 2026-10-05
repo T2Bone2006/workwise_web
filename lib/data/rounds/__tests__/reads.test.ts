@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { summariseCustomerAgreements } from '@/lib/data/rounds/customers';
+import { countCustomersByService } from '@/lib/data/rounds/service-catalog';
 import { summariseTodayVisits } from '@/lib/data/rounds/home';
 import { foldVisitCounts, mapVisitRow, type VisitRow } from '@/lib/data/rounds/visits';
 
@@ -123,5 +124,19 @@ describe('summariseTodayVisits', () => {
       visit({ id: '2', status: 'assigned', route_position: 2 }),
     ]);
     expect(summary.unorderedToday).toBe(false);
+  });
+});
+
+describe('countCustomersByService', () => {
+  it('counts each customer once per service and ignores agreements with no service', () => {
+    expect(
+      countCustomersByService([
+        { service_catalog_id: 'a', customer_id: '1' },
+        { service_catalog_id: 'a', customer_id: '1' },
+        { service_catalog_id: 'a', customer_id: '2' },
+        { service_catalog_id: 'b', customer_id: '2' },
+        { service_catalog_id: null, customer_id: '3' },
+      ]),
+    ).toEqual({ a: 2, b: 1 });
   });
 });

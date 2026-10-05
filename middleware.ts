@@ -28,12 +28,17 @@ const UNPROTECTED_PATHS = [
   // Self-serve signup: the user has no users row until the Stripe webhook
   // provisions them, so these must never bounce to /dashboard or /login.
   '/signup',
+  // Referral links. They only set a cookie and redirect to the marketing site.
+  '/r',
   // Public customer pages + Stripe return pages.
   '/pay',
   '/connect',
   // Phase 5: the accountant's read-only pages. They have their own emailed-code
   // sign-in and no Supabase user, so the dashboard session rules must not touch them.
   '/accountant',
+  // Phase 6: one-tap Accept / Decline / Change price from the new-lead email or text.
+  // The link token is the only credential; opening it must not bounce to /login.
+  '/lead',
 ] as const;
 
 /** Paths workers may visit on the web (invite / password setup). */

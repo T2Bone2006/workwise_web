@@ -33,7 +33,7 @@ export default async function InvoicePage({
   return (
     <div className="space-y-6">
       <HistoryBackButton fallbackHref="/payments?tab=invoices" label="Invoices" />
-      <PageGradientHeader title={invoice.number} subtitle="Invoice" />
+      <PageGradientHeader title={invoice.number} subtitle={`Invoice for ${invoice.billTo.name}`} />
       <InvoiceDetail invoice={invoice} />
     </div>
   );

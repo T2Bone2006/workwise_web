@@ -49,7 +49,7 @@ export function RoomCard({
         </p>
       ) : (
         <>
-          <div className={cn('rounded-xl border px-3.5 py-3', room.kind === 'full' ? 'border-amber-500/30 bg-amber-500/[0.07]' : 'border-teal-500/30 bg-teal-500/[0.07]')}>
+          <div className={cn('rounded-xl border px-3.5 py-3', room.kind === 'full' ? 'border-(--tone-amber-line) bg-(--tone-amber-soft)' : 'border-(--tone-teal-line) bg-(--tone-teal-soft)')}>
             <p className="text-[15px] font-semibold leading-snug">{roomHeadline(room)}</p>
             <p className="mt-1 text-sm text-muted-foreground">{roomDetail(room)}</p>
           </div>
@@ -86,10 +86,10 @@ export function RoomCard({
                     }
                     if (day.stops === 0) {
                       return (
-                        <td key={weekday} className="h-11 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-0">
+                        <td key={weekday} className="h-11 rounded-lg border border-(--tone-emerald-line) bg-(--tone-emerald-soft) p-0">
                           <Link
                             href={`/calendar?view=day&date=${day.date}`}
-                            className="flex h-full flex-col items-center justify-center rounded-lg font-semibold text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                            className="flex h-full flex-col items-center justify-center rounded-lg font-semibold text-(--tone-emerald-text) hover:bg-(--tone-emerald-solid)/10"
                           >
                             <span className="text-[10px] font-normal text-muted-foreground">{date}</span>
                             Free
@@ -99,7 +99,7 @@ export function RoomCard({
                     }
                     const strength = Math.min(1, day.stops / busiest);
                     return (
-                      <td key={weekday} className="h-11 rounded-lg p-0" style={{ backgroundColor: `rgb(20 184 166 / ${0.06 + strength * 0.22})` }}>
+                      <td key={weekday} className="h-11 rounded-lg p-0" style={{ backgroundColor: `color-mix(in srgb, var(--tone-teal-solid) ${Math.round(8 + strength * 30)}%, transparent)` }}>
                         <Link
                           href={`/calendar?view=day&date=${day.date}`}
                           className="flex h-full flex-col items-center justify-center rounded-lg hover:bg-muted/40"
@@ -123,7 +123,7 @@ export function RoomCard({
 
       {roundValue && roundValue.schedules > 0 ? (
         <div className="mt-auto flex items-center gap-3 border-t border-border/60 pt-3">
-          <TrendingUp className="size-4 shrink-0 text-teal-600 dark:text-teal-300" aria-hidden="true" />
+          <TrendingUp className="size-4 shrink-0 text-(--tone-teal-text)" aria-hidden="true" />
           <p className="text-sm text-muted-foreground">
             Your regular work is worth about{' '}
             <span className="font-semibold text-foreground">{formatGbp(roundValue.perMonth)} a month</span> from{' '}

@@ -57,6 +57,19 @@ export const ROUND_BOOK_AI_MODEL = process.env.ROUND_BOOK_AI_MODEL?.trim() || 'c
 export const CUSTOMER_IMPORT_AI_MODEL =
   process.env.CUSTOMER_IMPORT_AI_MODEL?.trim() || 'claude-haiku-4-5';
 
+/** Phase 6: the website assistant. Sonnet, one business's prices, a low effort. */
+export const WIDGET_AI_MODEL = process.env.WIDGET_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: the set-up interview that learns how the tradie prices. */
+export const INTERVIEW_AI_MODEL = process.env.INTERVIEW_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: follow-up texts drafted in the tradie's voice. */
+export const LITE_TEXT_AI_MODEL = process.env.LITE_TEXT_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: a one-line summary of a finished website chat. Haiku is enough. */
+export const CONVERSATION_SUMMARY_AI_MODEL =
+  process.env.CONVERSATION_SUMMARY_AI_MODEL?.trim() || 'claude-haiku-4-5';
+
 /**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
  * among them), so it can only be sent when the configured model supports it.

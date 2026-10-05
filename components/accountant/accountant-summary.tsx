@@ -18,10 +18,10 @@ function Amount({ value, className }: { value: number; className?: string }) {
 
 function Tile({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
   return (
-    <Card className="gap-1 py-4">
+    <Card className="gap-1 rounded-2xl py-4">
       <CardContent>
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="mt-1 text-3xl font-semibold tracking-tight">{children}</p>
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <p className="mt-1.5 text-3xl font-semibold tracking-tight tabular-nums">{children}</p>
         <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
       </CardContent>
     </Card>
@@ -97,10 +97,10 @@ export function AccountantSummary({
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile label="Money in" hint={`${plural(summary.paymentsCount, 'payment', 'payments')} received`}>
-          <span className="text-emerald-600 dark:text-emerald-400">{money(summary.moneyIn)}</span>
+          <span className="text-(--tone-emerald-solid)">{money(summary.moneyIn)}</span>
         </Tile>
         <Tile label="Money out" hint="expenses the business has saved">
-          {money(summary.moneyOut)}
+          <span className="text-(--tone-rose-solid)">{money(summary.moneyOut)}</span>
         </Tile>
         <Tile label="Left" hint="money in less money out, before tax">
           <Amount value={summary.left} />

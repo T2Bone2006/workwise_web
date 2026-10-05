@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -13,10 +13,10 @@ import {
   Route,
   Wallet,
 } from 'lucide-react';
+import { useLook } from '@/components/look/use-look';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import type { TenantSkillRow } from '@/lib/actions/skills';
-import type { BillingSummary } from '@/lib/data/billing';
 import type { CardPanelData } from '@/lib/data/payments/card-panel';
 import type { PaymentSettings } from '@/lib/data/payments/settings';
 import type { RoundsSettings } from '@/lib/rounds/settings';
@@ -26,7 +26,6 @@ import { SettingsAccountantTab } from './settings-accountant-tab';
 import type { AccessSummary } from '@/lib/accountant/access';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
-import { SettingsBillingTab } from './settings-billing-tab';
 import { SettingsRoundsTab } from './settings-rounds-tab';
 import {
   SettingsMessagesSection,
@@ -36,7 +35,12 @@ import {
 interface SettingsViewProps {
   initialData: SettingsPageData;
   initialTenantSkills: TenantSkillRow[];
-  billing: BillingSummary;
+  /** Self-serve plan page, or the managed billing tab. */
+  billingPanel: ReactNode;
+  /** Self-serve businesses see "Plan & billing". Managed businesses keep "Billing". */
+  selfServeBilling?: boolean;
+  /** Any Rounds subscription, including one that has ended. Offers the data download before close. */
+  hasRounds?: boolean;
   rounds?: { settings: RoundsSettings } | null;
   payments?: { settings: PaymentSettings; cardPanel: CardPanelData } | null;
   /** Rounds account owner only: their accountants (null inside = couldn't load). */
@@ -50,6 +54,18 @@ interface SettingsViewProps {
   verifyUrl?: string | null;
 }
 
+/** The new look's shorter tab names. Classic (Pro) keeps its own. */
+const NEW_LABELS: Record<string, string> = {
+  company: 'Company',
+  rounds: 'Rounds',
+  messages: 'Messages',
+  payments: 'Payments',
+  accountant: 'Accountant',
+  billing: 'Plan & billing',
+  profile: 'Your profile',
+  danger: 'Danger zone',
+};
+
 const baseTabs = [
   { value: 'company', label: 'Company Settings', icon: Building2 },
   { value: 'billing', label: 'Billing', icon: CreditCard },
@@ -60,7 +76,9 @@ const baseTabs = [
 export function SettingsView({
   initialData,
   initialTenantSkills,
-  billing,
+  billingPanel,
+  selfServeBilling = false,
+  hasRounds = false,
   rounds = null,
   payments = null,
   accountant = null,
@@ -71,6 +89,7 @@ export function SettingsView({
   verifyUrl,
 }: SettingsViewProps) {
   const router = useRouter();
+  const fresh = useLook() === 'new';
   const onSaved = () => router.refresh();
   const messaging = useMessagingSectionData();
   const tabs = rounds
@@ -119,29 +138,43 @@ export function SettingsView({
         className={cn(
           'h-auto w-full shrink-0 flex-row flex-wrap gap-1 rounded-xl p-1.5',
           'md:sticky md:top-0 md:h-fit md:w-56 md:flex-col md:flex-nowrap md:self-start',
-          'bg-muted/80 dark:bg-muted/40',
-          'border border-border/50'
+          fresh
+            ? 'flex-nowrap overflow-x-auto group-data-[orientation=vertical]/tabs:flex-row md:group-data-[orientation=vertical]/tabs:flex-col rounded-2xl border border-border bg-card p-2 shadow-(--look-card-shadow) [scrollbar-width:none] md:gap-0.5 md:overflow-visible [&::-webkit-scrollbar]:hidden'
+            : 'bg-muted/80 dark:bg-muted/40 border border-border/50'
         )}
       >
-        {tabs.map(({ value, label, icon: Icon }) => (
-          <TabsTrigger
-            key={value}
-            value={value}
-            className={cn(
-              'h-auto flex-1 gap-2 whitespace-normal rounded-lg px-3 py-2.5 text-left transition-all duration-200 md:w-full md:flex-none',
-              'data-[state=active]:bg-background data-[state=active]:shadow-sm',
-              'data-[state=active]:ring-1 data-[state=active]:ring-brand-primary/30',
-              'dark:data-[state=active]:bg-card dark:data-[state=active]:border dark:data-[state=active]:border-border',
-              value === 'danger' && 'data-[state=active]:ring-destructive/40 text-destructive hover:text-destructive'
-            )}
-          >
-            <Icon className="size-4 shrink-0" />
-            <span className="hidden sm:inline">{label}</span>
-          </TabsTrigger>
-        ))}
+        {tabs.map(({ value, label, icon: Icon }) => {
+          const text = fresh ? (NEW_LABELS[value] ?? label) : value === 'billing' && selfServeBilling ? 'Plan & billing' : label;
+          return (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className={cn(
+                'h-auto flex-1 gap-2 whitespace-normal rounded-lg px-3 py-2.5 text-left transition-all duration-200 md:w-full md:flex-none',
+                fresh && 'flex-none whitespace-nowrap group-data-[orientation=vertical]/tabs:w-auto md:group-data-[orientation=vertical]/tabs:w-full md:whitespace-normal',
+                fresh
+                  ? [
+                      'font-medium text-muted-foreground hover:bg-muted hover:text-foreground',
+                      'data-[state=active]:bg-(--tone-rounds-soft) data-[state=active]:text-(--tone-rounds-text) data-[state=active]:shadow-none',
+                      value === 'danger' &&
+                        'text-(--tone-rose-text) hover:text-(--tone-rose-text) data-[state=active]:bg-(--tone-rose-soft) data-[state=active]:text-(--tone-rose-text)',
+                    ]
+                  : [
+                      'data-[state=active]:bg-background data-[state=active]:shadow-sm',
+                      'data-[state=active]:ring-1 data-[state=active]:ring-brand-primary/30',
+                      'dark:data-[state=active]:bg-card dark:data-[state=active]:border dark:data-[state=active]:border-border',
+                      value === 'danger' && 'data-[state=active]:ring-destructive/40 text-destructive hover:text-destructive',
+                    ]
+              )}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className={fresh ? undefined : 'hidden sm:inline'}>{text}</span>
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
 
-      <div className="min-w-0 flex-1">
+      <div className={cn('min-w-0 flex-1', fresh && 'md:max-w-[880px]')}>
         <TabsContent value="company" className="mt-0 outline-none">
           <SettingsCompanyTab
             data={initialData}
@@ -190,13 +223,13 @@ export function SettingsView({
           </TabsContent>
         )}
         <TabsContent value="billing" className="mt-0 outline-none">
-          <SettingsBillingTab billing={billing} />
+          {billingPanel}
         </TabsContent>
         <TabsContent value="profile" className="mt-0 outline-none">
           <SettingsUserTab data={initialData} onSaved={onSaved} onDirtyChange={setFormDirty} />
         </TabsContent>
         <TabsContent value="danger" className="mt-0 outline-none">
-          <SettingsDangerTab data={initialData} />
+          <SettingsDangerTab data={initialData} selfServe={selfServeBilling} hasRounds={hasRounds} />
         </TabsContent>
       </div>
     </Tabs>

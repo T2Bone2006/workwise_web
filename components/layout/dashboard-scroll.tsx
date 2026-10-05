@@ -3,6 +3,8 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { BreadcrumbNamesProvider } from '@/components/layout/page-breadcrumb';
+import { useLook } from '@/components/look/use-look';
+import { cn } from '@/lib/utils';
 
 const positions = new Map<string, number>();
 
@@ -24,6 +26,7 @@ function scrollToWhenReady(main: HTMLElement, top: number) {
 }
 
 export function DashboardScroll({ children }: { children: React.ReactNode }) {
+  const look = useLook();
   const pathname = usePathname();
   const mainRef = useRef<HTMLElement>(null);
   const popped = useRef(false);
@@ -66,9 +69,18 @@ export function DashboardScroll({ children }: { children: React.ReactNode }) {
   return (
     <main
       ref={mainRef}
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain p-4 sm:p-6"
+      className={cn(
+        'flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain',
+        look === 'new' ? 'px-4 py-5 sm:px-8 sm:py-7' : 'p-4 sm:p-6',
+      )}
     >
-      <BreadcrumbNamesProvider>{children}</BreadcrumbNamesProvider>
+      <BreadcrumbNamesProvider>
+        {look === 'new' ? (
+          <div className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col">{children}</div>
+        ) : (
+          children
+        )}
+      </BreadcrumbNamesProvider>
     </main>
   );
 }

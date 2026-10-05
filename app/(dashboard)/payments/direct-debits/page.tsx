@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { ExistingDirectDebits } from '@/components/payments/existing-direct-debits';
 import { getExistingDirectDebits } from '@/lib/data/direct-debit/existing';
@@ -44,6 +45,7 @@ export default async function ExistingDirectDebitsPage() {
 
   return (
     <div className="space-y-6">
+      <HistoryBackButton fallbackHref="/payments" label="Payments" />
       <PageGradientHeader
         title="Existing Direct Debits"
         subtitle="Direct Debits already in your GoCardless account. Linked ones are collected by WorkWise after each visit, just like new ones."

@@ -32,7 +32,6 @@ export const paths = {
   services: '/services',
   import: '/import',
   payments: '/payments',
-  bank: '/bank',
   messages: '/messages',
   expenses: '/expenses',
 } as const;

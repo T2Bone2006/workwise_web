@@ -34,19 +34,19 @@ function DayTile({ day, busiest, weather }: { day: GlanceDay; busiest: number; w
       href={`/calendar?view=day&date=${day.date}`}
       aria-label={`${weekdayShort.format(at(day.date))} ${Number(day.date.slice(8))}: ${status}${day.stops > 0 ? `, ${formatGbp(day.amount)}` : ''}`}
       className={cn(
-        'group relative flex min-h-[8.5rem] flex-col rounded-xl border p-2.5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:p-3',
-        day.isToday && 'border-sky-500/60 bg-sky-500/[0.08] ring-1 ring-sky-500/40',
-        !day.isToday && day.isFree && 'border-emerald-500/40 bg-emerald-500/[0.07]',
-        !day.isToday && !day.isFree && day.isDayOff && 'border-dashed border-border/70 bg-muted/30',
-        !day.isToday && !day.isFree && !day.isDayOff && 'border-border/60 bg-background/60',
+        'group relative flex min-h-[8.5rem] flex-col rounded-xl border p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:p-3.5',
+        day.isToday && 'border-(--tone-rounds-solid) bg-(--tone-rounds-soft) ring-[1.5px] ring-(--tone-rounds-solid)',
+        !day.isToday && day.isFree && 'border-(--tone-emerald-line) bg-(--tone-emerald-soft)',
+        !day.isToday && !day.isFree && day.isDayOff && 'border-dashed border-border bg-muted/30',
+        !day.isToday && !day.isFree && !day.isDayOff && 'border-border bg-background',
         day.isPast && !day.isToday && 'opacity-70',
       )}
     >
       <div className="flex items-baseline justify-between gap-1">
         <span
           className={cn(
-            'text-[11px] font-semibold uppercase tracking-wide',
-            day.isToday ? 'text-sky-700 dark:text-sky-300' : 'text-muted-foreground',
+            'text-xs font-semibold',
+            day.isToday ? 'text-(--tone-rounds-solid)' : 'text-foreground',
           )}
         >
           {day.isToday ? 'Today' : weekdayShort.format(at(day.date))}
@@ -60,12 +60,12 @@ function DayTile({ day, busiest, weather }: { day: GlanceDay; busiest: number; w
         <p
           className={cn(
             'flex items-center gap-1 text-xs font-medium',
-            day.isFree && 'text-emerald-700 dark:text-emerald-300',
+            day.isFree && 'text-(--tone-emerald-text)',
             day.isDayOff && day.stops === 0 && 'text-muted-foreground',
           )}
         >
           {day.isPast && day.stops > 0 && day.done === day.stops ? (
-            <Check className="size-3.5 text-emerald-600" aria-hidden="true" />
+            <Check className="size-3.5 text-(--tone-emerald-text)" aria-hidden="true" />
           ) : null}
           {status}
         </p>
@@ -76,7 +76,7 @@ function DayTile({ day, busiest, weather }: { day: GlanceDay; busiest: number; w
         )}
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
           <div
-            className={cn('h-full rounded-full', day.isPast ? 'bg-indigo-400/60' : 'bg-indigo-500')}
+            className={cn('h-full rounded-full', day.isPast ? 'bg-(--tone-rounds-solid)/50' : 'bg-(--tone-rounds-solid)')}
             style={{ width: `${fill}%` }}
           />
         </div>
@@ -95,28 +95,28 @@ function DayRow({ day, busiest, weather }: { day: GlanceDay; busiest: number; we
       href={`/calendar?view=day&date=${day.date}`}
       className={cn(
         'grid grid-cols-[3.25rem_1fr_auto] items-center gap-3 rounded-xl border px-3 py-2.5',
-        day.isToday && 'border-sky-500/60 bg-sky-500/[0.08]',
-        !day.isToday && day.isFree && 'border-emerald-500/40 bg-emerald-500/[0.07]',
-        !day.isToday && !day.isFree && day.isDayOff && 'border-dashed border-border/70 bg-muted/30',
-        !day.isToday && !day.isFree && !day.isDayOff && 'border-border/60',
+        day.isToday && 'border-(--tone-rounds-solid) bg-(--tone-rounds-soft)',
+        !day.isToday && day.isFree && 'border-(--tone-emerald-line) bg-(--tone-emerald-soft)',
+        !day.isToday && !day.isFree && day.isDayOff && 'border-dashed border-border bg-muted/30',
+        !day.isToday && !day.isFree && !day.isDayOff && 'border-border',
         day.isPast && !day.isToday && 'opacity-70',
       )}
     >
       <span className="leading-tight">
-        <span className={cn('block text-[11px] font-semibold uppercase', day.isToday ? 'text-sky-700 dark:text-sky-300' : 'text-muted-foreground')}>
+        <span className={cn('block text-xs font-semibold', day.isToday ? 'text-(--tone-rounds-solid)' : 'text-foreground')}>
           {day.isToday ? 'Today' : weekdayShort.format(at(day.date))}
         </span>
         <span className="text-base font-semibold tabular-nums">{Number(day.date.slice(8))}</span>
       </span>
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-x-2 text-sm">
-          <span className={cn('font-medium', day.isFree && 'text-emerald-700 dark:text-emerald-300', day.isDayOff && day.stops === 0 && 'text-muted-foreground')}>
+          <span className={cn('font-medium', day.isFree && 'text-(--tone-emerald-text)', day.isDayOff && day.stops === 0 && 'text-muted-foreground')}>
             {status}
           </span>
           {w ? <DayWeather weather={w} /> : null}
         </span>
         <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-          <span className={cn('block h-full rounded-full', day.isPast ? 'bg-indigo-400/60' : 'bg-indigo-500')} style={{ width: `${fill}%` }} />
+          <span className={cn('block h-full rounded-full', day.isPast ? 'bg-(--tone-rounds-solid)/50' : 'bg-(--tone-rounds-solid)')} style={{ width: `${fill}%` }} />
         </span>
       </span>
       <span className="text-right text-sm font-semibold tabular-nums">{day.stops > 0 ? formatGbp(day.amount) : '—'}</span>
@@ -147,25 +147,25 @@ export function WeekStrip({ week, weather }: { week: WeekGlance | null; weather:
         <p className="text-sm text-muted-foreground">Couldn&apos;t load this week.</p>
       ) : (
         <>
-          <div className="hidden overflow-x-auto pb-1 sm:block">
-            <div className="grid min-w-[44rem] grid-cols-7 gap-2 lg:min-w-0">
+          <div className="hidden overflow-x-auto p-1.5 sm:block lg:overflow-visible lg:p-1">
+            <div className="grid min-w-[44rem] grid-cols-7 gap-3 lg:min-w-0">
               {week.days.map((day) => (
                 <DayTile key={day.date} day={day} busiest={busiest} weather={weather} />
               ))}
             </div>
           </div>
-          <div className="space-y-1.5 sm:hidden">
+          <div className="space-y-2 sm:hidden">
             {week.days.map((day) => (
               <DayRow key={day.date} day={day} busiest={busiest} weather={weather} />
             ))}
           </div>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-1.5 w-5 rounded-full bg-indigo-500" aria-hidden="true" />
+              <span className="h-1.5 w-5 rounded-full bg-(--tone-rounds-solid)" aria-hidden="true" />
               Bar = that day&apos;s £ against your busiest day
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="size-2.5 rounded-sm border border-emerald-500/50 bg-emerald-500/15" aria-hidden="true" />
+              <span className="size-2.5 rounded-sm border border-(--tone-emerald-solid)/50 bg-(--tone-emerald-soft)" aria-hidden="true" />
               Free = a working day with nothing booked
             </span>
           </p>

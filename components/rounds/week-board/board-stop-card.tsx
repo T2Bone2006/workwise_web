@@ -14,11 +14,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const BAR: Record<BoardStop['state'], string> = {
-  planned: 'bg-sky-500',
-  underway: 'bg-sky-500',
-  part_done: 'bg-amber-500',
-  done: 'bg-emerald-500',
-  skipped: 'bg-rose-500',
+  planned: 'bg-(--tone-sky-solid)',
+  underway: 'bg-(--tone-sky-solid)',
+  part_done: 'bg-(--tone-amber-solid)',
+  done: 'bg-(--tone-emerald-solid)',
+  skipped: 'bg-(--tone-rose-solid)',
 };
 
 const PAID_WORD: Record<NonNullable<BoardStop['paid']>, string> = {
@@ -34,14 +34,14 @@ export function StopCardFace(props: { stop: BoardStop }): JSX.Element {
     <>
       <span className={cn('absolute inset-y-0 left-0 w-1', BAR[stop.state])} aria-hidden />
       {stop.untoldChangeId ? (
-        <span className="absolute right-2 top-0 rounded-b-md bg-amber-100 px-1.5 text-[10px] font-extrabold leading-4 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+        <span className="absolute right-2 top-0 rounded-b-md bg-(--tone-amber-soft) px-1.5 text-[10px] font-bold leading-4 text-(--tone-amber-text) ring-1 ring-(--tone-amber-line)">
           Not told
         </span>
       ) : null}
       <span className="flex items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{stop.name}</span>
         {stop.jobCount > 1 ? (
-          <span className="shrink-0 rounded bg-indigo-100 px-1 text-[10px] font-extrabold leading-4 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300">
+          <span className="shrink-0 rounded bg-(--tone-indigo-soft) px-1 text-[10px] font-bold leading-4 text-(--tone-indigo-text)">
             {stop.jobCount} jobs
           </span>
         ) : null}
@@ -53,9 +53,18 @@ export function StopCardFace(props: { stop: BoardStop }): JSX.Element {
       <span className="block truncate text-xs text-muted-foreground">{stop.services}</span>
       <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         <span className="font-semibold text-foreground">{formatGbp(stop.amount)}</span>
-        {stop.paid ? <span className="text-muted-foreground">{PAID_WORD[stop.paid]}</span> : null}
+        {stop.paid ? (
+          <span
+            className={cn(
+              'rounded-full px-1.5 text-[11px] font-medium leading-4',
+              stop.paid === 'paid' ? 'text-(--tone-emerald-text)' : 'bg-(--tone-rose-soft) text-(--tone-rose-text)',
+            )}
+          >
+            {PAID_WORD[stop.paid]}
+          </span>
+        ) : null}
         {stop.reply ? (
-          <span className="truncate rounded bg-amber-100 px-1.5 font-semibold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+          <span className="truncate rounded bg-(--tone-amber-soft) px-1.5 font-semibold text-(--tone-amber-text)">
             {stop.reply}
           </span>
         ) : null}
@@ -65,7 +74,7 @@ export function StopCardFace(props: { stop: BoardStop }): JSX.Element {
 }
 
 export const CARD_BOX =
-  'relative block w-full overflow-hidden rounded-xl border border-border/70 bg-[var(--glass-bg)] pl-3.5 pr-2.5 py-2 text-left';
+  'relative block w-full overflow-hidden rounded-xl border border-border bg-card pl-3.5 pr-2.5 py-2 text-left';
 
 /** One job inside an opened combined card: its own grip (drag just this job) and its own menu. */
 function JobRow(props: {
@@ -115,12 +124,12 @@ function JobRow(props: {
             <span className="min-w-0 flex-1 truncate font-medium text-foreground">{job.services}</span>
             <span className="shrink-0 text-muted-foreground">{formatGbp(job.amount)}</span>
             {job.state === 'done' ? (
-              <span className="shrink-0 text-emerald-600 dark:text-emerald-400">{job.paid ? PAID_WORD[job.paid] : 'Done'}</span>
+              <span className="shrink-0 text-(--tone-emerald-text)">{job.paid ? PAID_WORD[job.paid] : 'Done'}</span>
             ) : job.state === 'skipped' ? (
-              <span className="shrink-0 text-rose-600 dark:text-rose-400">Skipped</span>
+              <span className="shrink-0 text-(--tone-rose-text)">Skipped</span>
             ) : null}
             {job.untoldChangeId ? (
-              <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-extrabold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+              <span className="shrink-0 rounded bg-(--tone-amber-soft) px-1 text-[10px] font-bold text-(--tone-amber-text)">
                 Not told
               </span>
             ) : null}
@@ -178,7 +187,7 @@ export function BoardStopCard(props: {
     <div
       data-stop-id={stop.id}
       className={cn(
-        'relative overflow-hidden rounded-xl border border-border/70 bg-[var(--glass-bg)] transition-shadow hover:shadow-md',
+        'relative overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md',
         dimmed && 'opacity-60',
         props.flash && 'ring-2 ring-primary',
         props.join && 'bg-primary/10 ring-2 ring-primary',

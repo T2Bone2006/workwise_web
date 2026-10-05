@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText } from 'lucide-react';
+import { FileText, SearchX } from 'lucide-react';
+import { Avatar, EmptyState, LookCard, Tag, type Tone } from '@/components/look';
+import { FilterChips, type FilterChip } from '@/components/payments/filter-chips';
 import {
   PaymentsListFilters,
   type PaymentsWhere,
 } from '@/components/payments/payments-filter-bar';
-import { MoneyRow, MONEY_ACCENT, type MoneyAccent } from '@/components/payments/money-row';
-import { Card, CardContent } from '@/components/ui/card';
 import type { InvoiceRecord } from '@/lib/data/payments/invoices';
 import { invoiceStatus } from '@/lib/invoices/status';
 import { formatGbp } from '@/lib/money/pence';
@@ -25,12 +25,16 @@ function formatDay(ymd: string): string {
   }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
-const INVOICE_ACCENT: Record<ReturnType<typeof invoiceStatus>, MoneyAccent> = {
-  Paid: MONEY_ACCENT.received,
-  Overdue: MONEY_ACCENT.overdue,
-  Unpaid: MONEY_ACCENT.unpaid,
-  Cancelled: MONEY_ACCENT.quiet,
+type InvoiceStatus = ReturnType<typeof invoiceStatus>;
+
+const INVOICE_STATUS_TONE: Record<InvoiceStatus, Tone> = {
+  Paid: 'emerald',
+  Overdue: 'amber',
+  Unpaid: 'rounds',
+  Cancelled: 'slate',
 };
+
+const STATUSES: InvoiceStatus[] = ['Unpaid', 'Overdue', 'Paid', 'Cancelled'];
 
 export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
   const router = useRouter();
@@ -38,9 +42,11 @@ export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
   const [dateFrom, setDateFrom] = useState<string | undefined>();
   const [dateTo, setDateTo] = useState<string | undefined>();
   const [wheres, setWheres] = useState<PaymentsWhere[]>([]);
+  const [statusTab, setStatusTab] = useState<InvoiceStatus | 'all'>('all');
   const needle = search.trim().toLowerCase();
 
   const filtered = rows.filter((invoice) => {
+    if (statusTab !== 'all' && invoiceStatus(invoice) !== statusTab) return false;
     if (needle && !`${invoice.billTo.name} ${invoice.number}`.toLowerCase().includes(needle)) {
       return false;
     }
@@ -96,45 +102,92 @@ export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
 
   if (rows.length === 0) {
     return (
-      <Card className="glass-card border-border/80">
-        <CardContent className="flex min-h-[180px] flex-col items-center justify-center p-8 text-center">
-          <p className="text-sm font-medium text-foreground">No invoices yet</p>
-          <p className="mt-1 max-w-md text-sm text-muted-foreground">
-            Turn on &apos;Send an invoice after each visit&apos; for a customer, or use Send invoice on their page.
-          </p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={FileText}
+        title="No invoices yet"
+        body="Turn on 'Send an invoice after each visit' for a customer, or use Send invoice on their page."
+      />
     );
   }
 
+  const amountOf = (invoice: InvoiceRecord) =>
+    invoice.status !== 'void' && invoice.balanceDue > 0 ? invoice.balanceDue : invoice.total;
+  const byStatus = STATUSES.map((status) => {
+    const inStatus = rows.filter((invoice) => invoiceStatus(invoice) === status);
+    return {
+      status,
+      count: inStatus.length,
+      amount: inStatus.reduce((sum, invoice) => sum + amountOf(invoice), 0),
+    };
+  });
+  const chips: FilterChip<InvoiceStatus | 'all'>[] = [
+    {
+      key: 'all',
+      label: 'All invoices',
+      detail: `${rows.length} · ${formatGbp(rows.filter((r) => r.status !== 'void').reduce((sum, r) => sum + r.total, 0))}`,
+    },
+    ...byStatus
+      .filter((item) => item.count > 0)
+      .map((item) => ({
+        key: item.status,
+        label: item.status,
+        tone: INVOICE_STATUS_TONE[item.status],
+        detail: `${item.count} · ${formatGbp(item.amount)}`,
+      })),
+  ];
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <FilterChips
+        ariaLabel="Invoice status"
+        chips={chips}
+        value={statusTab}
+        onChange={(key) => setStatusTab(key === statusTab ? 'all' : key)}
+      />
       {filters}
       {filtered.length === 0 ? (
-        <Card className="glass-card border-border/80">
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            Nothing matches.
-          </CardContent>
-        </Card>
+        <EmptyState icon={SearchX} title="Nothing matches" body="Try a different name or clear the filters." />
       ) : (
-        <ul className="space-y-3">
-          {filtered.map((invoice) => {
-            const status = invoiceStatus(invoice);
-            const owed = invoice.status !== 'void' && invoice.balanceDue > 0;
-            return (
-              <MoneyRow
-                key={invoice.id}
-                accent={INVOICE_ACCENT[status]}
-                icon={FileText}
-                title={invoice.billTo.name}
-                detail={`${invoice.number} · ${formatDay(invoice.issueDate)}`}
-                amount={formatGbp(owed ? invoice.balanceDue : invoice.total)}
-                status={status}
-                onClick={() => router.push(`/payments/invoices/${invoice.id}`)}
-              />
-            );
-          })}
-        </ul>
+        <LookCard>
+          <ul className="divide-y divide-border">
+            {filtered.map((invoice) => {
+              const status = invoiceStatus(invoice);
+              const tone = INVOICE_STATUS_TONE[status];
+              return (
+                <li key={invoice.id} className="relative flex flex-wrap items-center gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0 sm:flex-nowrap sm:gap-4">
+                  <button
+                    type="button"
+                    aria-label={`Open invoice ${invoice.number}`}
+                    onClick={() => router.push(`/payments/invoices/${invoice.id}`)}
+                    className="absolute inset-0 rounded-lg focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  />
+                  <span className="pointer-events-none flex min-w-0 flex-1 basis-52 items-center gap-3">
+                    <Avatar name={invoice.billTo.name} tone={status === 'Cancelled' ? 'slate' : tone === 'rounds' ? 'slate' : tone} />
+                    <span className="min-w-0">
+                      <span className="block truncate text-[15px] font-medium tracking-tight">{invoice.billTo.name}</span>
+                      <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                        <span className="font-medium tabular-nums">{invoice.number}</span> · issued {formatDay(invoice.issueDate)}
+                        {status === 'Paid' || status === 'Cancelled' ? '' : ` · due ${formatDay(invoice.dueDate)}`}
+                      </span>
+                    </span>
+                  </span>
+                  <span className="pointer-events-none ml-auto flex items-center gap-3">
+                    <Tag tone={tone}>{status}</Tag>
+                    <span
+                      className={
+                        status === 'Cancelled'
+                          ? 'w-20 text-right text-base font-semibold text-muted-foreground tabular-nums line-through'
+                          : 'w-20 text-right text-base font-semibold tabular-nums'
+                      }
+                    >
+                      {formatGbp(amountOf(invoice))}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </LookCard>
       )}
     </div>
   );

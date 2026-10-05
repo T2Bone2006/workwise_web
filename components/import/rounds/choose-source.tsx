@@ -1,20 +1,29 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileSpreadsheet, ImagePlus, NotebookPen, X } from 'lucide-react';
+import { ArrowRightLeft, Camera, FileSpreadsheet, ImagePlus, LifeBuoy, X, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { LookCard, IconChip, type Tone } from '@/components/look';
+import { StuckLink } from '@/components/import/rounds/stuck-link';
 import { Textarea } from '@/components/ui/textarea';
 import { SpreadsheetDropzone } from '@/components/import/spreadsheet-dropzone';
-import { IconChip } from '@/components/rounds/overview/shared';
 import { MAX_ROUND_BOOK_TEXT_CHARS } from '@/lib/import/round-book-limits';
 import { cn } from '@/lib/utils';
 
 const MAX_PHOTOS = 10;
 const PHOTO_ACCEPT = '.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf';
 
+type Source = 'sheet' | 'app' | 'book' | 'help';
+
+const SOURCES: { key: Source; title: string; line: string; icon: LucideIcon; tone: Tone }[] = [
+  { key: 'sheet', title: 'A spreadsheet', line: 'CSV or Excel, any layout. We work out the columns.', icon: FileSpreadsheet, tone: 'rounds' },
+  { key: 'app', title: 'Squeegee or CleanerPlanner', line: 'Use the customer export from your old app.', icon: ArrowRightLeft, tone: 'indigo' },
+  { key: 'book', title: 'Photos of my round book', line: 'Our AI reads it, then you check it.', icon: Camera, tone: 'violet' },
+  { key: 'help', title: 'Do it for me', line: "Send us your file and we'll set it up.", icon: LifeBuoy, tone: 'teal' },
+];
+
 /**
- * The first screen: two ways in. A spreadsheet (read as soon as it is dropped),
+ * The first screen: four ways in. A spreadsheet (read as soon as it is dropped),
  * or a round book (photos you add and then read, or a list you type or paste).
  * Photos and text can't be mixed; the card switches cleanly between them.
  */
@@ -27,6 +36,8 @@ export function ChooseSource({
   onPhotos: (files: File[]) => void;
   onText: (text: string) => void;
 }) {
+  const [source, setSource] = useState<Source>('sheet');
+  const [helpOpen, setHelpOpen] = useState(false);
   const [mode, setMode] = useState<'photos' | 'text'>('photos');
   const [photos, setPhotos] = useState<File[]>([]);
   const [text, setText] = useState('');
@@ -45,55 +56,75 @@ export function ChooseSource({
     setPhotos((prev) => [...prev, ...Array.from(incoming)].slice(0, MAX_PHOTOS));
   };
 
+  const picked = SOURCES.find((item) => item.key === source) ?? SOURCES[0]!;
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="glass-card gap-4 border-sky-500/25 p-5">
-          <div className="flex items-start gap-3">
-            <IconChip icon={FileSpreadsheet} tone="sky" />
-            <div>
-              <h2 className="text-base font-semibold">Spreadsheet</h2>
-              <p className="text-sm text-muted-foreground">
-                CSV or Excel from Squeegee, CleanerPlanner or your own sheet. Any layout — we work out the columns.
-              </p>
-            </div>
-          </div>
-          <SpreadsheetDropzone
-            file={null}
-            onFile={onSpreadsheet}
-            inputId="rounds-import-sheet"
-            hint=".csv or .xlsx · we read it as soon as you drop it"
-          />
-        </Card>
+    <div className="space-y-5">
+      <div role="radiogroup" aria-label="Where is your round now?" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {SOURCES.map((item) => {
+          const active = item.key === source;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setSource(item.key)}
+              className={cn(
+                'flex flex-col items-start gap-3 rounded-2xl border bg-card p-4 text-left shadow-(--look-card-shadow) transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                active ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-(--tone-slate-solid)/40',
+              )}
+            >
+              <IconChip icon={item.icon} tone={item.tone} />
+              <span>
+                <span className="block text-[15px] font-semibold">{item.title}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground">{item.line}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-        <Card className="glass-card gap-4 border-violet-500/25 p-5">
-          <div className="flex items-start gap-3">
-            <IconChip icon={NotebookPen} tone="violet" />
-            <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold">Round book</h2>
-              <p className="text-sm text-muted-foreground">
-                Photos of your paper round book, or a list you type in. Handwriting is fine.
-              </p>
-            </div>
+      <LookCard title={picked.title} icon={picked.icon} tone={picked.tone}>
+        {source === 'sheet' || source === 'app' ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {source === 'app'
+                ? 'Export your customers from the app as a CSV or Excel file, then drop it here. We match their columns to ours.'
+                : 'CSV or Excel from your own sheet. Any layout. We work out the columns, and you check them before anything is saved.'}
+            </p>
+            <SpreadsheetDropzone
+              file={null}
+              onFile={onSpreadsheet}
+              inputId="rounds-import-sheet"
+              hint=".csv or .xlsx · we read it as soon as you drop it"
+            />
           </div>
+        ) : null}
 
-          <div className="inline-flex w-fit rounded-lg bg-muted p-0.5 text-sm" role="tablist" aria-label="Round book input">
-            {(['photos', 'text'] as const).map((m) => (
-              <button
-                key={m}
-                role="tab"
-                aria-selected={mode === m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={cn(
-                  'rounded-md px-3 py-1 font-medium transition-colors',
-                  mode === m ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {m === 'photos' ? 'Photos' : 'Type or paste'}
-              </button>
-            ))}
-          </div>
+        {source === 'book' ? (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Photos of your paper round book, or a list you type in. Handwriting is fine.
+            </p>
+      <div className="inline-flex w-fit rounded-lg bg-muted p-0.5 text-sm" role="tablist" aria-label="Round book input">
+        {(['photos', 'text'] as const).map((m) => (
+          <button
+            key={m}
+            role="tab"
+            aria-selected={mode === m}
+            type="button"
+            onClick={() => setMode(m)}
+            className={cn(
+              'rounded-md px-3 py-1 font-medium transition-colors',
+              mode === m ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {m === 'photos' ? 'Photos' : 'Type or paste'}
+          </button>
+        ))}
+      </div>
+
 
           {mode === 'photos' ? (
             <div className="space-y-3">
@@ -181,8 +212,22 @@ export function ChooseSource({
               </div>
             </div>
           )}
-        </Card>
-      </div>
+          </div>
+        ) : null}
+
+        {source === 'help' ? (
+          <div className="space-y-3">
+            <p className="text-sm">
+              Got a file, a pile of photos or just a messy list? Send it to us and we&apos;ll get your round set up for you.
+            </p>
+            <Button onClick={() => setHelpOpen(true)}>Send us my file</Button>
+            <p className="text-xs text-muted-foreground">
+              We&apos;ll email you within 2 working days. Trying the import yourself first is usually quicker.
+            </p>
+            <StuckLink context="review" open={helpOpen} onOpenChange={setHelpOpen} />
+          </div>
+        ) : null}
+      </LookCard>
 
       <p className="text-center text-sm text-muted-foreground">Nothing is saved until you press Import.</p>
     </div>

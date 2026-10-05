@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useLook } from '@/components/look/use-look';
 import { cn } from '@/lib/utils';
 
 const LEAVE_MESSAGE = 'Not saved. Leave without saving?';
@@ -44,6 +45,7 @@ export function UnsavedSaveBar({
   savedAt: number;
 }) {
   useUnsavedGuard(dirty);
+  const fresh = useLook() === 'new';
   const [holdFor, setHoldFor] = useState(0);
   const [holdSaved, setHoldSaved] = useState(false);
   const [fading, setFading] = useState(false);
@@ -73,13 +75,23 @@ export function UnsavedSaveBar({
     <div
       className={cn(
         'sticky bottom-4 z-10 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-lg transition-opacity duration-500',
+        fresh && 'rounded-2xl border-(--tone-rounds-line) bg-card/95 backdrop-blur-md',
         fading && !dirty && 'pointer-events-none opacity-0',
       )}
     >
-      <p className={dirty ? 'font-medium text-amber-600' : 'text-sm text-muted-foreground'}>
-        {dirty ? 'Not saved' : 'Saved'}
+      <p
+        className={
+          dirty
+            ? fresh
+              ? 'font-medium text-(--tone-amber-text)'
+              : 'font-medium text-amber-600'
+            : 'text-sm text-muted-foreground'
+        }
+        role="status"
+      >
+        {dirty ? 'You have changes that are not saved' : 'Saved'}
       </p>
-      <Button type="submit" variant="gradient" size="lg" disabled={saving || !dirty}>
+      <Button type="submit" variant={fresh ? 'default' : 'gradient'} size="lg" disabled={saving || !dirty}>
         {saving && <Loader2 className="size-4 animate-spin" />}
         Save
       </Button>

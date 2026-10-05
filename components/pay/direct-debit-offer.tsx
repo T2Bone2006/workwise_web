@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
-import { Landmark } from 'lucide-react';
+import { Repeat } from 'lucide-react';
+import { IconChip } from '@/components/look';
 import { formatGbp } from '@/lib/money/pence';
 import type { CustomerPayPage } from '@/lib/data/payments/public-pay';
 
@@ -26,12 +27,12 @@ export function DirectDebitOffer(props: {
     <section
       className={
         highlighted && directDebit.status === 'none'
-          ? 'rounded-xl border border-primary/40 bg-primary/5 p-4 ring-1 ring-primary/20'
-          : 'rounded-xl border border-border/80 bg-card/60 p-4'
+          ? 'rounded-2xl border border-(--tone-emerald-solid) bg-(--tone-emerald-soft) p-4 ring-1 ring-(--tone-emerald-line)'
+          : 'rounded-2xl border border-(--tone-emerald-line) bg-(--tone-emerald-soft) p-4'
       }
     >
-      <p className="flex items-center gap-2 text-base font-semibold tracking-tight">
-        <Landmark className="size-4" />
+      <p className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+        <IconChip icon={Repeat} tone="emerald" size="sm" />
         {directDebit.status === 'none' ? 'Pay automatically by Direct Debit' : 'Direct Debit'}
       </p>
       {directDebit.status === 'none' ? (
@@ -49,7 +50,7 @@ export function DirectDebitOffer(props: {
             <input type="hidden" name="token" value={token} />
             <button
               type="submit"
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              className="inline-flex h-11 w-full items-center justify-center rounded-full bg-(--tone-emerald-solid) px-4 text-sm font-semibold text-white transition-colors hover:bg-(--tone-emerald-solid)/90"
             >
               Set up Direct Debit
             </button>
@@ -61,7 +62,7 @@ export function DirectDebitOffer(props: {
               <input type="hidden" name="kind" value="pay_and_dd" />
               <button
                 type="submit"
-                className="inline-flex min-h-10 w-full items-center justify-center rounded-lg border border-border bg-background px-4 py-2 text-center text-sm font-medium transition-colors hover:bg-muted"
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-border bg-card px-4 py-2 text-center text-sm font-medium transition-colors hover:bg-muted"
               >
                 Pay the {formatGbp(owedAmount, { always2dp: true })} now by bank and set up Direct Debit
               </button>

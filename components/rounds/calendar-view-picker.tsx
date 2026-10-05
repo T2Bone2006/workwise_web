@@ -1,12 +1,5 @@
 import Link from 'next/link';
-import { Check, ChevronDown } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
 
 export type CalendarView = 'day' | 'week' | 'month';
 
@@ -16,30 +9,26 @@ const VIEWS: { value: CalendarView; label: string }[] = [
   { value: 'month', label: 'Month' },
 ];
 
-/** The Day / Week / Month dropdown on every Calendar view. Choosing one keeps the date you were looking at. */
+/** The Day / Week / Month switch on every Calendar view. Choosing one keeps the date you were looking at. */
 export function CalendarViewPicker(props: { view: CalendarView; date: string }) {
-  const current = VIEWS.find((v) => v.value === props.view)?.label ?? 'Week';
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
-          {current}
-          <ChevronDown className="size-4" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-36">
-        {VIEWS.map((view) => (
-          <DropdownMenuItem key={view.value} asChild>
-            <Link
-              href={`/calendar?view=${view.value}&date=${props.date}`}
-              className="flex items-center justify-between gap-3"
-            >
-              {view.label}
-              {view.value === props.view ? <Check className="size-4" aria-hidden /> : null}
-            </Link>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <nav aria-label="Calendar view" className="inline-flex rounded-full bg-look-segment p-1 text-sm font-medium">
+      {VIEWS.map((view) => {
+        const current = view.value === props.view;
+        return (
+          <Link
+            key={view.value}
+            href={`/calendar?view=${view.value}&date=${props.date}`}
+            aria-current={current ? 'page' : undefined}
+            className={cn(
+              'rounded-full px-4 py-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+              current ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {view.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

@@ -4,7 +4,8 @@ import { useState, type JSX } from 'react';
 import Link from 'next/link';
 import { Check, CreditCard, ImageIcon, Landmark } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { IconChip, LookCard } from '@/components/look';
+import { Button } from '@/components/ui/button';
 import { startCardPaymentsSetup } from '@/lib/actions/stripe-connect';
 import type { GetPaidChecklist as Checklist } from '@/lib/data/payments/checklist';
 
@@ -69,43 +70,44 @@ export function GetPaidChecklist({
     },
   ];
 
+  const doneCount = rows.filter((row) => row.done).length;
+
   return (
-    <Card className="glass-card border-border/80">
-      <CardHeader className="pb-2">
-        <h2 className="text-lg font-semibold">Get paid</h2>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <LookCard
+      title="Get paid"
+      icon={CreditCard}
+      tone="rounds"
+      aside={
+        <span className="tabular-nums">
+          {doneCount} of {rows.length} done
+        </span>
+      }
+    >
+      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <div
+          className="h-full rounded-full bg-(--tone-emerald-solid)"
+          style={{ width: `${Math.round((doneCount / rows.length) * 100)}%` }}
+        />
+      </div>
+      <ul className="divide-y divide-border">
         {rows.map((row) => (
-          <div key={row.text} className="flex items-start justify-between gap-3 text-sm">
-            <span className="flex min-w-0 items-start gap-3">
-              <span
-                className={
-                  row.done
-                    ? 'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600'
-                    : 'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'
-                }
-              >
-                {row.done ? <Check className="size-4" /> : <row.icon className="size-4" />}
-              </span>
-              <span className="pt-1">{row.text}</span>
+          <li key={row.text} className="flex items-center justify-between gap-3 py-2.5 text-sm first:pt-0 last:pb-0">
+            <span className="flex min-w-0 items-center gap-3">
+              <IconChip icon={row.done ? Check : row.icon} tone={row.done ? 'emerald' : 'slate'} size="sm" />
+              <span className={row.done ? 'text-muted-foreground line-through decoration-border' : ''}>{row.text}</span>
             </span>
             {row.done ? null : row.onClick ? (
-              <button
-                type="button"
-                className="shrink-0 font-medium text-primary hover:underline disabled:opacity-50"
-                disabled={starting}
-                onClick={row.onClick}
-              >
+              <Button type="button" size="sm" variant="outline" disabled={starting} onClick={row.onClick} className="shrink-0">
                 {row.action}
-              </button>
+              </Button>
             ) : (
-              <Link href={row.href ?? settingsHref} className="shrink-0 font-medium text-primary hover:underline">
-                {row.action}
-              </Link>
+              <Button asChild size="sm" variant="outline" className="shrink-0">
+                <Link href={row.href ?? settingsHref}>{row.action}</Link>
+              </Button>
             )}
-          </div>
+          </li>
         ))}
-      </CardContent>
-    </Card>
+      </ul>
+    </LookCard>
   );
 }

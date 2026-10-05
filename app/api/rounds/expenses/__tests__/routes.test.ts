@@ -177,11 +177,11 @@ describe('the guard', () => {
     expect(tenantHasRounds).not.toHaveBeenCalled();
   });
 
-  it('a Pro login → 403 Expenses are part of Rounds., before the owner check', async () => {
+  it('a login without an entitled Rounds plan → 403 plan_ended, before the owner check', async () => {
     tenantHasRounds.mockResolvedValue(false);
     const responses = await everyRoute();
     expect(responses.map((r) => r.status)).toEqual(Array(8).fill(403));
-    expect(await responses[0].json()).toEqual({ error: 'Expenses are part of Rounds.' });
+    expect(await responses[0].json()).toEqual({ error: 'plan_ended' });
     expect(isTenantAdmin).not.toHaveBeenCalled();
     expect(addExpenseCore).not.toHaveBeenCalled();
     expect(scanReceiptCore).not.toHaveBeenCalled();

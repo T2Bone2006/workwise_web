@@ -1,36 +1,23 @@
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import { Avatar, IconChip, Tag, toneClasses, type Tone } from '@/components/look';
 import { cn } from '@/lib/utils';
 
-export type MoneyAccent = {
-  glow: string;
-  bar: string;
-  wash: string;
-};
+/** What a money row means: the colour of its icon, its amount and its status tag. */
+export type MoneyAccent = { tone: Tone };
 
 export const MONEY_ACCENT = {
-  received: {
-    glow: 'rgb(16 185 129)',
-    bar: 'bg-emerald-500',
-    wash: 'from-emerald-500/[0.08] via-transparent to-transparent dark:from-emerald-400/15',
-  },
-  overdue: {
-    glow: 'rgb(225 29 72)',
-    bar: 'bg-rose-600',
-    wash: 'from-rose-600/[0.08] via-transparent to-transparent dark:from-rose-400/15',
-  },
-  unpaid: {
-    glow: 'rgb(245 158 11)',
-    bar: 'bg-amber-500',
-    wash: 'from-amber-500/[0.08] via-transparent to-transparent dark:from-amber-400/15',
-  },
-  quiet: {
-    glow: 'rgb(100 116 139)',
-    bar: 'bg-slate-500',
-    wash: 'from-slate-500/[0.06] via-transparent to-transparent dark:from-slate-400/10',
-  },
+  received: { tone: 'emerald' },
+  overdue: { tone: 'rose' },
+  unpaid: { tone: 'rounds' },
+  quiet: { tone: 'slate' },
 } as const satisfies Record<string, MoneyAccent>;
 
+/**
+ * One row in Who owes / Came in / Invoices: a white card with who and what
+ * on the left, the amount (coloured by meaning) and a status tag on the right.
+ * Payments is a Rounds page, so this only ever renders in the new look.
+ */
 export function MoneyRow(props: {
   accent: MoneyAccent;
   icon: LucideIcon;
@@ -38,60 +25,57 @@ export function MoneyRow(props: {
   detail?: string;
   amount?: string;
   status?: string;
+  /** Tone of the status tag; defaults to the row's own tone. */
+  statusTone?: Tone;
+  /** Show the customer's initials instead of the icon. */
+  avatar?: boolean;
   /** Small chips shown under the detail line. */
   tags?: ReactNode;
   onClick?: () => void;
   actions?: ReactNode;
 }): ReactNode {
-  const Icon = props.icon;
+  const tone = props.accent.tone;
   return (
     <li
-      className="relative list-none overflow-hidden rounded-2xl border border-border/70 bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)] transition-all duration-200 sm:hover:-translate-y-0.5 dark:border-white/[0.06]"
+      className={cn(
+        'relative list-none rounded-2xl border border-border bg-card shadow-(--look-card-shadow) transition-colors',
+        props.onClick && 'hover:border-(--tone-slate-solid)/40',
+      )}
     >
-      <div className={cn('pointer-events-none absolute inset-y-0 left-0 w-1', props.accent.bar)} aria-hidden />
-      <div
-        className={cn('pointer-events-none absolute inset-0 bg-gradient-to-r', props.accent.wash)}
-        aria-hidden
-      />
-      <div className="relative flex items-center gap-3 p-3 pl-4 sm:gap-4 sm:p-4 sm:pl-5">
+      <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2.5 p-3 sm:flex-nowrap sm:gap-4 sm:p-3.5">
         {props.onClick ? (
           <button
             type="button"
             onClick={props.onClick}
             aria-label={props.title}
-            className="absolute inset-0 rounded-2xl"
+            className="absolute inset-0 rounded-2xl focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           />
         ) : null}
-        <span className="pointer-events-none flex min-w-0 flex-1 items-start gap-3 text-left">
-          <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-full border"
-            style={{
-              borderColor: props.accent.glow.replace(')', ' / 0.45)'),
-              backgroundColor: props.accent.glow.replace(')', ' / 0.12)'),
-              color: props.accent.glow,
-            }}
-          >
-            <Icon className="size-4" />
-          </span>
+        <span className="pointer-events-none flex min-w-0 flex-1 basis-48 items-center gap-3 text-left">
+          {props.avatar ? (
+            <Avatar name={props.title} tone={tone} />
+          ) : (
+            <IconChip icon={props.icon} tone={tone} />
+          )}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[15px] font-medium tracking-tight">{props.title}</span>
             {props.detail ? (
-              <span className="mt-1 block truncate text-sm text-foreground/80">{props.detail}</span>
+              <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{props.detail}</span>
             ) : null}
             {props.tags ? <span className="mt-1.5 flex flex-wrap gap-1.5">{props.tags}</span> : null}
           </span>
         </span>
         {props.actions ? (
-          <div className="relative z-10 flex shrink-0 items-center gap-2">{props.actions}</div>
+          <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-2">{props.actions}</div>
         ) : null}
         {props.amount || props.status ? (
-          <span className="pointer-events-none flex shrink-0 flex-col items-end gap-1 text-right">
+          <span className="pointer-events-none ml-auto flex min-w-20 shrink-0 flex-col items-end gap-1 text-right">
             {props.amount ? (
-              <span className="text-sm font-medium tabular-nums text-foreground">{props.amount}</span>
+              <span className={cn('text-base font-semibold tabular-nums', toneClasses(tone).text)}>
+                {props.amount}
+              </span>
             ) : null}
-            {props.status ? (
-              <span className="text-xs font-medium text-foreground">{props.status}</span>
-            ) : null}
+            {props.status ? <Tag tone={props.statusTone ?? tone}>{props.status}</Tag> : null}
           </span>
         ) : null}
       </div>

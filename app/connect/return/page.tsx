@@ -20,7 +20,7 @@ export default async function ConnectReturnPage({ searchParams }: PageProps) {
 
   if (from === 'app') {
     return (
-      <ConnectCard title="You're all set">
+      <ConnectCard title="You're all set" status="success">
         <p>Go back to the WorkWise app. If Stripe still needs anything, the app will tell you.</p>
       </ConnectCard>
     );
@@ -37,7 +37,7 @@ export default async function ConnectReturnPage({ searchParams }: PageProps) {
   }
 
   return (
-    <ConnectCard title="Card payments">
+    <ConnectCard title="Card payments" status="success">
       <p>Setup saved. Sign in to WorkWise to see your card payments.</p>
     </ConnectCard>
   );

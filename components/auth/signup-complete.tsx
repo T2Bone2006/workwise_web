@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { authButtonClassName, authSecondaryButtonClassName } from '@/components/auth/auth-shell';
 import type { SignupStatus } from '@/app/api/signup/status/route';
 
 const POLL_MS = 2000;
@@ -53,29 +53,48 @@ export function SignupComplete({ canceled }: { canceled: boolean }) {
 
   if (canceled) {
     return (
-      <div className="space-y-3 text-center">
-        <Button asChild variant="gradient" className="w-full">
-          <a href="/api/stripe/checkout">Resume payment</a>
-        </Button>
-        <p className="text-xs text-muted-foreground">Your login has been created; only the card step is outstanding.</p>
+      <div className="space-y-3">
+        <a href="/api/stripe/checkout" className={authButtonClassName}>
+          Resume payment
+        </a>
+        <p className="text-center text-[13px] leading-relaxed text-[#6E6A63] dark:text-[#93A3BA]">
+          Your login has been created; only the card step is outstanding.
+        </p>
       </div>
     );
   }
 
+  const done = status === 'provisioned';
+
   return (
-    <div className="space-y-4 text-center">
-      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" aria-hidden />
-        {status === 'provisioned' ? 'Done. Taking you in…' : 'Confirming your subscription…'}
+    <div className="space-y-6">
+      <div
+        role="status"
+        className="rounded-2xl border border-[#EBEBEA] bg-[#FAFAF8] p-4 dark:border-white/10 dark:bg-white/[0.03]"
+      >
+        <div className="flex items-center gap-2.5 text-sm font-medium text-[#0A1A2E] dark:text-[#EAF1FB]">
+          <Loader2 className="size-4 animate-spin text-[#0C66E4] dark:text-[#7FAAF0]" aria-hidden />
+          {done ? 'Done. Taking you in…' : 'Confirming your subscription…'}
+        </div>
+        <div aria-hidden className="mt-3.5 h-1.5 overflow-hidden rounded-full bg-[#E7EEF9] dark:bg-white/10">
+          <div
+            className={
+              done
+                ? 'h-full w-full rounded-full bg-[#0C66E4] transition-all duration-500'
+                : 'h-full w-1/3 animate-[signup-progress_1.4s_ease-in-out_infinite] rounded-full bg-[#0C66E4] motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-60'
+            }
+          />
+        </div>
       </div>
+      <style>{`@keyframes signup-progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }`}</style>
       {slow && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
+        <div className="space-y-3">
+          <p className="text-center text-[13px] leading-relaxed text-[#6E6A63] dark:text-[#93A3BA]">
             Taking longer than usual? If you didn&apos;t finish the payment step, you can resume it.
           </p>
-          <Button asChild variant="outline" className="w-full">
-            <a href="/api/stripe/checkout">Resume payment</a>
-          </Button>
+          <a href="/api/stripe/checkout" className={authSecondaryButtonClassName}>
+            Resume payment
+          </a>
         </div>
       )}
     </div>

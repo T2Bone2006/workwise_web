@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { handleLeadReply } from '@/lib/lite/lead-replies';
 import { classifyPaymentReply, classifyReply, type ReplyIntent } from '@/lib/messaging/classify';
 import { pushReplyToOwner } from '@/lib/messaging/owner-push';
 import { applyReplyOutcome } from '@/lib/messaging/replies';
@@ -21,6 +22,7 @@ export type InboundOutcome =
   | 'opt_in'
   | 'unknown_autoreplied'
   | 'unknown_stored'
+  | 'lead_reply'
   | 'recorded';
 
 const BODY_LIMIT = 1600;
@@ -84,7 +86,16 @@ async function alreadyStored(
     .eq('provider_message_id', providerMessageId)
     .maybeSingle();
   if (unroutedError) throw new Error(unroutedError.message);
-  return Boolean(unrouted);
+  if (unrouted) return true;
+
+  const { data: leadText, error: leadTextError } = await admin
+    .from('lite_texts')
+    .select('id')
+    .eq('provider', PROVIDER)
+    .eq('provider_message_id', providerMessageId)
+    .maybeSingle();
+  if (leadTextError) throw new Error(leadTextError.message);
+  return Boolean(leadText);
 }
 
 function asYmd(value: unknown): string | null {
@@ -320,6 +331,17 @@ export async function handleInboundText(
   const body = clipBody(event.body);
 
   if (route.kind === 'unknown') {
+    const leadReply = await handleLeadReply(admin, {
+      from: event.from,
+      body,
+      providerMessageId: messageKey,
+      keyword: keyword === 'opt_out' || keyword === 'opt_in' ? keyword : null,
+      at,
+    });
+    if (leadReply.handled) {
+      return { outcome: leadReply.duplicate ? 'duplicate' : 'lead_reply' };
+    }
+
     const { data, error } = await admin
       .from('messaging_unrouted_inbound')
       .insert({

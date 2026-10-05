@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, PoundSterling, Repeat, Users } from 'lucide-react';
+import { IconChip, StatTile } from '@/components/look';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { IconChip } from '@/components/rounds/overview/shared';
 import { StuckLink } from '@/components/import/rounds/stuck-link';
 import type { AfterImportDirectDebit } from '@/lib/actions/rounds/import-after';
 import type { ImportRoundsResult } from '@/lib/actions/rounds/import';
@@ -84,34 +84,28 @@ export function ImportDone({
 }) {
   const owed = owedPoundsAdded(rows, result.errors);
   const toCheck = directDebit ? directDebit.toCheck + directDebit.notMatched : 0;
-  const lines: string[] = [];
-  if (result.customersCreated === 0) lines.push('Everything in this file was already here.');
-  if (result.customersCreated > 0) lines.push(`${result.customersCreated} new customers`);
-  if (result.customersMatched > 0) lines.push(`${result.customersMatched} were already here`);
-  if (result.agreementsCreated > 0 || result.visitsGenerated > 0) {
-    lines.push(
-      `${result.agreementsCreated} regular services, ${result.visitsGenerated} visits on your calendar`,
-    );
-  }
-  if (result.paused > 0) lines.push(`${result.paused} paused`);
-  if (result.balancesAdded > 0) {
-    lines.push(`${formatGbp(owed)} owed from before added to ${result.balancesAdded} customers`);
-  }
-
   return (
-    <Card className="glass-card gap-4 p-6">
-      <div className="flex items-start gap-3">
-        <IconChip icon={CheckCircle2} tone="emerald" />
-        <div>
-          <h2 className="text-base font-semibold">Your round is in</h2>
-          <ul className="mt-2 space-y-1 text-sm">
-            {lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-(--tone-emerald-line) bg-(--tone-emerald-soft) p-5 shadow-(--look-card-shadow)">
+        <div className="flex items-start gap-3">
+          <IconChip icon={CheckCircle2} tone="emerald" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold tracking-tight">Your round is in</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {result.customersCreated === 0
+                ? 'Everything in this file was already here.'
+                : `${result.customersCreated} ${result.customersCreated === 1 ? 'customer is' : 'customers are'} ready on your calendar.`}
+            </p>
+          </div>
         </div>
-      </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <StatTile label="Customers added" value={String(result.customersCreated)} tone="emerald" icon={Users} sub={result.customersMatched > 0 ? `${result.customersMatched} were already here` : 'New to WorkWise'} />
+          <StatTile label="Regular services" value={String(result.agreementsCreated)} tone="rounds" icon={Repeat} sub={`${result.visitsGenerated} visits on your calendar${result.paused > 0 ? `, ${result.paused} paused` : ''}`} />
+          <StatTile label="Owed from before" value={formatGbp(owed)} tone={owed > 0 ? 'rose' : 'slate'} icon={PoundSterling} sub={result.balancesAdded > 0 ? `added to ${result.balancesAdded} ${result.balancesAdded === 1 ? 'customer' : 'customers'}` : 'Nothing carried over'} />
+        </div>
+      </section>
 
+      <Card className="glass-card gap-4 p-5">
       {directDebit && !directDebitCheckFailed && (
         <div className="space-y-1 text-sm">
           <p>{linkedSentence(directDebit.linked)}</p>
@@ -165,6 +159,7 @@ export function ImportDone({
       </div>
 
       <StuckLink context="done" />
-    </Card>
+      </Card>
+    </div>
   );
 }

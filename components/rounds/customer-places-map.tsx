@@ -8,7 +8,15 @@ const CustomerPlacesMap = dynamic(
   { ssr: false },
 );
 
-export function CustomerPlacesMapCard({ places }: { places: CustomerPlace[] }) {
+export function CustomerPlacesMapCard({
+  places,
+  compact,
+  className,
+}: {
+  places: CustomerPlace[];
+  compact?: boolean;
+  className?: string;
+}) {
   if (places.length === 0) return null;
-  return <CustomerPlacesMap places={places} />;
+  return <CustomerPlacesMap places={places} compact={compact} className={className} />;
 }

@@ -91,11 +91,19 @@ async function loadOpenDisputes(
   return rows;
 }
 
-export async function getCardPanelData(
+type PayoutsResult = Pick<CardPanelData, 'payouts' | 'payoutsError'>;
+
+/**
+ * The card panel in two parts. `data` is database-only and fast. `payoutsPromise`
+ * is the live Stripe balance/payouts call, already running when this returns, so
+ * the page can render now and the panel fills in when Stripe answers. It never
+ * rejects (failure resolves to payoutsError). Null when there is nothing to fetch.
+ */
+export async function getCardPanelParts(
   supabase: SupabaseClient,
   tenantId: string,
   opts?: { refresh?: boolean },
-): Promise<CardPanelData> {
+): Promise<{ data: CardPanelData; payoutsPromise: Promise<PayoutsResult> | null }> {
   let settings = await getPaymentSettings(supabase, tenantId);
 
   if (opts?.refresh && settings.connect.accountId) {
@@ -118,17 +126,29 @@ export async function getCardPanelData(
   };
 
   if (settings.connect.status !== 'active' || !settings.connect.accountId) {
-    return { ...base, payouts: null, payoutsError: false };
+    return { data: { ...base, payouts: null, payoutsError: false }, payoutsPromise: null };
   }
 
-  try {
-    const payouts = await getPayoutSummary({
-      tenantId,
-      accountId: settings.connect.accountId,
-    });
-    return { ...base, payouts, payoutsError: false };
-  } catch (error) {
-    console.error('[getCardPanelData] payouts', error);
-    return { ...base, payouts: null, payoutsError: true };
-  }
+  const payoutsPromise: Promise<PayoutsResult> = getPayoutSummary({
+    tenantId,
+    accountId: settings.connect.accountId,
+  }).then(
+    (payouts) => ({ payouts, payoutsError: false }),
+    (error: unknown) => {
+      console.error('[getCardPanelData] payouts', error);
+      return { payouts: null, payoutsError: true };
+    },
+  );
+  return { data: { ...base, payouts: null, payoutsError: false }, payoutsPromise };
+}
+
+/** Everything at once (waits for Stripe). Pages that can stream use getCardPanelParts. */
+export async function getCardPanelData(
+  supabase: SupabaseClient,
+  tenantId: string,
+  opts?: { refresh?: boolean },
+): Promise<CardPanelData> {
+  const { data, payoutsPromise } = await getCardPanelParts(supabase, tenantId, opts);
+  if (!payoutsPromise) return data;
+  return { ...data, ...(await payoutsPromise) };
 }

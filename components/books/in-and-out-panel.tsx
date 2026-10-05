@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { TraderBooksPanel } from '@/components/books/trader-books-panel';
 import type { BooksSummary } from '@/lib/books/summary-pure';
 import { formatGbp } from '@/lib/money/pence';
 import { paymentMethodLabel } from '@/lib/payments/method-labels';
@@ -11,6 +12,8 @@ export type InAndOutPanelProps = {
   audience: 'trader' | 'accountant';
   /** Where a month's name in the tax-year table goes. Omit for plain text. */
   monthHref?: (year: number, month: number) => string;
+  /** For the trader's view, which draws in the browser: the address a month's link adds `&period=` to. */
+  monthBase?: string;
 };
 
 const money = (n: number) => formatGbp(n, { always2dp: true });
@@ -20,7 +23,8 @@ function Amount({ value, className }: { value: number; className?: string }) {
 }
 
 /** Presentational only: formats a BooksSummary. No data fetching, no actions. */
-export function InAndOutPanel({ summary, audience, monthHref }: InAndOutPanelProps) {
+export function InAndOutPanel({ summary, audience, monthHref, monthBase }: InAndOutPanelProps) {
+  if (audience === 'trader') return <TraderBooksPanel summary={summary} monthBase={monthBase} />;
   const { period, vat } = summary;
   const empty = summary.paymentsCount === 0 && summary.moneyOut === 0;
   const spentCategories = summary.moneyOutByCategory;
@@ -181,11 +185,6 @@ export function InAndOutPanel({ summary, audience, monthHref }: InAndOutPanelPro
         </Card>
       ) : null}
 
-      {audience === 'trader' ? (
-        <p className="text-xs text-muted-foreground">
-          Money in is counted on the day it arrived. Expenses count once you&apos;ve saved them.
-        </p>
-      ) : null}
     </div>
   );
 }

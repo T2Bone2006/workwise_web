@@ -15,6 +15,11 @@ vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => fakeAdmin,
 }));
 
+const listRoundsTenantIds = vi.fn(async () => ['tenant-1']);
+vi.mock('@/lib/messaging/rounds-tenants', () => ({
+  listRoundsTenantIds: () => listRoundsTenantIds(),
+}));
+
 type MessageRow = Record<string, unknown> & { id: string };
 type CustomerRow = {
   id: string;
@@ -509,6 +514,8 @@ describe('sendCustomerMessage', () => {
     });
     activeProvider.mockReturnValue('log');
     ourNumber.mockReturnValue('+447700900100');
+    listRoundsTenantIds.mockReset();
+    listRoundsTenantIds.mockResolvedValue([TENANT]);
     resetDb();
   });
 
@@ -1043,6 +1050,74 @@ describe('sendCustomerMessage', () => {
     expect(db.messages.find((m) => m.id === 'held-3')?.status).toBe('queued');
     expect(counts.sent).toBe(1);
   });
+
+  it('skips a held text when the business has no entitled Rounds plan, and refunds the credits taken when it was held', async () => {
+    resetDb({
+      messages: [
+        {
+          id: 'held-lapsed',
+          tenant_id: TENANT,
+          thread_id: 'thr-held',
+          customer_id: CUSTOMER,
+          kind: 'visit_change',
+          body: 'Held text',
+          to_address: '+447700900123',
+          segments: 1,
+          billed_from: 'allowance',
+          billed_month: '2026-09',
+          job_id: null,
+          job_ids: [],
+          dedupe_key: 'change:lapsed:job',
+          status: 'held',
+          hold_until: '2026-09-16T06:00:00.000Z',
+        },
+      ],
+    });
+    listRoundsTenantIds.mockResolvedValue([]);
+
+    const { sendHeldMessages } = await loadSend();
+    const counts = await sendHeldMessages(new Date('2026-09-16T07:00:00.000Z'));
+
+    expect(sendText).not.toHaveBeenCalled();
+    expect(counts).toMatchObject({ sent: 0, skipped: 1, failed: 0 });
+    expect(db.messages.find((m) => m.id === 'held-lapsed')).toMatchObject({
+      status: 'skipped',
+      error: 'plan_ended',
+    });
+    expect(db.refundCalls).toEqual([
+      { p_segments: 1, p_from: 'allowance', p_month: '2026-09' },
+    ]);
+    expect(db.claimCalls).toEqual([]);
+  });
+
+  it('sends nothing when the Rounds tenant list fails', async () => {
+    resetDb({
+      messages: [
+        {
+          id: 'held-lapsed',
+          tenant_id: TENANT,
+          thread_id: 'thr-held',
+          customer_id: CUSTOMER,
+          kind: 'visit_change',
+          body: 'Held text',
+          to_address: '+447700900123',
+          segments: 1,
+          billed_from: 'allowance',
+          billed_month: '2026-09',
+          status: 'held',
+          hold_until: '2026-09-16T06:00:00.000Z',
+        },
+      ],
+    });
+    listRoundsTenantIds.mockRejectedValue(new Error('db down'));
+
+    const { sendHeldMessages } = await loadSend();
+    const counts = await sendHeldMessages(new Date('2026-09-16T07:00:00.000Z'));
+
+    expect(sendText).not.toHaveBeenCalled();
+    expect(counts).toEqual({ sent: 0, emailed: 0, skipped: 0, failed: 0 });
+    expect(db.messages[0]?.status).toBe('held');
+  });
 });
 
 describe('retryFailedTexts', () => {
@@ -1057,6 +1132,8 @@ describe('retryFailedTexts', () => {
     });
     activeProvider.mockReturnValue('log');
     ourNumber.mockReturnValue('+447700900100');
+    listRoundsTenantIds.mockReset();
+    listRoundsTenantIds.mockResolvedValue([TENANT]);
   });
 
   function failedRow(overrides: Record<string, unknown> = {}) {
@@ -1149,5 +1226,19 @@ describe('retryFailedTexts', () => {
 
     expect(sendText).not.toHaveBeenCalled();
     expect(db.messages[0]?.status).toBe('failed');
+  });
+
+  it('skips a failed text when the business has no entitled Rounds plan', async () => {
+    seed(failedRow());
+    listRoundsTenantIds.mockResolvedValue([]);
+    const { retryFailedTexts } = await loadSend();
+
+    const counts = await retryFailedTexts(new Date('2026-09-16T07:00:00.000Z'));
+
+    expect(sendText).not.toHaveBeenCalled();
+    expect(counts.skipped).toBe(1);
+    expect(db.messages[0]).toMatchObject({ status: 'skipped', error: 'plan_ended' });
+    expect(db.claimCalls).toEqual([]);
+    expect(db.refundCalls).toEqual([]);
   });
 });

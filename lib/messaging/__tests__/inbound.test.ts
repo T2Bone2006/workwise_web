@@ -4,9 +4,19 @@ import type { InboundEvent } from '@/lib/messaging/provider';
 import { UNKNOWN_NUMBER_SMS } from '@/lib/messaging/templates';
 
 const sendText = vi.fn();
+const leadReplies = vi.hoisted(() => ({
+  handleLeadReply: vi.fn(async (..._args: unknown[]) => {
+    void _args;
+    return { handled: false as boolean, duplicate: false };
+  }),
+}));
 
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => fakeAdmin,
+}));
+
+vi.mock('@/lib/lite/lead-replies', () => ({
+  handleLeadReply: (...args: unknown[]) => leadReplies.handleLeadReply(...args),
 }));
 
 vi.mock('@/lib/messaging/provider', () => ({
@@ -37,6 +47,7 @@ type FakeDb = {
   messages: Row[];
   optOuts: Row[];
   unrouted: Row[];
+  liteTexts: Row[];
   limits: LimitRow[];
   failClassifyUpdate: boolean;
   clock: Date;
@@ -70,6 +81,7 @@ function tableOf(name: string): Row[] {
   if (name === 'messages') return db.messages;
   if (name === 'messaging_opt_outs') return db.optOuts;
   if (name === 'messaging_unrouted_inbound') return db.unrouted;
+  if (name === 'lite_texts') return db.liteTexts;
   return [];
 }
 
@@ -302,6 +314,7 @@ beforeEach(() => {
     messages: [],
     optOuts: [],
     unrouted: [],
+    liteTexts: [],
     limits: [],
     failClassifyUpdate: false,
     clock: NOW,
@@ -309,6 +322,8 @@ beforeEach(() => {
     nextUnrouted: 1,
   };
   fakeAdmin = buildAdmin();
+  leadReplies.handleLeadReply.mockReset();
+  leadReplies.handleLeadReply.mockResolvedValue({ handled: false, duplicate: false });
   sendText.mockReset();
   sendText.mockResolvedValue({
     ok: true,
@@ -319,6 +334,108 @@ beforeEach(() => {
 });
 
 describe('handleInboundText', () => {
+  it('stores a lead reply and does not file it as unknown or auto-reply', async () => {
+    db.threads = [];
+    db.customers = [];
+    leadReplies.handleLeadReply.mockResolvedValue({ handled: true, duplicate: false });
+
+    const result = await handleInboundText(inbound({ body: "Thursday's good" }), NOW);
+
+    expect(result).toEqual({ outcome: 'lead_reply' });
+    expect(db.unrouted).toHaveLength(0);
+    expect(db.messages).toHaveLength(0);
+    expect(sendText).not.toHaveBeenCalled();
+    expect(leadReplies.handleLeadReply).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        from: PHONE,
+        body: "Thursday's good",
+        providerMessageId: 'provider-1',
+        keyword: null,
+        at: NOW,
+      }),
+    );
+  });
+
+  it('treats a repeated lead-reply webhook as a duplicate and still does not auto-reply', async () => {
+    db.threads = [];
+    db.customers = [];
+    leadReplies.handleLeadReply.mockResolvedValue({ handled: true, duplicate: true });
+
+    const result = await handleInboundText(inbound(), NOW);
+
+    expect(result).toEqual({ outcome: 'duplicate' });
+    expect(db.unrouted).toHaveLength(0);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('does not count a redelivered lead reply toward the daily limit', async () => {
+    db.threads = [];
+    db.customers = [];
+    leadReplies.handleLeadReply.mockImplementation(async () => {
+      const stored = db.liteTexts.some((row) => row.provider_message_id === 'provider-1');
+      if (!stored) {
+        db.liteTexts.push({
+          id: 'lite-1',
+          provider: 'puresms',
+          provider_message_id: 'provider-1',
+        });
+        return { handled: true, duplicate: false };
+      }
+      return { handled: true, duplicate: true };
+    });
+
+    expect(await handleInboundText(inbound({ body: "Thursday's good" }), NOW)).toEqual({
+      outcome: 'lead_reply',
+    });
+    expect(await handleInboundText(inbound({ body: "Thursday's good" }), NOW)).toEqual({
+      outcome: 'duplicate',
+    });
+    expect(db.limits).toEqual([expect.objectContaining({ phone: PHONE, count: 1 })]);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('routes a Rounds reply as before and never asks Lite', async () => {
+    const result = await handleInboundText(inbound({ body: 'Thursday works' }), NOW);
+
+    expect(result.outcome).toBe('recorded');
+    expect(leadReplies.handleLeadReply).not.toHaveBeenCalled();
+    expect(db.unrouted).toHaveLength(0);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('still blocks a spamming number before a lead reply is considered', async () => {
+    db.threads = [];
+    db.customers = [];
+    db.limits = [{ phone: PHONE, count: 11, last_autoreply_at: null }];
+    leadReplies.handleLeadReply.mockResolvedValue({ handled: true, duplicate: false });
+
+    const result = await handleInboundText(inbound(), NOW);
+
+    expect(result).toEqual({ outcome: 'blocked' });
+    expect(leadReplies.handleLeadReply).not.toHaveBeenCalled();
+    expect(db.unrouted).toHaveLength(0);
+  });
+
+  it('records STOP before forwarding a lead reply, and does not auto-reply', async () => {
+    db.threads = [];
+    db.customers = [];
+    leadReplies.handleLeadReply.mockResolvedValue({ handled: true, duplicate: false });
+
+    const result = await handleInboundText(inbound({ body: 'STOP' }), NOW);
+
+    expect(result).toEqual({ outcome: 'lead_reply' });
+    expect(db.optOuts).toEqual([
+      expect.objectContaining({ phone_e164: PHONE, source: 'keyword', last_keyword: 'stop' }),
+    ]);
+    expect(leadReplies.handleLeadReply).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ keyword: 'opt_out' }),
+    );
+    expect(db.unrouted).toHaveLength(0);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it('blocks the 11th text in a day and stores nothing for it', async () => {
     for (let n = 1; n <= 10; n += 1) {
       const result = await handleInboundText(

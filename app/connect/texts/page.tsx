@@ -17,7 +17,7 @@ export default async function ConnectTextsPage({ searchParams }: PageProps) {
   const cancelled = status === 'cancelled';
 
   return (
-    <ConnectCard title="Texts">
+    <ConnectCard title="Texts" status={cancelled ? 'checking' : 'success'}>
       <p>
         {cancelled
           ? 'No charge made.'

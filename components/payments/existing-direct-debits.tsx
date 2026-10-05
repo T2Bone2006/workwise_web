@@ -3,6 +3,8 @@
 import { useMemo, useState, useTransition, type JSX } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { CheckCheck, ChevronDown, EyeOff, Link2, type LucideIcon } from 'lucide-react';
+import { Avatar, IconChip, Tag, type Tone } from '@/components/look';
 import { CustomerPicker } from '@/components/payments/customer-picker';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,7 +59,6 @@ function firstName(name: string): string {
 
 function summary(row: ExistingDirectDebit): string {
   return [
-    row.payerName ?? 'Unnamed',
     row.payerEmail,
     row.payerPostcode,
     row.bankName || row.bankEnding ? `${row.bankName ?? 'Bank'}${row.bankEnding ? ` ••${row.bankEnding}` : ''}` : null,
@@ -72,6 +73,52 @@ function matches(row: ExistingDirectDebit, query: string): boolean {
   const hay = [row.payerName, row.payerEmail, row.payerPostcode].join(' ').toLowerCase();
   return hay.includes(query);
 }
+
+/** One collapsible group: icon chip, title, count tag. */
+function Group({
+  icon,
+  tone,
+  title,
+  count,
+  open,
+  children,
+}: {
+  icon: LucideIcon;
+  tone: Tone;
+  title: string;
+  count: string;
+  open?: boolean;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <details open={open} className="group rounded-2xl border border-border bg-card shadow-(--look-card-shadow)">
+      <summary className="flex cursor-pointer list-none items-center gap-2.5 p-4 [&::-webkit-details-marker]:hidden">
+        <IconChip icon={icon} tone={tone} size="sm" />
+        <span className="flex-1 text-[15px] font-semibold">{title}</span>
+        <Tag tone={tone}>{count}</Tag>
+        <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-2 border-t border-border p-4">{children}</div>
+    </details>
+  );
+}
+
+function Payer({ row, trailing }: { row: ExistingDirectDebit; trailing?: React.ReactNode }): JSX.Element {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <Avatar name={row.payerName ?? 'Unnamed'} tone="slate" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">
+          {row.payerName ?? 'Unnamed'}
+          {trailing}
+        </p>
+        <p className="truncate text-[13px] text-muted-foreground">{summary(row)}</p>
+      </div>
+    </div>
+  );
+}
+
+const ROW = 'space-y-2.5 rounded-xl border border-border p-3 text-sm';
 
 export function ExistingDirectDebits(props: {
   data: Data;
@@ -142,10 +189,10 @@ export function ExistingDirectDebits(props: {
     const canLink = Boolean(chosen) && (!otherApp || ticked[row.linkId] === true);
 
     return (
-      <li key={row.linkId} className="space-y-2 rounded-lg border border-border/60 p-3 text-sm">
-        <p className="font-medium">{summary(row)}</p>
+      <li key={row.linkId} className={ROW}>
+        <Payer row={row} />
         {otherApp ? (
-          <p className="rounded-md bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-300">
+          <p className="rounded-lg bg-(--tone-amber-soft) px-2.5 py-1.5 text-(--tone-amber-text)">
             <span className="font-medium">Another app is still collecting</span>
             {row.otherCollectionsDetail ? ` — ${row.otherCollectionsDetail}` : ''}
           </p>
@@ -213,7 +260,7 @@ export function ExistingDirectDebits(props: {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-(--look-card-shadow)">
         <Button disabled={pending} onClick={check}>
           Check GoCardless again
         </Button>
@@ -226,20 +273,21 @@ export function ExistingDirectDebits(props: {
         />
       </div>
 
-      <details open className="space-y-3">
-        <summary className="cursor-pointer text-base font-semibold">
-          To link ({toLink.length}
-          {q && toLink.length !== data.toLink.length ? ` of ${data.toLink.length}` : ''})
-        </summary>
+      <Group
+        open
+        icon={Link2}
+        tone={toLink.length > 0 ? 'amber' : 'slate'}
+        title="To link"
+        count={`${toLink.length}${q && toLink.length !== data.toLink.length ? ` of ${data.toLink.length}` : ''}`}
+      >
         {toLink.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing to link right now.</p>
         ) : (
           <ul className="space-y-3">{toLink.map(renderToLink)}</ul>
         )}
-      </details>
+      </Group>
 
-      <details className="space-y-3">
-        <summary className="cursor-pointer text-base font-semibold">Linked ({linked.length})</summary>
+      <Group icon={CheckCheck} tone="emerald" title="Linked" count={String(linked.length)}>
         {linked.length === 0 ? (
           <p className="text-sm text-muted-foreground">None yet.</p>
         ) : (
@@ -247,25 +295,23 @@ export function ExistingDirectDebits(props: {
             {linked.map((row) => (
               <li
                 key={row.linkId}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 p-3 text-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3 text-sm"
               >
-                <span>
-                  {summary(row)}
+                <div className="min-w-0 flex-1">
+                  <Payer row={row} />
                   {row.linked ? (
-                    <>
-                      {' → '}
+                    <p className="mt-1.5 pl-12 text-[13px]">
+                      <span className="text-muted-foreground">Collected for </span>
                       <Link
                         href={`/customers/${row.linked.customerId}`}
                         className="font-medium text-primary hover:underline"
                       >
                         {row.linked.name}
                       </Link>
-                    </>
+                      {row.linkedAutomatically ? <Tag tone="slate" className="ml-2">Linked automatically</Tag> : null}
+                    </p>
                   ) : null}
-                  {row.linkedAutomatically ? (
-                    <span className="ml-2 text-xs text-muted-foreground">Linked automatically</span>
-                  ) : null}
-                </span>
+                </div>
                 {row.canUnlink ? (
                   <Button size="sm" variant="outline" disabled={pending} onClick={() => setUnlinking(row)}>
                     Unlink
@@ -275,10 +321,9 @@ export function ExistingDirectDebits(props: {
             ))}
           </ul>
         )}
-      </details>
+      </Group>
 
-      <details className="space-y-3">
-        <summary className="cursor-pointer text-base font-semibold">Ignored ({ignored.length})</summary>
+      <Group icon={EyeOff} tone="slate" title="Ignored" count={String(ignored.length)}>
         {ignored.length === 0 ? (
           <p className="text-sm text-muted-foreground">None ignored.</p>
         ) : (
@@ -286,9 +331,11 @@ export function ExistingDirectDebits(props: {
             {ignored.map((row) => (
               <li
                 key={row.linkId}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 p-3 text-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-3 text-sm"
               >
-                <span>{summary(row)}</span>
+                <div className="min-w-0 flex-1">
+                  <Payer row={row} />
+                </div>
                 <Button size="sm" variant="outline" disabled={pending} onClick={() => unlink(row, 'Undone')}>
                   Undo
                 </Button>
@@ -296,7 +343,7 @@ export function ExistingDirectDebits(props: {
             ))}
           </ul>
         )}
-      </details>
+      </Group>
 
       <Dialog open={unlinking != null} onOpenChange={(open) => !open && setUnlinking(null)}>
         <DialogContent>

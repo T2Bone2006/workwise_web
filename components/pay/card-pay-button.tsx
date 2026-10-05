@@ -21,6 +21,8 @@ export function CardPayButton(props: {
   token: string;
   kind: 'customer' | 'invoice';
   amount: number;
+  /** Another way sits above this one, so this is the quieter button. */
+  secondary?: boolean;
 }): JSX.Element {
   return (
     <form method="post" action="/api/pay/checkout" className="space-y-2">
@@ -28,7 +30,10 @@ export function CardPayButton(props: {
       <input type="hidden" name="kind" value={props.kind} />
       <button
         type="submit"
-        className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'w-full gap-2')}
+        className={cn(
+          buttonVariants({ variant: props.secondary ? 'outline' : 'default', size: 'lg' }),
+          'h-12 w-full gap-2 rounded-full text-[15px]',
+        )}
       >
         <CreditCard className="size-4" />
         Pay {formatGbp(props.amount, { always2dp: true })} by card

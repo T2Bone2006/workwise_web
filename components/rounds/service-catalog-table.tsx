@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { ChevronDown, Loader2, Plus } from 'lucide-react';
+import { ChevronDown, Loader2, Plus, PoundSterling, Repeat, Sparkles } from 'lucide-react';
+import { IconChip, StatTile, Tag } from '@/components/look';
 import { toast } from 'sonner';
 import {
   addServicePresets,
@@ -142,11 +143,14 @@ export function ServiceCatalogTable({
   presetGroups,
   fetchError,
   presetError,
+  usage = {},
 }: {
   services: ServiceRow[];
   presetGroups: ServicePresetGroup[];
   fetchError: string | null;
   presetError: string | null;
+  /** Customers using each service, by service id. */
+  usage?: Record<string, number>;
 }) {
   const [editor, setEditor] = useState<Editor>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -255,6 +259,23 @@ export function ServiceCatalogTable({
     editor?.kind === 'edit' && inactiveServices.some((service) => service.id === editor.id);
   const showInactive = inactiveOpen || editingInactive;
   const showActiveTable = activeServices.length > 0 || editor?.kind === 'add';
+  const prices = activeServices.map((service) => Number(service.default_price ?? 0));
+  const priceRange =
+    prices.length === 0
+      ? '—'
+      : Math.min(...prices) === Math.max(...prices)
+        ? formatPrice(prices[0]!)
+        : `${formatPrice(Math.min(...prices))}–${formatPrice(Math.max(...prices))}`;
+  const repeatCounts = new Map<string, number>();
+  for (const service of activeServices) {
+    const label = repeatLabel(service.default_frequency_days);
+    repeatCounts.set(label, (repeatCounts.get(label) ?? 0) + 1);
+  }
+  const commonRepeat = [...repeatCounts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)[0];
+
+  const maxUsage = Math.max(1, ...Object.values(usage));
 
   function serviceRow(service: ServiceRow, switchedOff: boolean) {
     if (editor?.kind === 'edit' && editor.id === service.id) {
@@ -277,10 +298,30 @@ export function ServiceCatalogTable({
     return (
       <TableRow key={service.id} className={switchedOff ? 'text-muted-foreground' : undefined}>
         <TableCell className="whitespace-normal font-medium text-foreground">
-          {service.name}
+          <span className="flex items-center gap-2.5">
+            <IconChip icon={Sparkles} tone={switchedOff ? 'slate' : 'rounds'} size="sm" />
+            {service.name}
+          </span>
         </TableCell>
-        <TableCell>{formatPrice(service.default_price)}</TableCell>
-        <TableCell>{repeatLabel(service.default_frequency_days)}</TableCell>
+        <TableCell className="font-semibold tabular-nums">{formatPrice(service.default_price)}</TableCell>
+        <TableCell>
+          <Tag tone={switchedOff ? 'slate' : 'indigo'}>{repeatLabel(service.default_frequency_days)}</Tag>
+        </TableCell>
+        <TableCell className="text-sm tabular-nums">
+          {(usage[service.id] ?? 0) > 0 ? (
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <span
+                  className="block h-full rounded-full bg-(--tone-rounds-solid)"
+                  style={{ width: `${Math.max(8, ((usage[service.id] ?? 0) / maxUsage) * 100)}%` }}
+                />
+              </span>
+              {usage[service.id]} {usage[service.id] === 1 ? 'customer' : 'customers'}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Not used yet</span>
+          )}
+        </TableCell>
         <TableCell className="text-right">
           <div className="flex justify-end gap-1">
             <Button
@@ -338,11 +379,37 @@ export function ServiceCatalogTable({
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-border/60 bg-card/80">
-        <div className="flex flex-col gap-3 border-b border-border/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+      {activeServices.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatTile
+            label="Active services"
+            value={String(activeServices.length)}
+            tone="rounds"
+            icon={Sparkles}
+            sub={inactiveServices.length > 0 ? `${inactiveServices.length} switched off` : 'Customers pick from these'}
+          />
+          <StatTile
+            label="Default prices"
+            value={priceRange}
+            tone="emerald"
+            icon={PoundSterling}
+            sub="Each customer can have their own"
+          />
+          <StatTile
+            label="Most common repeat"
+            value={commonRepeat?.label ?? '—'}
+            tone="indigo"
+            icon={Repeat}
+            sub={commonRepeat ? `${commonRepeat.count} of ${activeServices.length} services` : 'Set a default repeat'}
+          />
+        </div>
+      ) : null}
+
+      <div className="rounded-2xl border border-border bg-card shadow-(--look-card-shadow)">
+        <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
-            <h2 className="font-semibold">Your services</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h2 className="text-[15px] font-semibold">Your services</h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Price and repeat are defaults. Add a service, or start from a trade preset.
               You set the real figures per customer, and you can change them again later —
               including on the day.
@@ -412,7 +479,7 @@ export function ServiceCatalogTable({
         )}
 
         {inactiveServices.length > 0 ? (
-          <div className="border-t border-border/60">
+          <div className="border-t border-border">
             <button
               type="button"
               className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-muted-foreground hover:text-foreground"
@@ -499,6 +566,7 @@ function ServiceTable({ children }: { children: ReactNode }) {
           <TableHead>Name</TableHead>
           <TableHead>Default price</TableHead>
           <TableHead>Default repeat</TableHead>
+          <TableHead>Used by</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -528,7 +596,7 @@ function ServiceEditorRow({
 
   return (
     <TableRow className="hover:bg-transparent">
-      <TableCell colSpan={4} className="whitespace-normal">
+      <TableCell colSpan={5} className="whitespace-normal">
         <form
           className="grid gap-3 py-1 sm:grid-cols-2 lg:grid-cols-4"
           onSubmit={(event) => {

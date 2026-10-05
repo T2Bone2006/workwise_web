@@ -10,9 +10,9 @@ import { formatDayMonth, SectionCard } from './shared';
 
 function Figure({ label, value, className }: { label: string; value: number; className?: string }) {
   return (
-    <div className="rounded-xl bg-muted/40 px-3 py-2.5">
+    <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn('mt-0.5 text-lg font-semibold tabular-nums', className)}>{formatGbp(value)}</p>
+      <p className={cn('mt-0.5 text-xl font-semibold tabular-nums', className)}>{formatGbp(value)}</p>
     </div>
   );
 }
@@ -51,12 +51,12 @@ export function MoneyCard({
     >
       {books ? (
         <div className="grid grid-cols-3 gap-2">
-          <Figure label="In" value={books.moneyIn} className="text-emerald-700 dark:text-emerald-300" />
-          <Figure label="Out" value={books.moneyOut} className="text-rose-700 dark:text-rose-300" />
+          <Figure label="In" value={books.moneyIn} className="text-(--tone-emerald-solid)" />
+          <Figure label="Out" value={books.moneyOut} className="text-(--tone-rose-solid)" />
           <Figure
             label="Left"
             value={books.left}
-            className={books.left < 0 ? 'text-rose-700 dark:text-rose-300' : undefined}
+            className={books.left < 0 ? 'text-(--tone-rose-text)' : undefined}
           />
         </div>
       ) : (
@@ -67,10 +67,10 @@ export function MoneyCard({
         <div>
           <div className="mb-1 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              <span className="size-2.5 rounded-sm bg-emerald-500" aria-hidden="true" /> Money in
+              <span className="size-2.5 rounded-sm bg-(--tone-emerald-solid)" aria-hidden="true" /> Money in
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="size-2.5 rounded-sm bg-rose-500" aria-hidden="true" /> Money out
+              <span className="size-2.5 rounded-sm bg-(--tone-rose-solid)" aria-hidden="true" /> Money out
             </span>
           </div>
           <MoneyChart months={trend} />
@@ -98,7 +98,7 @@ export function MoneyCard({
                   <span className="text-muted-foreground"> · {paymentMethodLabel(p.method)}</span>
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">{when(p.receivedOn, today)}</span>
-                <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-(--tone-emerald-text)">
                   +{formatGbp(p.amount)}
                 </span>
               </li>

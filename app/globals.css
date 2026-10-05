@@ -65,6 +65,32 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
+  /* New look (data-look="new"): the marketing site's navy and warm scales.
+     Not amber, blue or purple: Tailwind's own scales stay as they are. */
+  --color-navy-950: #050f1c;
+  --color-navy-900: #0a1a2e;
+  --color-navy-800: #0f2347;
+  --color-navy-700: #153060;
+  --color-navy-600: #1b3d78;
+  --color-navy-500: #2451a0;
+  --color-navy-400: #3b6bc4;
+  --color-navy-300: #6b95d8;
+  --color-navy-200: #a8c3ec;
+  --color-navy-100: #d4e4f7;
+  --color-navy-50: #eaf1fb;
+  --color-warm-white: #fafaf8;
+  --color-warm-50: #f5f5f2;
+  --color-warm-100: #ebebea;
+  --color-warm-200: #d6d5d2;
+  --color-warm-300: #b8b6b0;
+  --color-warm-400: #928e88;
+  --color-warm-500: #6e6a63;
+  --color-look-canvas: var(--look-canvas);
+  --color-look-rounds: var(--look-rounds);
+  --color-look-lite: var(--look-lite);
+  /* Segmented-pill trough. Falls back to --muted where the new look is off (Pro). */
+  --color-look-segment: var(--look-segment, var(--muted));
+
   /* Blur */
   --blur-glass: 12px;
   --blur-glass-strong: 20px;
@@ -204,6 +230,225 @@
 }
 
 /* ==========================================================================
+   NEW LOOK (Phase 7b) – the marketing site's drawings, for Rounds and Lite.
+   Switched on by data-look="new" (server-rendered wrapper + the same
+   attribute on <html> so portals match). Pro logins never get the attribute,
+   so :root and .dark above stay exactly as they were.
+   Palette and tones are documented in docs/DASHBOARD-LOOK.md.
+   ========================================================================== */
+[data-look="new"] {
+  --background: #f7f7f4;
+  --foreground: #0a1a2e;
+  --card: #ffffff;
+  --card-foreground: #0a1a2e;
+  --popover: #ffffff;
+  --popover-foreground: #0a1a2e;
+  --primary: #0c66e4;
+  --primary-foreground: #ffffff;
+  --secondary: #eaf1fb;
+  --secondary-foreground: #0f2347;
+  --muted: #f5f5f2;
+  --muted-foreground: #6e6a63;
+  --accent: #eaf1fb;
+  --accent-foreground: #0f2347;
+  --border: #ebebea;
+  --input: #dcdbd8;
+  --ring: #0c66e4;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f2347;
+  --sidebar-primary: #0c66e4;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eaf1fb;
+  --sidebar-accent-foreground: #0f2347;
+  --sidebar-border: #ebebea;
+  --sidebar-ring: #0c66e4;
+
+  /* The old indigo brand tokens (input focus rings, import gradients) become the brand blue. */
+  --brand-primary: #0c66e4;
+  --brand-secondary: #2f7bea;
+  --brand-accent: #5b9bf0;
+  --glow-primary: rgba(12 102 228 / 0.25);
+  --glow-accent: rgba(47 123 234 / 0.2);
+  --glow-purple: rgba(12 102 228 / 0.4);
+  --glow-blue: rgba(47 123 234 / 0.35);
+  --shadow-input-focus-value: 0 0 0 3px rgba(12 102 228 / 0.15);
+
+  --look-canvas: #f7f7f4;
+  --look-rounds: #0c66e4;
+  --look-lite: #9b30d9;
+  --look-card-shadow: 0 1px 2px rgb(15 35 71 / 0.04), 0 4px 10px -4px rgb(15 35 71 / 0.06);
+  --look-rounds-pill: #0c66e4;
+  --look-lite-pill: #9b30d9;
+  --look-green-pill: #1a7f55;
+  /* Trough behind a segmented pill (Day / Week / Month). --muted is almost the
+     canvas, so the white pill had nothing to sit in. The drawing uses #ECECE7. */
+  --look-segment: #ecece7;
+
+  /* Tones: each colour has one meaning (docs/DASHBOARD-LOOK.md).
+     soft = tag/chip background, text = ink on soft, solid = bars and dots. */
+  --tone-sky-soft: #eaf2ff;     --tone-sky-text: #0852b8;     --tone-sky-solid: #0c66e4;     --tone-sky-line: #bfd7f8;
+  --tone-emerald-soft: #f0fdf4; --tone-emerald-text: #15803d; --tone-emerald-solid: #059669; --tone-emerald-line: #bbf7d0;
+  --tone-rose-soft: #fef2f2;    --tone-rose-text: #be123c;    --tone-rose-solid: #e11d48;    --tone-rose-line: #fecdd3;
+  --tone-amber-soft: #fffbeb;   --tone-amber-text: #b45309;   --tone-amber-solid: #f59e0b;   --tone-amber-line: #fde68a;
+  --tone-indigo-soft: #eef2ff;  --tone-indigo-text: #3730a3;  --tone-indigo-solid: #4f46e5;  --tone-indigo-line: #c7d2fe;
+  --tone-teal-soft: #f0fdfa;    --tone-teal-text: #0f766e;    --tone-teal-solid: #14b8a6;    --tone-teal-line: #99f6e4;
+  --tone-violet-soft: #f5f3ff;  --tone-violet-text: #6d28d9;  --tone-violet-solid: #7c3aed;  --tone-violet-line: #ddd6fe;
+  --tone-rounds-soft: #eaf2ff;  --tone-rounds-text: #0852b8;  --tone-rounds-solid: #0c66e4;  --tone-rounds-line: #bfd7f8;
+  --tone-lite-soft: #faf5ff;    --tone-lite-text: #7b21b3;    --tone-lite-solid: #9b30d9;    --tone-lite-line: #e9d5ff;
+  --tone-slate-soft: #f1f5f9;   --tone-slate-text: #475569;   --tone-slate-solid: #64748b;   --tone-slate-line: #e2e8f0;
+
+  /* The old pages still say bg-sky-100, bg-blue-600. Inside the new look sky /
+     cyan / blue all become the brand blue of the sidebar and the marketing site
+     (#0C66E4 at 600). Green and red are Tailwind's own, exactly as the site's
+     drawings use them. Pro never has data-look, so it keeps Tailwind's scales. */
+  --color-blue-50: #eaf2ff;     --color-blue-100: #deebff;    --color-blue-200: #bfd7f8;    --color-blue-300: #8db8f2;
+  --color-blue-400: #5b9bf0;    --color-blue-500: #2f7bea;    --color-blue-600: #0c66e4;    --color-blue-700: #0852b8;
+  --color-blue-800: #003e99;    --color-blue-900: #12326b;    --color-blue-950: #0a1f47;
+  --color-sky-50: #eaf2ff;      --color-sky-100: #deebff;     --color-sky-200: #bfd7f8;     --color-sky-300: #8db8f2;
+  --color-sky-400: #5b9bf0;     --color-sky-500: #2f7bea;     --color-sky-600: #0c66e4;     --color-sky-700: #0852b8;
+  --color-sky-800: #003e99;     --color-sky-900: #12326b;     --color-sky-950: #0a1f47;
+  --color-cyan-50: #eaf2ff;     --color-cyan-100: #deebff;    --color-cyan-200: #bfd7f8;    --color-cyan-300: #8db8f2;
+  --color-cyan-400: #5b9bf0;    --color-cyan-500: #2f7bea;    --color-cyan-600: #0c66e4;    --color-cyan-700: #0852b8;
+  --color-cyan-800: #003e99;    --color-cyan-900: #12326b;    --color-cyan-950: #0a1f47;
+}
+
+.dark [data-look="new"],
+[data-look="new"].dark,
+html.dark[data-look="new"] {
+  --background: #0b1220;
+  --foreground: #eaf1fb;
+  --card: #111b2e;
+  --card-foreground: #eaf1fb;
+  --popover: #141f35;
+  --popover-foreground: #eaf1fb;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #1a2740;
+  --secondary-foreground: #eaf1fb;
+  --muted: #16223a;
+  --muted-foreground: #9fb0c8;
+  --accent: #1a2740;
+  --accent-foreground: #eaf1fb;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.12);
+  --ring: #60a5fa;
+  --sidebar: #0e1626;
+  --sidebar-foreground: #d4e4f7;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a2740;
+  --sidebar-accent-foreground: #eaf1fb;
+  --sidebar-border: rgb(255 255 255 / 0.08);
+  --sidebar-ring: #60a5fa;
+
+  --brand-primary: #3b82f6;
+  --brand-secondary: #60a5fa;
+  --brand-accent: #93c5fd;
+  --glow-primary: rgba(59 130 246 / 0.35);
+  --glow-accent: rgba(96 165 250 / 0.3);
+  --glow-purple: rgba(59 130 246 / 0.5);
+  --glow-blue: rgba(96 165 250 / 0.45);
+  --shadow-input-focus-value: 0 0 0 1px rgba(255 255 255 / 0.08), 0 0 0 3px rgba(59 130 246 / 0.4);
+
+  --look-canvas: #0b1220;
+  --look-rounds: #3b82f6;
+  --look-lite: #b565e8;
+  --look-card-shadow: 0 0 0 1px rgb(255 255 255 / 0.03), 0 8px 20px -10px rgb(0 0 0 / 0.5);
+  --look-rounds-pill: #2563eb;
+  --look-lite-pill: #9333ea;
+  --look-green-pill: #1a7f55;
+  /* Dark already separates the trough from the canvas, so it stays with --muted. */
+  --look-segment: #16223a;
+
+  --tone-sky-soft: rgb(47 123 234 / 0.18);     --tone-sky-text: #9dc3f5;     --tone-sky-solid: #3b82f6;     --tone-sky-line: rgb(79 143 234 / 0.35);
+  --tone-emerald-soft: rgb(16 185 129 / 0.14); --tone-emerald-text: #6ee7b7; --tone-emerald-solid: #34d399; --tone-emerald-line: rgb(16 185 129 / 0.3);
+  --tone-rose-soft: rgb(244 63 94 / 0.14);     --tone-rose-text: #fda4af;    --tone-rose-solid: #fb7185;    --tone-rose-line: rgb(244 63 94 / 0.3);
+  --tone-amber-soft: rgb(245 158 11 / 0.14);   --tone-amber-text: #fcd34d;   --tone-amber-solid: #fbbf24;   --tone-amber-line: rgb(245 158 11 / 0.3);
+  --tone-indigo-soft: rgb(99 102 241 / 0.18);  --tone-indigo-text: #a5b4fc;  --tone-indigo-solid: #818cf8;  --tone-indigo-line: rgb(99 102 241 / 0.35);
+  --tone-teal-soft: rgb(20 184 166 / 0.14);    --tone-teal-text: #5eead4;    --tone-teal-solid: #2dd4bf;    --tone-teal-line: rgb(20 184 166 / 0.3);
+  --tone-violet-soft: rgb(139 92 246 / 0.18);  --tone-violet-text: #c4b5fd;  --tone-violet-solid: #a78bfa;  --tone-violet-line: rgb(139 92 246 / 0.35);
+  --tone-rounds-soft: rgb(37 99 235 / 0.2);    --tone-rounds-text: #93c5fd;  --tone-rounds-solid: #3b82f6;  --tone-rounds-line: rgb(59 130 246 / 0.35);
+  --tone-lite-soft: rgb(181 101 232 / 0.18);   --tone-lite-text: #dcb4f7;    --tone-lite-solid: #b565e8;    --tone-lite-line: rgb(181 101 232 / 0.35);
+  --tone-slate-soft: rgb(148 163 184 / 0.14);  --tone-slate-text: #cbd5e1;   --tone-slate-solid: #94a3b8;   --tone-slate-line: rgb(148 163 184 / 0.25);
+}
+
+/* Pages not restyled yet look calm, not half old and half new. */
+[data-look="new"] .animated-gradient-bg {
+  animation: none;
+  background: var(--look-canvas);
+}
+[data-look="new"] .animated-gradient-bg::before {
+  display: none;
+}
+[data-look="new"] .glass-card,
+[data-look="new"] .glass-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--look-card-shadow);
+  backdrop-filter: none;
+  border-radius: 1rem;
+}
+
+/* Shared widgets, calmed once for every page in the new look. In the components
+   layer so a page's own utility classes can still win. */
+@layer components {
+[data-look="new"] [data-slot="table-head"] {
+  height: 2.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+[data-look="new"] [data-slot="table-cell"] {
+  padding-block: 0.75rem;
+}
+[data-look="new"] [data-slot="table-row"] {
+  border-color: var(--border);
+}
+[data-look="new"] [data-slot="table-row"]:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+[data-look="new"] [data-slot="tabs-list"][data-variant="default"] {
+  height: 2.5rem;
+  padding: 4px;
+  border-radius: 0.75rem;
+  background: var(--look-segment);
+}
+[data-look="new"] [data-slot="tabs-trigger"] {
+  border-radius: 0.5rem;
+  padding-inline: 0.875rem;
+}
+[data-look="new"] [data-slot="tabs-trigger"][data-state="active"] {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--look-card-shadow);
+}
+[data-look="new"] [data-slot="card"] {
+  border-radius: 1rem;
+  border-color: var(--border);
+  box-shadow: var(--look-card-shadow);
+}
+[data-look="new"] [data-slot="card-title"] {
+  font-size: 0.9375rem;
+  letter-spacing: -0.005em;
+}
+[data-look="new"] [data-slot="input"],
+[data-look="new"] [data-slot="select-trigger"],
+[data-look="new"] [data-slot="textarea"] {
+  background: var(--card);
+  border-color: var(--input);
+  border-radius: 0.625rem;
+}
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-look="new"] * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
    Keyframes – animated gradient (atmospheric, smooth)
    ========================================================================== */
 @keyframes gradient-shift {
@@ -338,4 +583,45 @@
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-glass-value);
+}
+
+/* ==========================================================================
+   Loading skeletons – grey blocks with a soft moving shimmer.
+   Own colours (not --muted) because --muted is almost the page background.
+   ========================================================================== */
+.skeleton {
+  --skeleton-base: #e6e6e2;
+  --skeleton-shine: #f4f4f1;
+  background-color: var(--skeleton-base);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--skeleton-shine) 50%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  background-position: 150% 0;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.dark .skeleton {
+  --skeleton-base: rgb(255 255 255 / 0.07);
+  --skeleton-shine: rgb(255 255 255 / 0.14);
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background-image: none;
+  }
 }

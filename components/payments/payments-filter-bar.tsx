@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Plus, Search, X } from 'lucide-react';
 import { JobsDateRangeFilter } from '@/components/jobs/jobs-date-range-filter';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,13 @@ export function PaymentsListFilters({
   onClear: () => void;
   hasFilters: boolean;
 }) {
+  // "Clear filters" sits on the first filter line once there is one, otherwise up with the search.
+  const clearButton = hasFilters ? (
+    <Button variant="ghost" size="sm" className="ml-auto h-10 self-end" onClick={onClear}>
+      Clear filters
+    </Button>
+  ) : null;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -89,14 +97,10 @@ export function PaymentsListFilters({
             Filter
           </Button>
         ) : null}
-        {hasFilters ? (
-          <Button variant="ghost" size="sm" className="ml-auto self-end" onClick={onClear}>
-            Clear filters
-          </Button>
-        ) : null}
+        {wheres.length === 0 ? clearButton : null}
       </div>
       {wheres.length > 0 ? (
-        <WhereRows fields={fields} wheres={wheres} onWheresChange={onWheresChange} />
+        <WhereRows fields={fields} wheres={wheres} onWheresChange={onWheresChange} clearButton={clearButton} />
       ) : null}
     </div>
   );
@@ -106,10 +110,12 @@ function WhereRows({
   fields,
   wheres,
   onWheresChange,
+  clearButton,
 }: {
   fields: PaymentsFilterField[];
   wheres: PaymentsWhere[];
   onWheresChange: (next: PaymentsWhere[]) => void;
+  clearButton: ReactNode;
 }) {
   const list = wheres;
 
@@ -170,6 +176,7 @@ function WhereRows({
               >
                 <X className="size-4" />
               </Button>
+            {index === 0 ? clearButton : null}
           </div>
         );
       })}

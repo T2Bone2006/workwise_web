@@ -18,14 +18,14 @@ export default async function ConnectRefreshPage({ searchParams }: PageProps) {
 
   if (from === 'app') {
     return (
-      <ConnectCard title="Setup link expired">
+      <ConnectCard title="Setup link expired" status="problem">
         <p>This setup link has expired. Go back to the WorkWise app and tap Finish setting up.</p>
       </ConnectCard>
     );
   }
 
   return (
-    <ConnectCard title="Continue setup">
+    <ConnectCard title="Continue setup" status="checking">
       <p>This setup link has expired. Continue to get a new one.</p>
       <ContinueSetupButton />
     </ConnectCard>

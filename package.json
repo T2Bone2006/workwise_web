@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "stripe:probe": "tsx --env-file=.env.local scripts/stripe-connect-probe.ts"
+    "stripe:probe": "tsx --env-file=.env.local scripts/stripe-connect-probe.ts",
+    "stripe:portal-config": "node --env-file=.env.local scripts/stripe-portal-config.mjs",
+    "lite:tick": "node --env-file=.env.local scripts/lite-tick.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Upload,
   UserCheck,
   UserMinus,
   Users,
@@ -20,14 +21,6 @@ import {
   deactivateCustomer,
   reactivateCustomer,
 } from '@/lib/actions/customers';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -37,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Card, CardContent } from '@/components/ui/card';
+import { Avatar, EmptyState, Tag } from '@/components/look';
 import {
   Dialog,
   DialogContent,
@@ -60,11 +53,6 @@ import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 import { postcodeMatchesArea, ukPostcodeOutward } from '@/lib/utils/postcode';
 import { cn } from '@/lib/utils';
 import { formatGbp } from '@/lib/money/pence';
-import {
-  SummaryStrip,
-  type SummaryStripItem,
-} from '@/components/jobs/status-summary-strip';
-import { CheckCircle2, CircleAlert } from 'lucide-react';
 
 const DEBOUNCE_MS = 300;
 
@@ -81,8 +69,31 @@ const FILTER_FIELDS: { key: CustomerFilterField; label: string }[] = [
 
 const MAX_FILTERS = 4;
 
+type FilterRow = {
+  id: string;
+  field: CustomerFilterField | null;
+  value: string;
+};
+
 function newFilterId(): string {
   return Math.random().toString(36).slice(2, 9);
+}
+
+function newFilterRow(filter?: CustomerFieldFilter): FilterRow {
+  return {
+    id: newFilterId(),
+    field: filter?.field ?? null,
+    value: filter?.value ?? '',
+  };
+}
+
+/** Rows with both a field and a value. Blank rows stay on screen but do not filter. */
+function committedFilters(rows: FilterRow[]): CustomerFieldFilter[] {
+  const committed: CustomerFieldFilter[] = [];
+  for (const row of rows) {
+    if (row.field && row.value) committed.push({ field: row.field, value: row.value });
+  }
+  return committed;
 }
 type WhenFilter = 'overdue' | 'week' | 'later' | 'none';
 
@@ -174,6 +185,67 @@ function phoneLabel(customer: RoundsCustomerListRow): string {
   );
 }
 
+function RowMenu({
+  customer,
+  onAction,
+}: {
+  customer: RoundsCustomerListRow;
+  onAction: (customer: RoundsCustomerListRow, action: 'deactivate' | 'reactivate') => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${customer.name}`}>
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem asChild>
+          <Link href={`/customers/${customer.id}`} className="gap-2">
+            <Eye className="size-3.5" />
+            View
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={`/customers/${customer.id}/edit`} className="gap-2">
+            <Pencil className="size-3.5" />
+            Edit
+          </Link>
+        </DropdownMenuItem>
+        {customer.is_active ? (
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onAction(customer, 'deactivate')}>
+            <UserMinus className="size-3.5" />
+            Deactivate
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => onAction(customer, 'reactivate')}>
+            <UserCheck className="size-3.5" />
+            Reactivate
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function firstOf(values: string[]): string {
+  return values[0] ?? '—';
+}
+
+/** First service, then how many more ("Window clean (front) +1"). */
+function servicesLabel(customer: RoundsCustomerListRow): string {
+  const [first, ...rest] = customer.services;
+  if (!first) return 'No active agreement';
+  return rest.length > 0 ? `${first} +${rest.length}` : first;
+}
+
+function NextVisit({ date, today }: { date: string | null; today: string }) {
+  const when = whenOf(date, today);
+  if (when === 'none') return <span className="text-sm text-muted-foreground">No visit booked</span>;
+  const tone = when === 'overdue' ? 'amber' : when === 'week' ? 'sky' : 'slate';
+  return <Tag tone={tone}>{when === 'overdue' ? `Overdue · ${formatVisitDate(date)}` : formatVisitDate(date)}</Tag>;
+}
+
 export function RoundsCustomersTable({
   customers,
   today,
@@ -193,7 +265,11 @@ export function RoundsCustomersTable({
   const searchParams = useSearchParams();
   const [search, setSearch] = useState(initialSearch);
   const [status, setStatus] = useState<StatusFilter>(initialStatus);
-  const [fieldFilters, setFieldFilters] = useState<CustomerFieldFilter[]>(initialFilters);
+  const [filterRows, setFilterRows] = useState<FilterRow[]>(() =>
+    initialFilters.map((filter) => newFilterRow(filter)),
+  );
+  const filterRowsRef = useRef(filterRows);
+  filterRowsRef.current = filterRows;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<RoundsCustomerListRow | null>(
     null,
@@ -241,7 +317,7 @@ export function RoundsCustomersTable({
     setSearch(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      pushFilters(value, status, fieldFilters);
+      pushFilters(value, status, committedFilters(filterRowsRef.current));
     }, DEBOUNCE_MS);
   };
 
@@ -249,7 +325,7 @@ export function RoundsCustomersTable({
     const next = (value === 'inactive' || value === 'all' ? value : 'active') as StatusFilter;
     setStatus(next);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    pushFilters(search, next, fieldFilters);
+    pushFilters(search, next, committedFilters(filterRows));
   };
 
   const openConfirm = (
@@ -286,8 +362,9 @@ export function RoundsCustomersTable({
     }
   };
 
+  const appliedFilters = committedFilters(filterRows);
   const narrowed = customers.filter((customer) => {
-    if (!matchesFieldFilters(customer, fieldFilters)) return false;
+    if (!matchesFieldFilters(customer, appliedFilters)) return false;
     if (moneyFilter === 'overdue') return customer.owed_amount > 0;
     if (moneyFilter === 'paid') return customer.owed_amount <= 0;
     return true;
@@ -296,173 +373,179 @@ export function RoundsCustomersTable({
   const overdueCustomers = customers.filter((customer) => customer.owed_amount > 0);
   const paidCustomers = customers.filter((customer) => customer.owed_amount <= 0);
   const overdueTotal = overdueCustomers.reduce((sum, customer) => sum + customer.owed_amount, 0);
-  const moneyItems: SummaryStripItem[] = [
-    {
-      key: 'overdue',
-      title: 'Overdue',
-      icon: CircleAlert,
-      glow: 'rgb(225 29 72)',
-      count: formatGbp(overdueTotal),
-    },
-    {
-      key: 'paid',
-      title: 'Paid',
-      icon: CheckCircle2,
-      glow: 'rgb(16 185 129)',
-      count: paidCustomers.length,
-    },
+  const moneyPills: { key: 'overdue' | 'paid' | null; label: string; count: number; extra?: string }[] = [
+    { key: null, label: 'Everyone', count: customers.length },
+    { key: 'overdue', label: 'Owes', count: overdueCustomers.length, extra: formatGbp(overdueTotal) },
+    { key: 'paid', label: 'Paid up', count: paidCustomers.length },
   ];
+  const showWhereRows = filterRows.length > 0;
+  // "Clear filters" sits on the first filter line once there is one, otherwise up with the search.
+  const clearButton =
+    search.trim() || status !== 'active' || filterRows.length > 0 || moneyFilter != null ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="ml-auto h-10"
+        onClick={() => {
+          setSearch('');
+          setStatus('active');
+          setFilterRows([]);
+          setMoneyFilter(null);
+          router.push('/customers');
+        }}
+      >
+        Clear filters
+      </Button>
+    ) : null;
   const emptyBecauseFilter =
     visible.length === 0 &&
     (search.trim().length > 0 ||
       status !== 'active' ||
-      fieldFilters.length > 0 ||
+      appliedFilters.length > 0 ||
       moneyFilter != null);
+
+  const updateFilterRow = (id: string, patch: Partial<Pick<FilterRow, 'field' | 'value'>>) => {
+    const next = filterRows.map((row) => (row.id === id ? { ...row, ...patch } : row));
+    setFilterRows(next);
+    pushFilters(search, status, committedFilters(next));
+  };
 
   return (
     <>
-      <SummaryStrip
-        label="Money"
-        hint="· click to see who is overdue"
-        activeKey={moneyFilter}
-        onSelect={(key) => {
-          if (key === 'overdue' || key === 'paid') {
-            setMoneyFilter((prev) => (prev === key ? null : key));
-          }
-        }}
-        items={moneyItems}
-        gridClassName="grid-cols-2 gap-2 sm:gap-3"
-      />
-      <Card className="glass-card border-border/80">
-        <CardContent className="flex flex-col gap-4 p-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-[180px] flex-1 flex-col gap-1.5 sm:max-w-[280px]">
-              <label className="text-xs font-medium text-muted-foreground">Search</label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => onSearchChange(e.target.value)}
-                  placeholder="Name, phone, email…"
-                  className="pl-9"
-                  aria-label="Search customers"
-                />
-              </div>
+      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 shadow-(--look-card-shadow)">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-[180px] flex-1 flex-col gap-1.5 sm:max-w-[320px]">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="customer-search">Search</label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="customer-search"
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Name, phone, email…"
+                className="pl-9"
+                aria-label="Search customers"
+              />
             </div>
-            <div className="flex min-w-[10.5rem] flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Customer</label>
-              <Select value={status} onValueChange={onStatusChange}>
-                <SelectTrigger className="w-[10.5rem]" aria-label="Status filter">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="all">All</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {(search.trim() || status !== 'active' || fieldFilters.length > 0) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-10"
-                onClick={() => {
-                  setSearch('');
-                  setStatus('active');
-                  setFieldFilters([]);
-                  router.push('/customers');
-                }}
-              >
-                Clear filters
-              </Button>
-            )}
           </div>
-          <div className="space-y-2 border-t border-border/60 pt-3">
-            {(fieldFilters.length === 0 ? [null] : fieldFilters).map((filter, index) => {
-              const field = filter?.field ?? null;
-              const options = field ? valuesForField(customers, field) : [];
-              return (
-                <div key={`${filter?.field ?? 'new'}-${index}`} className="flex flex-wrap items-end gap-3">
-                  <div className="flex min-w-[160px] max-w-[min(100%,240px)] flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {index === 0 ? 'Where' : 'And'}
-                    </label>
-                    <SearchableSelect
-                      value={field ?? '__none__'}
-                      onValueChange={(value) => {
-                        const nextField = FILTER_FIELDS.some((item) => item.key === value)
-                          ? (value as CustomerFilterField)
-                          : null;
-                        const next = [...fieldFilters];
-                        if (!nextField) {
-                          next.splice(index, 1);
-                        } else if (filter) {
-                          next[index] = { field: nextField, value: '' };
-                        } else {
-                          next.push({ field: nextField, value: '' });
-                        }
-                        const committed = next.filter((item) => item.value);
-                        setFieldFilters(committed.length > 0 || nextField ? next.filter((item) => item.field) : []);
-                        pushFilters(search, status, committed);
-                      }}
-                      placeholder="Choose field"
-                      searchPlaceholder="Search fields…"
-                      className="h-10 w-full"
-                      options={[
-                        { value: '__none__', label: 'Any field' },
-                        ...FILTER_FIELDS.map((item) => ({ value: item.key, label: item.label })),
-                      ]}
-                    />
-                  </div>
-                  <div className="flex min-w-[160px] max-w-[min(100%,280px)] flex-col gap-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {field === 'postcode' ? 'Area' : 'Is'}
-                    </label>
-                    {field === 'postcode' ? (
-                      <SearchableMultiSelect
-                        values={filter?.value ? splitPostcodeAreas(filter.value) : []}
-                        onValuesChange={(areas) => {
-                          const chosen = areas.join(',');
-                          const next = fieldFilters.map((item, itemIndex) =>
-                            itemIndex === index ? { field, value: chosen } : item,
-                          );
-                          const committed = next.filter((item) => item.value);
-                          setFieldFilters(committed);
-                          pushFilters(search, status, committed);
-                        }}
-                        placeholder="Any area"
-                        searchPlaceholder="Search areas, e.g. SW1"
-                        emptyText="No areas match."
-                        className="h-10 w-full"
-                        allowQueryValue
-                        options={options.map((option) => ({ value: option, label: option }))}
-                      />
+          <div className="flex min-w-[10.5rem] flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Customer</label>
+            <Select value={status} onValueChange={onStatusChange}>
+              <SelectTrigger className="w-[10.5rem]" aria-label="Status filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="all">All</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Money</span>
+            <div className="flex w-full rounded-full bg-look-segment p-1 text-sm font-medium sm:w-auto" role="group" aria-label="Filter by money">
+              {moneyPills.map((pill) => (
+                <button
+                  key={pill.label}
+                  type="button"
+                  aria-pressed={moneyFilter === pill.key}
+                  onClick={() => setMoneyFilter(pill.key)}
+                  className={cn(
+                    'flex h-8 flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:flex-none sm:px-3.5',
+                    moneyFilter === pill.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {pill.label}
+                  <span className={cn('tabular-nums', pill.key === 'overdue' && pill.count > 0 ? 'text-(--tone-rose-text)' : 'text-muted-foreground')}>
+                    {pill.extra && pill.count > 0 ? (
+                      <>
+                        <span className="sm:hidden">{pill.count}</span>
+                        <span className="hidden sm:inline">{pill.extra}</span>
+                      </>
                     ) : (
+                      pill.count
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {filterRows.length === 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 gap-1.5"
+              onClick={() => setFilterRows([newFilterRow()])}
+            >
+              <Plus className="size-3.5" />
+              Filter by service, postcode…
+            </Button>
+          ) : null}
+          {showWhereRows ? null : clearButton}
+        </div>
+        {showWhereRows ? (
+          <div className="space-y-2 border-t border-border/60 pt-3">
+              {filterRows.map((row, index) => {
+                const field = row.field;
+                const options = field ? valuesForField(customers, field) : [];
+                return (
+                  <div key={row.id} className="flex flex-wrap items-end gap-3">
+                    <div className="flex min-w-[160px] max-w-[min(100%,240px)] flex-col gap-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {index === 0 ? 'Where' : 'And'}
+                      </label>
                       <SearchableSelect
-                        value={filter?.value || '__none__'}
+                        value={field ?? '__none__'}
                         onValueChange={(value) => {
-                          if (!field) return;
-                          const chosen = value === '__none__' ? '' : value;
-                          const next = fieldFilters.map((item, itemIndex) =>
-                            itemIndex === index ? { field, value: chosen } : item,
-                          );
-                          const committed = next.filter((item) => item.value);
-                          setFieldFilters(committed);
-                          pushFilters(search, status, committed);
+                          const nextField = FILTER_FIELDS.some((item) => item.key === value)
+                            ? (value as CustomerFilterField)
+                            : null;
+                          updateFilterRow(row.id, { field: nextField, value: '' });
                         }}
-                        placeholder={field ? 'Choose value' : 'Pick a field first'}
-                        searchPlaceholder="Search values…"
+                        placeholder="Choose field"
+                        searchPlaceholder="Search fields…"
                         className="h-10 w-full"
-                        disabled={!field}
                         options={[
-                          { value: '__none__', label: 'Any value' },
-                          ...options.map((option) => ({ value: option, label: option })),
+                          { value: '__none__', label: 'Any field' },
+                          ...FILTER_FIELDS.map((item) => ({ value: item.key, label: item.label })),
                         ]}
                       />
-                    )}
-                  </div>
-                  {filter ? (
+                    </div>
+                    <div className="flex min-w-[160px] max-w-[min(100%,280px)] flex-col gap-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {field === 'postcode' ? 'Area' : 'Is'}
+                      </label>
+                      {field === 'postcode' ? (
+                        <SearchableMultiSelect
+                          values={row.value ? splitPostcodeAreas(row.value) : []}
+                          onValuesChange={(areas) => {
+                            updateFilterRow(row.id, { value: areas.join(',') });
+                          }}
+                          placeholder="Any area"
+                          searchPlaceholder="Search areas, e.g. SW1"
+                          emptyText="No areas match."
+                          className="h-10 w-full"
+                          allowQueryValue
+                          options={options.map((option) => ({ value: option, label: option }))}
+                        />
+                      ) : (
+                        <SearchableSelect
+                          value={row.value || '__none__'}
+                          onValueChange={(value) => {
+                            if (!field) return;
+                            updateFilterRow(row.id, { value: value === '__none__' ? '' : value });
+                          }}
+                          placeholder={field ? 'Choose value' : 'Pick a field first'}
+                          searchPlaceholder="Search values…"
+                          className="h-10 w-full"
+                          disabled={!field}
+                          options={[
+                            { value: '__none__', label: 'Any value' },
+                            ...options.map((option) => ({ value: option, label: option })),
+                          ]}
+                        />
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"
@@ -470,207 +553,134 @@ export function RoundsCustomersTable({
                       className="h-10 px-2 text-muted-foreground"
                       aria-label="Remove filter"
                       onClick={() => {
-                        const next = fieldFilters.filter((_, itemIndex) => itemIndex !== index);
-                        setFieldFilters(next);
-                        pushFilters(search, status, next);
+                        const next = filterRows.filter((item) => item.id !== row.id);
+                        setFilterRows(next);
+                        pushFilters(search, status, committedFilters(next));
                       }}
                     >
                       <X className="size-4" />
                     </Button>
-                  ) : null}
-                </div>
-              );
-            })}
-            {fieldFilters.length > 0 && fieldFilters.length < MAX_FILTERS && fieldFilters.every((item) => item.value) ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                onClick={() => setFieldFilters([...fieldFilters, { field: 'service', value: '' }])}
-              >
-                <Plus className="size-3.5" />
-                Filter
-              </Button>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+                    {index === 0 ? clearButton : null}
+                  </div>
+                );
+              })}
+              {filterRows.length < MAX_FILTERS ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  onClick={() => setFilterRows([...filterRows, newFilterRow()])}
+                >
+                  <Plus className="size-3.5" />
+                  Add filter
+                </Button>
+              ) : null}
+            </div>
+        ) : null}
+      </div>
 
       {fetchError ? (
         <p className="text-sm text-destructive">{fetchError}</p>
       ) : null}
 
       {visible.length === 0 ? (
-        <Card className="glass-card border-border/80">
-          <CardContent className="flex min-h-[280px] flex-col items-center justify-center p-8 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-muted bg-muted/30">
-              <Users className="size-7 text-muted-foreground" />
-            </div>
-            {emptyBecauseFilter ? (
-              <>
-                <p className="mt-4 text-sm font-medium text-foreground">No matches</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Try a different search or status filter.
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="mt-4 text-sm font-medium text-foreground">No customers yet</p>
-                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Add your first customer to start planning the round.
-                </p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  <Button asChild>
-                    <Link href="/customers/new">Add customer</Link>
-                  </Button>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+        emptyBecauseFilter ? (
+          <EmptyState icon={Search} title="No matches" body="Try a different search, status or filter." />
+        ) : (
+          <EmptyState
+            icon={Users}
+            title="No customers yet"
+            body="Add your first customer to start planning the round, or bring them in from a spreadsheet."
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button asChild>
+                  <Link href="/customers/new">Add customer</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/import">
+                    <Upload className="mr-1.5 size-4" />
+                    Import a spreadsheet
+                  </Link>
+                </Button>
+              </div>
+            }
+          />
+        )
       ) : (
-        <Card className="glass-card overflow-hidden border-border/80">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Money</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Postcode</TableHead>
-                  <TableHead>Agreements</TableHead>
-                  <TableHead>Next visit</TableHead>
-                  <TableHead className="w-12">
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visible.map((customer) => (
-                  <TableRow
-                    key={customer.id}
-                    className={cn(
-                      'cursor-pointer',
-                      !customer.is_active && 'opacity-70',
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-(--look-card-shadow)">
+          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_7rem_9rem_7rem_2rem] gap-4 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid">
+            <span>Customer</span>
+            <span>Service</span>
+            <span>How often</span>
+            <span>Next visit</span>
+            <span>Money</span>
+            <span className="sr-only">Actions</span>
+          </div>
+          <ul className="divide-y divide-border">
+            {visible.map((customer) => (
+              <li
+                key={customer.id}
+                className={cn(
+                  'relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/50',
+                  'md:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_7rem_9rem_7rem_2rem]',
+                  !customer.is_active && 'opacity-70',
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar name={customer.name} tone={customer.owed_amount > 0 ? 'rose' : 'rounds'} />
+                  <div className="min-w-0">
+                    <Link
+                      href={`/customers/${customer.id}`}
+                      title={customer.name}
+                      className="block truncate font-medium text-foreground after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                    >
+                      {customer.name}
+                    </Link>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {[customer.postcode?.toUpperCase(), phoneLabel(customer) !== '—' ? phoneLabel(customer) : null]
+                        .filter(Boolean)
+                        .join(' · ') || 'No address or phone yet'}
+                    </p>
+                  </div>
+                  {!customer.is_active ? <Tag tone="slate">Inactive</Tag> : null}
+                </div>
+
+                <div className="relative z-10 flex items-center justify-end md:hidden" onClick={(e) => e.stopPropagation()}>
+                  <RowMenu customer={customer} onAction={openConfirm} />
+                </div>
+
+                <p className="col-span-2 truncate text-sm text-muted-foreground md:col-span-1" title={customer.services.join(', ')}>
+                  {servicesLabel(customer)}
+                  {customer.agreement_count !== customer.active_agreement_count ? (
+                    <span className="text-xs"> · {customer.active_agreement_count} of {customer.agreement_count} active</span>
+                  ) : null}
+                </p>
+                <p className="hidden truncate text-sm text-muted-foreground md:block">{firstOf(customer.frequencies)}</p>
+                <div className="col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:contents">
+                  <div className="md:block">
+                    <NextVisit date={customer.next_visit_date} today={today} />
+                  </div>
+                  <div>
+                    {customer.owed_amount > 0 ? (
+                      <Tag tone="rose" className="tabular-nums">Owes {formatGbp(customer.owed_amount)}</Tag>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Paid up</span>
                     )}
-                    onClick={() => router.push(`/customers/${customer.id}`)}
-                  >
-                    <TableCell>
-                      <Link
-                        href={`/customers/${customer.id}`}
-                        className="font-medium text-foreground hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {customer.name}
-                      </Link>
-                      {!customer.is_active ? (
-                        <span className="ml-2 text-xs text-muted-foreground">Inactive</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {customer.owed_amount > 0 ? (
-                        <span className="inline-flex rounded-full border border-rose-300/70 bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-800 dark:border-rose-400/30 dark:bg-rose-500/15 dark:text-rose-200">
-                          Overdue {formatGbp(customer.owed_amount)}
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full border border-emerald-300/70 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200">
-                          Up to date
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="tabular-nums text-muted-foreground">
-                      {phoneLabel(customer)}
-                    </TableCell>
-                    <TableCell className="uppercase text-muted-foreground">
-                      {customer.postcode ?? '—'}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {customer.active_agreement_count}
-                      {customer.agreement_count !== customer.active_agreement_count
-                        ? ` / ${customer.agreement_count}`
-                        : null}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          'inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                          whenOf(customer.next_visit_date, today) === 'overdue' &&
-                            'border-rose-300/70 bg-rose-50 text-rose-800',
-                          whenOf(customer.next_visit_date, today) === 'week' &&
-                            'border-sky-300/70 bg-sky-50 text-sky-900',
-                          whenOf(customer.next_visit_date, today) === 'later' &&
-                            'border-emerald-300/70 bg-emerald-50 text-emerald-900',
-                          whenOf(customer.next_visit_date, today) === 'none' &&
-                            'border-border bg-muted/40 text-muted-foreground',
-                        )}
-                      >
-                        {formatVisitDate(customer.next_visit_date)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            aria-label={`Actions for ${customer.name}`}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem asChild>
-                            <Link
-                              href={`/customers/${customer.id}`}
-                              className="gap-2"
-                            >
-                              <Eye className="size-3.5" />
-                              View
-                            </Link>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem asChild>
-                            <Link
-                              href={`/customers/${customer.id}/edit`}
-                              className="gap-2"
-                            >
-                              <Pencil className="size-3.5" />
-                              Edit
-                            </Link>
-                          </DropdownMenuItem>
-                          {customer.is_active ? (
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => openConfirm(customer, 'deactivate')}
-                            >
-                              <UserMinus className="size-3.5" />
-                              Deactivate
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem
-                              onClick={() => openConfirm(customer, 'reactivate')}
-                            >
-                              <UserCheck className="size-3.5" />
-                              Reactivate
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  </div>
+                </div>
+                <div className="relative z-10 hidden justify-end md:flex" onClick={(e) => e.stopPropagation()}>
+                  <RowMenu customer={customer} onAction={openConfirm} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      <FloatingAddButton
-        href="/customers/new"
-        label="Add customer"
-        desktopLabel={false}
-      />
+      <div className="lg:hidden">
+        <FloatingAddButton href="/customers/new" label="Add customer" desktopLabel={false} />
+      </div>
 
       <Dialog
         open={confirmTarget != null}

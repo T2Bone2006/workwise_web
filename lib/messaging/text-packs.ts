@@ -15,7 +15,7 @@ export async function createTextPackCheckout(
     tenantId: string;
     userEmail: string | null;
     packKey: TextPackKey;
-    returnTo: 'dashboard' | 'phone';
+    returnTo: 'dashboard' | 'phone' | 'lite';
   },
 ): Promise<{ url: string } | { error: string }> {
   const pack = textPackByKey(p.packKey);
@@ -70,7 +70,9 @@ export async function createTextPackCheckout(
   const cancelUrl =
     p.returnTo === 'phone'
       ? `${appUrl}/connect/texts?status=cancelled`
-      : `${appUrl}/messages`;
+      : p.returnTo === 'lite'
+        ? `${appUrl}/lite/widget#texts`
+        : `${appUrl}/messages`;
 
   const session = await getStripe().checkout.sessions.create({
     mode: 'payment',

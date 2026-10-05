@@ -48,9 +48,13 @@ export async function login(
     });
 
       if (error) {
+      // Supabase only says "banned" once the password was right: a closed account (Close my account).
+      const closed = (error as { code?: string }).code === 'user_banned';
       return {
         success: false,
-        error: 'Invalid email or password',
+        error: closed
+          ? 'This account has been closed. Check your email for the details.'
+          : 'Invalid email or password',
         attemptedAt: Date.now(),
       };
     }

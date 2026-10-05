@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { friendlyTime, summariseToday, type RoundVisit } from '@/lib/rounds/today-strip';
+import { friendlyTime, listTodayStops, summariseToday, type RoundVisit } from '@/lib/rounds/today-strip';
 
 function visit(over: Partial<RoundVisit> & { id: string }): RoundVisit {
   return {
@@ -65,5 +65,38 @@ describe('summariseToday', () => {
 
   it('copes with an empty day', () => {
     expect(summariseToday([])).toMatchObject({ stops: 0, done: 0, toGo: 0, plannedAmount: 0, next: null });
+  });
+});
+
+describe('listTodayStops', () => {
+  it('lists every house in route order with its state, and agrees with summariseToday', () => {
+    const visits = [
+      visit({ id: '1', status: 'completed', final_amount: 18 }),
+      visit({ id: '2', status: 'cancelled', quoted_amount: 12 }),
+      visit({ id: '3', scheduled_time: '14:10:00', quoted_amount: 20 }),
+      visit({ id: '4' }),
+    ];
+    const rows = listTodayStops(visits);
+    expect(rows.map((r) => r.state)).toEqual(['done', 'skipped', 'next', 'todo']);
+    expect(rows[0]!.amount).toBe(18);
+    expect(rows[2]).toMatchObject({ customerName: 'Customer 3', street: '3 Elm Road', time: '2:10pm', amount: 20 });
+    const s = summariseToday(visits);
+    expect(rows.filter((r) => r.state === 'done').length).toBe(s.done);
+    expect(rows.filter((r) => r.state === 'skipped').length).toBe(s.skipped);
+    expect(rows.filter((r) => r.state === 'next' || r.state === 'todo').length).toBe(s.toGo);
+  });
+
+  it('puts several visits at one house on one row', () => {
+    const rows = listTodayStops([
+      visit({ id: 'a', customer_id: 'c', address: '9 Elm Road', job_description: 'Windows', quoted_amount: 15 }),
+      visit({ id: 'b', customer_id: 'c', address: '9 Elm Road', job_description: 'Conservatory roof', quoted_amount: 30 }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ state: 'next', work: 'Windows, Conservatory roof', amount: 45 });
+  });
+
+  it('has no next stop when everything is done', () => {
+    const rows = listTodayStops([visit({ id: '1', status: 'completed' })]);
+    expect(rows.map((r) => r.state)).toEqual(['done']);
   });
 });

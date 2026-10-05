@@ -65,7 +65,7 @@ export function DayWeather({
         {weather.highC}°{showLabel ? ` ${weather.label}` : ''}
       </span>
       {weather.wet && !(showLabel && WET_SYMBOLS.includes(weather.symbol)) ? (
-        <span aria-hidden="true" className="font-medium text-sky-700 dark:text-sky-300">
+        <span aria-hidden="true" className="font-medium text-sky-700 dark:text-sky-300 [[data-look=new]_&]:text-(--tone-amber-text)">
           · Rain likely
         </span>
       ) : null}
@@ -81,7 +81,7 @@ export function WeatherNow({ weather }: { weather: DayWeatherData }) {
       <Icon className="size-7 text-sky-600 dark:text-sky-300" aria-hidden="true" />
       <div aria-hidden="true">
         <p className="text-sm font-medium leading-tight">{weather.label}</p>
-        <p className={cn('text-xs', weather.wet ? 'font-medium text-sky-700 dark:text-sky-300' : 'text-muted-foreground')}>
+        <p className={cn('text-xs', weather.wet ? 'font-medium text-sky-700 dark:text-sky-300 [[data-look=new]_&]:text-(--tone-amber-text)' : 'text-muted-foreground')}>
           {weather.wet ? `Rain likely · ${weather.rainMm} mm` : 'Dry for the working day'}
         </p>
       </div>

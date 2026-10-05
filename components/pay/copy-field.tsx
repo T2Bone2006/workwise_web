@@ -40,9 +40,9 @@ export function CopyField(props: {
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 rounded-lg px-3 py-2.5',
+        'flex flex-col gap-1 rounded-xl px-3.5 py-2.5',
         highlighted
-          ? 'border border-amber-500/40 bg-amber-500/10'
+          ? 'border border-(--tone-amber-line) bg-(--tone-amber-soft)'
           : 'border border-transparent bg-muted/60',
       )}
     >

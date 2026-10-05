@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useCallback, useContext, useLayoutEffect, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
-
 type Crumb = { label: string; href?: string; nameId?: string };
 
 const BreadcrumbNamesContext = createContext<{
@@ -50,7 +48,6 @@ const SECTION: Record<string, string> = {
   calendar: 'Calendar',
   services: 'Services',
   payments: 'Payments',
-  bank: 'Bank',
   messages: 'Messages',
   expenses: 'Expenses',
   settings: 'Settings',
@@ -122,8 +119,14 @@ export function crumbsForPath(pathname: string): Crumb[] {
   }
 
   if (root === 'lite') {
+    if (a === 'leads') return [home, { label: 'Lead' }];
+    if (a === 'conversations' && b) return [home, { label: 'Conversation' }];
     if (a === 'conversations') return [home, { label: 'Conversations' }];
+    if (a === 'widget' && b === 'pricing') {
+      return [home, { label: 'Widget', href: '/lite/widget' }, { label: 'How you price' }];
+    }
     if (a === 'widget') return [home, { label: 'Widget' }];
+    if (a === 'setup') return [home, { label: 'Set up' }];
     return [{ label: section }];
   }
 
@@ -152,7 +155,9 @@ export function PageBreadcrumb() {
           return (
             <li key={`${crumb.href ?? crumb.label}-${index}`} className="flex items-center gap-1">
               {index > 0 ? (
-                <ChevronRight className="size-3.5 shrink-0 opacity-60" aria-hidden />
+                <span className="text-muted-foreground/70" aria-hidden="true">
+                  /
+                </span>
               ) : null}
               {last || !crumb.href ? (
                 <span

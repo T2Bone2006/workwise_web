@@ -15,7 +15,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { sendSetupRequest } from '@/lib/actions/rounds/setup-request';
 import { cn } from '@/lib/utils';
 
-export type StuckLinkProps = { context: 'review' | 'read_failed' | 'done' };
+export type StuckLinkProps = {
+  context: 'review' | 'read_failed' | 'done';
+  /** Open the dialog from somewhere else (the "Do it for me" card). With these set, the small link is not shown. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+};
 
 const ACCEPT = '.csv,.xls,.xlsx,.pdf,.jpg,.jpeg,.png,.webp,.txt';
 const MAX_FILES = 5;
@@ -26,8 +31,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function StuckLink({ context }: StuckLinkProps) {
-  const [open, setOpen] = useState(false);
+export function StuckLink({ context, open: openProp, onOpenChange }: StuckLinkProps) {
+  const [ownOpen, setOwnOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : ownOpen;
+  const setOpen = (next: boolean) => {
+    if (!controlled) setOwnOpen(next);
+    onOpenChange?.(next);
+  };
   const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
@@ -71,13 +82,15 @@ export function StuckLink({ context }: StuckLinkProps) {
 
   return (
     <div className="pt-1">
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="text-left text-xs text-muted-foreground underline-offset-4 hover:underline"
-      >
-        Stuck? Send us your file and we&apos;ll help.
-      </button>
+      {controlled ? null : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-left text-xs text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Stuck? Send us your file and we&apos;ll help.
+        </button>
+      )}
 
       <Dialog
         open={open}

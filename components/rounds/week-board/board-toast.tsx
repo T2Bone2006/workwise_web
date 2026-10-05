@@ -106,9 +106,9 @@ function ToastBody(props: {
         <span
           className={cn(
             'flex size-8 shrink-0 items-center justify-center rounded-full',
-            tone === 'success' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
-            tone === 'danger' && 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300',
-            tone === 'working' && 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300',
+            tone === 'success' && 'bg-(--tone-emerald-soft) text-(--tone-emerald-text)',
+            tone === 'danger' && 'bg-(--tone-rose-soft) text-(--tone-rose-text)',
+            tone === 'working' && 'bg-(--tone-sky-soft) text-(--tone-sky-text)',
           )}
         >
           {tone === 'working' ? (

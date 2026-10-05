@@ -18,6 +18,8 @@ import { ChooseSource } from '@/components/import/rounds/choose-source';
 import { CustomerReviewTable } from '@/components/import/rounds/customer-review-table';
 import { EMPTY_DEFAULTS, ImportDefaults, type ImportDefaultsState } from '@/components/import/rounds/import-defaults';
 import { ImportDone } from '@/components/import/rounds/import-done';
+import { ImportSteps } from '@/components/import/rounds/import-steps';
+import { Tag } from '@/components/look';
 import { StuckLink } from '@/components/import/rounds/stuck-link';
 import { afterImport, type AfterImportResult } from '@/lib/actions/rounds/import-after';
 import { checkImportFile } from '@/lib/actions/rounds/import-check';
@@ -452,6 +454,7 @@ export function RoundsImportWizard({ proImportHref }: { proImportHref?: string }
 
   return (
     <div className="space-y-5">
+      <ImportSteps current={step === 'done' ? 3 : step === 'review' || step === 'saving' ? 2 : 1} />
       {proImportHref ? (
         <p className="text-sm text-muted-foreground">
           Importing jobs instead?{' '}
@@ -505,7 +508,10 @@ export function RoundsImportWizard({ proImportHref }: { proImportHref?: string }
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-lg font-semibold">Check what we read</h2>
+              <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
+                {plural(counts.ready + counts.toFix, 'customer', 'customers')} found
+                {counts.toFix > 0 ? <Tag tone="amber">{counts.toFix} need a look</Tag> : <Tag tone="emerald">All ready</Tag>}
+              </h2>
               <p className="text-sm text-muted-foreground">
                 {source === 'spreadsheet' ? 'Spreadsheet' : 'Round book'}: {fileName} · {plural(prepared.length, 'row', 'rows')}. Fix anything in red, then press Import.
               </p>

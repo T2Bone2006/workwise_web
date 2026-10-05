@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CalendarClock, CheckCircle2, SkipForward, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { IconChip, toneClasses, type Tone } from '@/components/look';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -137,13 +138,13 @@ export function ReplyActions(props: {
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-border/70 bg-muted/25 px-2.5 py-2.5 dark:bg-muted/20">
+      <div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
         <Choice
           title="Skip"
           detail={visitDay ? `Take ${visitDay} off` : 'Off the round'}
           icon={SkipForward}
-          glow="rgb(244 63 94)"
+          tone="rose"
           disabled={pendingAction || !hasJobs}
           onClick={() => run('skip')}
         />
@@ -151,7 +152,7 @@ export function ReplyActions(props: {
           title="Keep"
           detail={visitDay ? `Keep as ${visitDay}` : 'Keep as is'}
           icon={CheckCircle2}
-          glow="rgb(16 185 129)"
+          tone="emerald"
           disabled={pendingAction || !hasJobs}
           onClick={() => run('keep')}
         />
@@ -160,7 +161,7 @@ export function ReplyActions(props: {
             title="Move"
             detail={moveDay}
             icon={CalendarClock}
-            glow="rgb(245 158 11)"
+            tone="amber"
             disabled={pendingAction || !hasJobs}
             onClick={() => run('move', moveDate)}
           />
@@ -171,7 +172,7 @@ export function ReplyActions(props: {
                 title="Move"
                 detail={pickedYmd && dayLabel(pickedYmd) ? dayLabel(pickedYmd)! : 'Pick a day'}
                 icon={CalendarClock}
-                glow="rgb(245 158 11)"
+                tone="amber"
                 disabled={pendingAction || !hasJobs}
               />
             </PopoverTrigger>
@@ -246,12 +247,11 @@ const Choice = forwardRef<
     title: string;
     detail: string;
     icon: LucideIcon;
-    glow: string;
+    tone: Tone;
     disabled: boolean;
     onClick?: () => void;
   }
->(function Choice(props, ref) {
-  const Icon = props.icon;
+>(function Choice({ tone, ...props }, ref) {
   return (
     <button
       ref={ref}
@@ -259,25 +259,17 @@ const Choice = forwardRef<
       disabled={props.disabled}
       onClick={props.onClick}
       className={cn(
-        'group inline-flex min-h-[2.5rem] w-full items-center justify-between gap-2 rounded-full border border-solid px-2.5 py-2 text-left text-sm transition-all duration-200 sm:px-3.5',
-        'hover:-translate-y-0.5',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0',
+        'group flex w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-3 text-left text-sm shadow-(--look-card-shadow) transition-colors',
+        'hover:bg-muted/50',
+        'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        toneClasses(tone).border,
       )}
-      style={{
-        borderColor: `color-mix(in srgb, ${props.glow} 55%, transparent)`,
-        background: `linear-gradient(145deg, color-mix(in srgb, ${props.glow} 26%, transparent), color-mix(in srgb, ${props.glow} 10%, transparent))`,
-        boxShadow: `0 8px 20px -12px color-mix(in srgb, ${props.glow} 70%, transparent), inset 0 1px 0 rgba(255,255,255,0.5)`,
-      }}
     >
-      <span className="inline-flex min-w-0 items-center gap-2">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-white/50 bg-white/55 dark:border-white/15 dark:bg-white/10">
-          <Icon className="size-3.5 shrink-0" style={{ color: props.glow }} strokeWidth={2.4} />
-        </span>
-        <span className="truncate font-semibold text-foreground">{props.title}</span>
-      </span>
-      <span className="shrink-0 rounded-full border border-white/45 bg-white/60 px-2 py-0.5 text-[11px] font-semibold text-foreground dark:border-white/10 dark:bg-white/10 sm:text-xs">
-        {props.detail}
+      <IconChip icon={props.icon} tone={tone} />
+      <span className="min-w-0">
+        <span className="block font-semibold text-foreground">{props.title}</span>
+        <span className="block text-xs text-muted-foreground">{props.detail}</span>
       </span>
     </button>
   );

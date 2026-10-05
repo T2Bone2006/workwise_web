@@ -2,11 +2,9 @@
 
 import type { ReactNode } from 'react';
 import { Clock, MapPin } from 'lucide-react';
+import { Tag, toneClasses } from '@/components/look';
 import { cn } from '@/lib/utils';
-import {
-  JOB_STATUS_DISPLAY,
-  type JobStatusUi,
-} from '@/lib/job-status-display';
+import { JOB_STATUS_DISPLAY, type JobStatusUi } from '@/lib/job-status-display';
 import { SKIP_REASON_LABELS, type SkipReason } from '@/lib/rounds/skip-reasons';
 import type { VisitRow } from '@/lib/data/rounds/visits';
 import type { SmsBrand } from '@/lib/messaging/templates';
@@ -17,54 +15,19 @@ const priceFormat = new Intl.NumberFormat('en-GB', {
   currency: 'GBP',
 });
 
-/** Accent bar + soft wash so the row reads the visit status at a glance. */
-const STATUS_ACCENT: Record<
-  string,
-  { bar: string; wash: string; glow: string }
-> = {
-  completed: {
-    bar: 'bg-emerald-500',
-    wash: 'from-emerald-500/[0.08] via-transparent to-transparent dark:from-emerald-400/[0.12]',
-    glow: 'rgb(16 185 129)',
-  },
-  cancelled: {
-    bar: 'bg-rose-500',
-    wash: 'from-rose-500/[0.08] via-transparent to-transparent dark:from-rose-400/[0.12]',
-    glow: 'rgb(244 63 94)',
-  },
-  in_progress: {
-    bar: 'bg-blue-500',
-    wash: 'from-blue-500/[0.10] via-transparent to-transparent dark:from-blue-400/[0.14]',
-    glow: 'rgb(59 130 246)',
-  },
-  en_route: {
-    bar: 'bg-blue-500',
-    wash: 'from-blue-500/[0.10] via-transparent to-transparent dark:from-blue-400/[0.14]',
-    glow: 'rgb(59 130 246)',
-  },
-  arrived: {
-    bar: 'bg-blue-500',
-    wash: 'from-blue-500/[0.10] via-transparent to-transparent dark:from-blue-400/[0.14]',
-    glow: 'rgb(59 130 246)',
-  },
-  paused: {
-    bar: 'bg-amber-600',
-    wash: 'from-amber-600/[0.10] via-transparent to-transparent dark:from-amber-500/[0.14]',
-    glow: 'rgb(180 83 9)',
-  },
-  assigned: {
-    bar: 'bg-amber-500',
-    wash: 'from-amber-500/[0.08] via-transparent to-transparent dark:from-amber-400/[0.12]',
-    glow: 'rgb(245 158 11)',
-  },
-  accepted: {
-    bar: 'bg-amber-500',
-    wash: 'from-amber-500/[0.08] via-transparent to-transparent dark:from-amber-400/[0.12]',
-    glow: 'rgb(245 158 11)',
-  },
-};
+type AccentTone = 'emerald' | 'rose' | 'sky' | 'amber' | 'slate';
 
-const FALLBACK_ACCENT = STATUS_ACCENT.assigned;
+/** The visit's status as a colour: bar, number bubble and tag all follow it (same as the phone). */
+const STATUS_TONE: Record<string, AccentTone> = {
+  completed: 'emerald',
+  cancelled: 'rose',
+  in_progress: 'sky',
+  en_route: 'sky',
+  arrived: 'sky',
+  paused: 'amber',
+  assigned: 'slate',
+  accepted: 'slate',
+};
 
 function roundsStatusKey(status: string): JobStatusUi {
   if (status === 'cancelled') return 'cancelled';
@@ -89,42 +52,16 @@ function roundsStatusLabel(status: string): string {
   return JOB_STATUS_DISPLAY[roundsStatusKey(status)]?.label ?? status;
 }
 
-function VisitStatusBadge({ status }: { status: string }) {
-  const key = roundsStatusKey(status);
-  const meta = JOB_STATUS_DISPLAY[key];
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide',
-        meta?.badgeClass
-      )}
-    >
-      {roundsStatusLabel(status)}
-    </span>
-  );
+function VisitStatusBadge({ status, next = false }: { status: string; next?: boolean }) {
+  if (next) return <Tag tone="sky">Next</Tag>;
+  return <Tag tone={STATUS_TONE[status] ?? 'slate'}>{roundsStatusLabel(status)}</Tag>;
 }
 
-const PAYMENT_STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  paid: {
-    label: 'Paid',
-    className:
-      'border-emerald-300/65 bg-gradient-to-br from-emerald-100/90 to-teal-50/70 text-emerald-950 dark:border-emerald-700/40 dark:from-emerald-950/40 dark:to-teal-950/20 dark:text-emerald-200',
-  },
-  partial: {
-    label: 'Part paid',
-    className:
-      'border-amber-300/65 bg-gradient-to-br from-amber-100/90 to-yellow-50/70 text-amber-950 dark:border-amber-700/40 dark:from-amber-950/40 dark:to-yellow-950/20 dark:text-amber-200',
-  },
-  unpaid: {
-    label: 'Unpaid',
-    className:
-      'border-rose-300/65 bg-gradient-to-br from-rose-100/90 to-red-50/70 text-rose-900 dark:border-rose-800/40 dark:from-rose-950/40 dark:to-red-950/20 dark:text-rose-200',
-  },
-  waived: {
-    label: 'Waived',
-    className:
-      'border-slate-300/65 bg-gradient-to-br from-slate-100/90 to-slate-50/70 text-slate-700 dark:border-slate-600/40 dark:from-slate-800/45 dark:to-slate-900/30 dark:text-slate-200',
-  },
+const PAYMENT_STATUS_BADGE: Record<string, { label: string; tone: AccentTone }> = {
+  paid: { label: 'Paid', tone: 'emerald' },
+  partial: { label: 'Part paid', tone: 'amber' },
+  unpaid: { label: 'Unpaid', tone: 'rose' },
+  waived: { label: 'Waived', tone: 'slate' },
 };
 
 /** Only a done visit can be owed; on a planned one "Unpaid" read like the customer was behind. */
@@ -138,16 +75,7 @@ function PaymentStatusBadge({
   if (!status || visitStatus !== 'completed') return null;
   const meta = PAYMENT_STATUS_BADGE[status];
   if (!meta) return null;
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide backdrop-blur-sm',
-        meta.className
-      )}
-    >
-      {meta.label}
-    </span>
-  );
+  return <Tag tone={meta.tone}>{meta.label}</Tag>;
 }
 
 function skipLabel(reason: string | null): string | null {
@@ -165,6 +93,7 @@ export function VisitStopCard({
   leading,
   className,
   dimmed,
+  isNext,
   brand,
 }: {
   visit: VisitRow;
@@ -176,6 +105,8 @@ export function VisitStopCard({
   leading?: ReactNode;
   className?: string;
   dimmed?: boolean;
+  /** The next stop still to do (blue, like the phone). */
+  isNext?: boolean;
   brand: SmsBrand;
 }) {
   const services = visits && visits.length > 0 ? visits : [visit];
@@ -184,7 +115,7 @@ export function VisitStopCard({
     if (row.status === 'cancelled') return sum;
     return sum + (row.final_amount ?? row.quoted_amount ?? 0);
   }, 0);
-  const accent = STATUS_ACCENT[visit.status] ?? FALLBACK_ACCENT;
+  const tone: AccentTone = isNext && (visit.status === 'assigned' || visit.status === 'accepted') ? 'sky' : (STATUS_TONE[visit.status] ?? 'slate');
   const time = services
     .map((row) => row.scheduled_time?.slice(0, 5))
     .filter((value): value is string => Boolean(value))
@@ -196,23 +127,14 @@ export function VisitStopCard({
   return (
     <li
       className={cn(
-        'group relative list-none overflow-hidden rounded-2xl border border-border/70',
-        'bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]',
-        'transition-all duration-200 sm:hover:-translate-y-0.5 sm:hover:shadow-[var(--shadow-glow-sm-value)]',
-        'dark:border-white/[0.06]',
+        'group relative list-none overflow-hidden rounded-2xl border border-border bg-card shadow-(--look-card-shadow)',
+        'transition-shadow duration-200 sm:hover:shadow-md',
         dimmed && 'opacity-60',
         className
       )}
     >
       <div
-        className={cn('pointer-events-none absolute inset-y-0 left-0 w-1', accent.bar)}
-        aria-hidden
-      />
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-0 bg-gradient-to-r',
-          accent.wash
-        )}
+        className={cn('pointer-events-none absolute inset-y-0 left-0 w-1', toneClasses(tone).solid)}
         aria-hidden
       />
 
@@ -223,9 +145,9 @@ export function VisitStopCard({
             <div
               className="flex size-8 shrink-0 items-center justify-center rounded-full border text-sm font-bold tabular-nums sm:size-9"
               style={{
-                borderColor: accent.glow.replace(')', ' / 0.45)'),
-                backgroundColor: accent.glow.replace(')', ' / 0.12)'),
-                color: accent.glow,
+                borderColor: `color-mix(in srgb, var(--tone-${tone}-solid) 45%, transparent)`,
+                backgroundColor: `var(--tone-${tone}-soft)`,
+                color: `var(--tone-${tone}-text)`,
               }}
               aria-label={`Stop ${position}`}
             >
@@ -237,12 +159,12 @@ export function VisitStopCard({
               <p className="text-[15px] font-semibold tracking-tight text-foreground sm:text-base">
                 {visit.customer_name ?? 'Customer'}
               </p>
-              <VisitStatusBadge status={visit.status} />
+              <VisitStatusBadge status={visit.status} next={tone === 'sky' && visit.status !== 'in_progress'} />
               {several ? null : (
                 <PaymentStatusBadge status={visit.payment_status} visitStatus={visit.status} />
               )}
               {amount != null ? (
-                <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground">
                   {priceFormat.format(amount)}
                 </span>
               ) : null}
@@ -275,7 +197,7 @@ export function VisitStopCard({
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               <span className="font-mono tabular-nums">{visit.reference_number}</span>
               {skippedWhy ? (
-                <span className="text-rose-700/90 dark:text-rose-300/90">
+                <span className="text-(--tone-rose-text)">
                   · {skippedWhy}
                 </span>
               ) : null}

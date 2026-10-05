@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createClientFromBearer, resolveTenantForUser } from '@/lib/auth/bearer';
+import { tenantHasRounds } from '@/lib/messaging/rounds-tenants';
 import type { Actor } from '@/lib/rounds/visit-transitions';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export type RoundsApiContext = {
   supabase: SupabaseClient;
@@ -30,6 +32,16 @@ export async function requireRoundsApi(
       ok: false,
       response: NextResponse.json(
         { error: 'Forbidden' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      ),
+    };
+  }
+
+  if (!(await tenantHasRounds(createAdminClient(), tenantId))) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'plan_ended' },
         { status: 403, headers: { 'Cache-Control': 'no-store' } },
       ),
     };

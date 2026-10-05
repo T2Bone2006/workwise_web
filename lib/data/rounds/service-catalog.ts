@@ -152,3 +152,40 @@ export async function getServicePresetGroups(): Promise<{
     };
   }
 }
+
+/** How many different customers each catalogue service is in use for (active agreements only). */
+export function countCustomersByService(
+  rows: { service_catalog_id: string | null; customer_id: string }[],
+): Record<string, number> {
+  const seen = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.service_catalog_id) continue;
+    const set = seen.get(row.service_catalog_id) ?? new Set<string>();
+    set.add(row.customer_id);
+    seen.set(row.service_catalog_id, set);
+  }
+  return Object.fromEntries([...seen.entries()].map(([id, set]) => [id, set.size]));
+}
+
+export async function getServiceUsage(tenantId: string): Promise<Record<string, number>> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('service_agreements')
+      .select('service_catalog_id, customer_id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .not('service_catalog_id', 'is', null)
+      .limit(10000);
+    if (error) {
+      console.error('[getServiceUsage]', error);
+      return {};
+    }
+    return countCustomersByService(
+      (data ?? []) as { service_catalog_id: string | null; customer_id: string }[],
+    );
+  } catch (err) {
+    console.error('[getServiceUsage]', err);
+    return {};
+  }
+}

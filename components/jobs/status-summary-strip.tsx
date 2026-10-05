@@ -10,6 +10,9 @@ import {
   RadioTower,
   UserCheck,
 } from 'lucide-react';
+import { IconChip } from '@/components/look/icon-chip';
+import { toneClasses, type Tone } from '@/components/look/tones';
+import { useLook } from '@/components/look/use-look';
 import { cn } from '@/lib/utils';
 
 export type SummaryStripItem = {
@@ -17,6 +20,8 @@ export type SummaryStripItem = {
   title: string;
   icon: LucideIcon;
   glow: string;
+  /** Colour by meaning in the new look (Rounds and Lite); the old look uses `glow`. */
+  tone?: Tone;
   /** Displayed in the trailing pill — number or formatted string (e.g. £90). */
   count: number | string;
 };
@@ -47,6 +52,49 @@ export function SummaryStrip({
   className,
   gridClassName = 'grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7',
 }: SummaryStripProps) {
+  const look = useLook();
+  if (look === 'new') {
+    return (
+      <div className={cn('flex flex-col gap-2', className)} role="group" aria-label={label}>
+        <p className="px-0.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{label}</span>
+          {hint ? <span className="ml-2 hidden sm:inline">{hint}</span> : null}
+        </p>
+        <div className={cn('grid', gridClassName)}>
+          {items.map((item) => {
+            const active = activeKey === item.key;
+            const tone = toneClasses(item.tone ?? 'slate');
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onSelect(item.key)}
+                aria-pressed={active}
+                title={active ? `Clear ${item.title} filter` : `Show ${item.title}`}
+                className={cn(
+                  'flex min-h-[4rem] min-w-0 items-center gap-3 rounded-2xl border bg-card px-3.5 py-2.5 text-left transition-all',
+                  'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                  active
+                    ? cn(tone.edge, tone.soft, 'ring-1 ring-current/10 shadow-(--look-card-shadow)')
+                    : 'border-border hover:border-(--tone-slate-solid)/40',
+                )}
+              >
+                <IconChip icon={item.icon} tone={item.tone ?? 'slate'} />
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block truncate text-[13px]', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>
+                    {item.title}
+                  </span>
+                  <span className={cn('block truncate text-xl leading-tight font-semibold tabular-nums', item.tone ? tone.figure : 'text-foreground')}>
+                    {item.count}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(

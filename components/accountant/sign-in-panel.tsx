@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BusinessMark } from '@/components/look';
 import { Input } from '@/components/ui/input';
 
 type Step = 'start' | 'code';
@@ -75,18 +75,19 @@ export function SignInPanel({
   };
 
   return (
-    <div className="mx-auto w-full max-w-md py-10">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">{businessName}&apos;s books</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+    <div className="mx-auto w-full max-w-md">
+      <div className="mb-4 flex items-center gap-3 px-1">
+        <BusinessMark name={businessName} logoUrl={null} size="lg" />
+        <h1 className="text-xl font-semibold tracking-tight">{businessName}&apos;s books</h1>
+      </div>
+      <div className="rounded-3xl border border-border bg-card p-6 shadow-(--look-card-shadow)">
+        <div className="space-y-4">
           {step === 'start' ? (
             <>
               <p className="text-sm text-muted-foreground">
                 We&apos;ll email a 6-digit code to {maskedEmail}.
               </p>
-              <Button className="w-full" disabled={pending} onClick={sendCode}>
+              <Button className="h-11 w-full rounded-full" disabled={pending} onClick={sendCode}>
                 {pending ? <Loader2 className="size-4 animate-spin" /> : null} Email me a code
               </Button>
             </>
@@ -107,7 +108,7 @@ export function SignInPanel({
                   setCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                 }}
               />
-              <Button type="submit" className="w-full" disabled={pending || code.length !== 6}>
+              <Button type="submit" className="h-11 w-full rounded-full" disabled={pending || code.length !== 6}>
                 {pending ? <Loader2 className="size-4 animate-spin" /> : null} Open the books
               </Button>
               <button
@@ -120,9 +121,9 @@ export function SignInPanel({
               </button>
             </form>
           )}
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </CardContent>
-      </Card>
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+        </div>
+      </div>
       <p className="mt-4 text-center text-xs text-muted-foreground">
         Read-only access. Nothing here can be changed.
       </p>

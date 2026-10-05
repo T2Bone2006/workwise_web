@@ -6,6 +6,7 @@ import { PayByBankButton, payByBankBanner } from '@/components/pay/pay-by-bank-b
 import { PayBanner, PayShell } from '@/components/pay/pay-shell';
 import { loadInvoiceByToken } from '@/lib/data/payments/public-pay';
 import { toInvoiceViewModel } from '@/lib/invoices/view-model';
+import { Tag, type Tone } from '@/components/look';
 import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -15,20 +16,11 @@ type InvoicePayPageProps = {
   searchParams: Promise<{ paid?: string; error?: string; bank?: string }>;
 };
 
-function statusPill(stamp: 'PAID' | 'VOID' | 'OVERDUE' | null): {
-  label: string;
-  className: string;
-} {
-  if (stamp === 'VOID') {
-    return { label: 'Cancelled', className: 'bg-muted text-muted-foreground' };
-  }
-  if (stamp === 'PAID') {
-    return { label: 'Paid', className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
-  }
-  if (stamp === 'OVERDUE') {
-    return { label: 'Overdue', className: 'bg-amber-500/15 text-amber-800 dark:text-amber-200' };
-  }
-  return { label: 'Unpaid', className: 'bg-muted text-foreground' };
+function statusTag(stamp: 'PAID' | 'VOID' | 'OVERDUE' | null): { label: string; tone: Tone } {
+  if (stamp === 'VOID') return { label: 'Cancelled', tone: 'slate' };
+  if (stamp === 'PAID') return { label: 'Paid', tone: 'emerald' };
+  if (stamp === 'OVERDUE') return { label: 'Overdue', tone: 'amber' };
+  return { label: 'Unpaid', tone: 'rounds' };
 }
 
 export async function generateMetadata({ params }: InvoicePayPageProps): Promise<Metadata> {
@@ -48,7 +40,7 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
 
   const { invoice, business, card, payByBank } = loaded;
   const vm = toInvoiceViewModel(invoice, { cardUrl: null });
-  const pill = statusPill(vm.stamp);
+  const pill = statusTag(vm.stamp);
   const issued = invoice.status === 'issued';
   const balance = invoice.balanceDue;
   const canPay = issued && balance > 0;
@@ -58,34 +50,28 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
   return (
     <PayShell business={business}>
       {query.paid === '1' ? (
-        <p className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-          Thanks — your payment went through. It can take a minute to show below.
-        </p>
+        <PayBanner tone="good">Thanks, your payment went through. It can take a minute to show below.</PayBanner>
       ) : null}
       {bankBanner ? <PayBanner tone={bankBanner.tone}>{bankBanner.text}</PayBanner> : null}
       {errorMessage ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-          {errorMessage}
-        </p>
+        <PayBanner tone="warn">{errorMessage}</PayBanner>
       ) : null}
       <section className="space-y-1">
         <div className="flex items-start justify-between gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Invoice {invoice.number}</h1>
-          <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium', pill.className)}>
-            {pill.label}
-          </span>
+          <Tag tone={pill.tone} className="shrink-0">{pill.label}</Tag>
         </div>
         <p className="text-sm text-muted-foreground">
           Issued {vm.issueDate} · Due {vm.dueDate}
         </p>
       </section>
       {invoice.status === 'void' ? (
-        <p className="text-sm font-medium">This invoice was cancelled.</p>
+        <PayBanner tone="info">This invoice was cancelled.</PayBanner>
       ) : null}
       {issued && balance <= 0 ? (
-        <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Paid — thank you.</p>
+        <PayBanner tone="good">Paid. Thank you.</PayBanner>
       ) : null}
-      <ul className="divide-y divide-border">
+      <ul className="divide-y divide-border rounded-2xl bg-muted/60 px-4 py-3">
         {vm.rows.map((row, index) => (
           <li
             key={`${row.date}-${row.description}-${index}`}
@@ -112,7 +98,7 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
       </dl>
       <a
         href={`/pay/i/${token}/pdf?download=1`}
-        className="text-sm text-primary underline-offset-4 hover:underline"
+        className="inline-flex h-10 items-center justify-center rounded-full border border-border px-4 text-sm font-medium transition-colors hover:bg-muted"
       >
         Download PDF
       </a>
@@ -120,7 +106,7 @@ export default async function InvoicePayPage({ params, searchParams }: InvoicePa
         <PayByBankButton token={token} from="invoice" amount={balance} />
       ) : null}
       {canPay && card.enabled ? (
-        <CardPayButton token={token} kind="invoice" amount={balance} />
+        <CardPayButton token={token} kind="invoice" amount={balance} secondary={payByBank.available} />
       ) : null}
       {canPay && invoice.bank ? (
         <BankTransferCard

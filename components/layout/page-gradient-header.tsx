@@ -1,4 +1,7 @@
+'use client';
+
 import type { ReactNode } from 'react';
+import { useLook } from '@/components/look/use-look';
 import { cn } from '@/lib/utils';
 
 interface PageGradientHeaderProps {
@@ -21,6 +24,20 @@ export function PageGradientHeader({
   actions,
   className,
 }: PageGradientHeaderProps) {
+  const look = useLook();
+  if (look === 'new') {
+    // The new look: a plain header on the canvas (title, one line, actions), no gradient band.
+    return (
+      <div className={cn('flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4', className)}>
+        <div className="min-w-0">
+          {eyebrow ? <p className="mb-0.5 text-xs font-medium text-muted-foreground">{eyebrow}</p> : null}
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px] sm:leading-9">{title}</h1>
+          {subtitle ? <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p> : null}
+        </div>
+        {actions ? <div className="w-full min-w-0 sm:w-auto sm:shrink-0">{actions}</div> : null}
+      </div>
+    );
+  }
   return (
     <div
       className={cn(

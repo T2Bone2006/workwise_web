@@ -4,7 +4,9 @@ import { getStripe } from '@/lib/stripe/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { creditTextPackFromSession } from '@/lib/messaging/text-packs';
 import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
-import { syncSubscription } from '@/lib/stripe/sync-subscription';
+import { syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
+import { onInvoicePaid, onSubscriptionEnded } from '@/lib/billing/referrals';
+import { onFirstInvoicePaid } from '@/lib/billing/second-month';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +21,8 @@ export const runtime = 'nodejs';
  * Events to enable on the endpoint:
  *   checkout.session.completed
  *   customer.subscription.created / updated / deleted
+ *   invoice.paid
  *   invoice.payment_failed
- *   customer.subscription.trial_will_end
  */
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -72,37 +74,56 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object;
-      if (session.mode === 'subscription') {
+      if (session.mode === 'subscription' && session.metadata?.kind === 'restart') {
+        await syncRestartSession(session);
+      } else if (session.mode === 'subscription') {
         await provisionFromCheckoutSession(session);
+        // Stripe can send invoice.paid for the first invoice before this event, when the
+        // business doesn't exist yet and a referral reward has nothing to attach to.
+        // Now that it does, look at that first invoice again (safe to repeat).
+        const invoiceId = checkoutInvoiceId(session);
+        if (invoiceId) await onInvoicePaid(await getStripe().invoices.retrieve(invoiceId));
       } else if (session.mode === 'payment' && session.metadata?.kind === 'text_pack') {
         await creditTextPackFromSession(session);
       }
       return;
     }
     case 'customer.subscription.created':
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted': {
+    case 'customer.subscription.updated': {
       await syncSubscription(event.data.object);
       return;
     }
-    case 'invoice.payment_failed': {
+    case 'customer.subscription.deleted': {
+      await syncSubscription(event.data.object);
+      await onSubscriptionEnded(event.data.object);
+      return;
+    }
+    case 'invoice.paid': {
       const invoice = event.data.object;
       const subscriptionId = invoiceSubscriptionId(invoice);
-      if (subscriptionId) {
-        const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-        await syncSubscription(subscription);
-      }
-      // Dunning email: handled by Stripe's own reminders for now (Billing settings).
+      if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(subscriptionId));
+      await onInvoicePaid(invoice);
+      await onFirstInvoicePaid(invoice);
+      return;
+    }
+    case 'invoice.payment_failed': {
+      const subscriptionId = invoiceSubscriptionId(event.data.object);
+      if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(subscriptionId));
       return;
     }
     case 'customer.subscription.trial_will_end': {
       await syncSubscription(event.data.object);
-      // Trial-ending email is a Phase 7 launch-checklist item.
       return;
     }
     default:
       return;
   }
+}
+
+function checkoutInvoiceId(session: Stripe.Checkout.Session): string | null {
+  const ref = session.invoice;
+  if (!ref) return null;
+  return typeof ref === 'string' ? ref : ref.id;
 }
 
 /** Newer API versions nest the subscription under invoice.parent; older ones expose invoice.subscription. */

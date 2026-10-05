@@ -71,6 +71,50 @@ function edgeSpeed(distance: number): number {
   return MAX_SPEED * (1 - Math.max(0, distance) / EDGE_PX);
 }
 
+function clientPoint(event: Event | null | undefined): { x: number; y: number } | null {
+  if (!event) return null;
+  if (typeof TouchEvent !== 'undefined' && event instanceof TouchEvent) {
+    const touch = event.touches[0] ?? event.changedTouches[0];
+    return touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }
+  if (event instanceof MouseEvent) return { x: event.clientX, y: event.clientY };
+  return null;
+}
+
+/** Scrollable parents, the same ones dnd-kit adds into the drag delta. */
+function scrollableAncestors(node: Element | null): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  let current: Node | null = node;
+  while (current) {
+    if (current instanceof HTMLElement && current !== node) {
+      const style = getComputedStyle(current);
+      if (/(auto|scroll|overlay)/.test(`${style.overflow}${style.overflowX}${style.overflowY}`)) {
+        found.push(current);
+      }
+      if (style.position === 'fixed') break;
+    }
+    if (current instanceof Document) {
+      const scrolling = current.scrollingElement;
+      if (scrolling instanceof HTMLElement && !found.includes(scrolling)) found.push(scrolling);
+      break;
+    }
+    current = current.parentNode;
+  }
+  return found;
+}
+
+function scrollOf(nodes: readonly HTMLElement[]): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  for (const node of nodes) {
+    x += node.scrollLeft;
+    y += node.scrollTop;
+  }
+  return { x, y };
+}
+
+type HeldScroll = { left: number; top: number; width: number; board: boolean };
+
 function sameTarget(a: DndTarget, b: DndTarget): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -91,6 +135,10 @@ type Params = {
  * which day and which spot a card would land in is worked out here from where the card
  * is on the screen, the same way the phone does it. The floating copy is moved directly
  * (no re-render per move), and React is only told when the target changes.
+ *
+ * The copy follows the pointer. dnd-kit's delta also includes every scroll since the
+ * drag started, so positioning from that delta walks the copy off the cursor, which
+ * then keeps the week scrolling at full speed.
  */
 export function useBoardDnd(params: Params) {
   const latest = useRef(params);
@@ -117,9 +165,21 @@ export function useBoardDnd(params: Params) {
   const targetRef = useRef<DndTarget>(null);
   const overlay = useRef<HTMLDivElement | null>(null);
   const center = useRef({ x: 0, y: 0 });
-  /** Where the lifted card started on screen. The copy follows this plus how far the pointer has moved, so hiding the original can't throw it off. */
+  /** Where the lifted card started on screen. */
   const start = useRef({ left: 0, top: 0, width: 0, height: 0 });
+  /** Where on the card the pointer went down, so the same spot stays under the cursor. */
+  const grab = useRef({ x: 0, y: 0 });
+  const placed = useRef({ left: 0, top: 0, scale: 1 });
   const frame = useRef<number | null>(null);
+  /** Pointer drags follow the cursor. Keyboard drags follow the arrow keys, with scroll taken back out. */
+  const pointerDriven = useRef(false);
+  const tracking = useRef(false);
+  /** True while this hook is the one changing scroll, so the hold below doesn't undo it. */
+  const writingScroll = useRef(false);
+  const heldScroll = useRef(new Map<HTMLElement, HeldScroll>());
+  /** Ancestors whose scroll dnd-kit folds into the keyboard delta. */
+  const scrollNodes = useRef<HTMLElement[]>([]);
+  const scrollBase = useRef({ x: 0, y: 0 });
 
   const setTarget = useCallback((next: DndTarget) => {
     if (sameTarget(targetRef.current, next)) return;
@@ -197,9 +257,87 @@ export function useBoardDnd(params: Params) {
   // The loop calls itself through a ref, so it is always the latest version.
   const tickRef = useRef<() => void>(() => {});
 
+  /**
+   * The week and the page also scroll on their own when the pointer leaves the window,
+   * and that scroll speeds up the further out it is. Hold them to the position we set.
+   * A change of width is a week being loaded: keep that correction.
+   */
+  const holdScroll = useCallback((event: Event) => {
+    if (!tracking.current || writingScroll.current) return;
+    let node: EventTarget | null = event.target;
+    if (node === document) node = document.scrollingElement;
+    if (!(node instanceof HTMLElement)) return;
+    const held = heldScroll.current.get(node);
+    if (!held) return;
+    if (held.board && node.scrollWidth !== held.width) {
+      heldScroll.current.set(node, { ...held, left: node.scrollLeft, top: node.scrollTop, width: node.scrollWidth });
+      return;
+    }
+    if (node.scrollLeft === held.left && node.scrollTop === held.top) return;
+    writingScroll.current = true;
+    node.scrollLeft = held.left;
+    node.scrollTop = held.top;
+    writingScroll.current = false;
+    if (node.scrollLeft !== held.left || node.scrollTop !== held.top) {
+      heldScroll.current.set(node, { ...held, left: node.scrollLeft, top: node.scrollTop, width: node.scrollWidth });
+    }
+  }, []);
+
+  const watchScrolling = useCallback(
+    (origin: Element | null) => {
+      const board = latest.current.scroller.current;
+      const next = new Map<HTMLElement, HeldScroll>();
+      for (const el of scrollableAncestors(origin)) {
+        // Day columns scroll on purpose while a card is over them. Everything else stays put.
+        if (el.hasAttribute('data-col-scroll')) continue;
+        next.set(el, { left: el.scrollLeft, top: el.scrollTop, width: el.scrollWidth, board: el === board });
+      }
+      if (board && !next.has(board)) {
+        next.set(board, { left: board.scrollLeft, top: board.scrollTop, width: board.scrollWidth, board: true });
+      }
+      heldScroll.current = next;
+      window.addEventListener('scroll', holdScroll, true);
+    },
+    [holdScroll],
+  );
+
+  const movePointer = useCallback(
+    (x: number, y: number) => {
+      if (!tracking.current || !pointerDriven.current || !activeRef.current) return;
+      const { width, height } = start.current;
+      const left = x - grab.current.x;
+      const top = y - grab.current.y;
+      center.current = { x: left + width / 2, y: top + height / 2 };
+      placed.current = { left, top, scale: 1.03 };
+      const el = overlay.current;
+      if (el) el.style.transform = `translate3d(${left}px, ${top}px, 0) scale(1.03)`;
+      updateTarget();
+    },
+    [updateTarget],
+  );
+  const movePointerRef = useRef(movePointer);
+  movePointerRef.current = movePointer;
+
+  const onPointerMove = useCallback((event: PointerEvent) => {
+    movePointerRef.current(event.clientX, event.clientY);
+  }, []);
+  const onTouchMove = useCallback((event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (touch) movePointerRef.current(touch.clientX, touch.clientY);
+  }, []);
+
+  const release = useCallback(() => {
+    tracking.current = false;
+    pointerDriven.current = false;
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('touchmove', onTouchMove);
+    window.removeEventListener('scroll', holdScroll, true);
+    heldScroll.current.clear();
+  }, [holdScroll, onPointerMove, onTouchMove]);
+
   /** Scroll the board sideways, and the column under the card up or down, when the card is near an edge. */
   const tick = useCallback(() => {
-    if (!activeRef.current) {
+    if (!tracking.current || !activeRef.current) {
       frame.current = null;
       return;
     }
@@ -212,7 +350,18 @@ export function useBoardDnd(params: Params) {
       const dx = edgeSpeed(bounds.right - x) - edgeSpeed(x - bounds.left);
       if (dx !== 0) {
         const before = scrollerEl.scrollLeft;
+        writingScroll.current = true;
         scrollerEl.scrollLeft = before + dx;
+        writingScroll.current = false;
+        const held = heldScroll.current.get(scrollerEl);
+        if (held) {
+          heldScroll.current.set(scrollerEl, {
+            ...held,
+            left: scrollerEl.scrollLeft,
+            top: scrollerEl.scrollTop,
+            width: scrollerEl.scrollWidth,
+          });
+        }
         if (scrollerEl.scrollLeft !== before) moved = true;
       }
     }
@@ -239,9 +388,16 @@ export function useBoardDnd(params: Params) {
     tickRef.current = tick;
   }, [tick]);
 
-  useEffect(() => stopLoop, [stopLoop]);
+  useEffect(
+    () => () => {
+      stopLoop();
+      release();
+    },
+    [release, stopLoop],
+  );
 
   const place = useCallback((left: number, top: number, scale: number) => {
+    placed.current = { left, top, scale };
     const el = overlay.current;
     if (el) el.style.transform = `translate3d(${left}px, ${top}px, 0) scale(${scale})`;
   }, []);
@@ -282,26 +438,41 @@ export function useBoardDnd(params: Params) {
         if (day && !day.isPast && day.stops.some((s) => s.movable)) next = { kind: 'day', day };
       }
       if (!next) return;
+      release();
+      tracking.current = true;
       activeRef.current = next;
       setActive(next);
+      const origin = pressedElement(event);
+      scrollNodes.current = scrollableAncestors(origin);
+      scrollBase.current = scrollOf(scrollNodes.current);
+      const point = clientPoint(event.activatorEvent);
       if (rect) {
         start.current = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
         center.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
         place(rect.left, rect.top, 1.03);
+        if (point) {
+          grab.current = { x: point.x - rect.left, y: point.y - rect.top };
+          pointerDriven.current = true;
+          window.addEventListener('pointermove', onPointerMove);
+          window.addEventListener('touchmove', onTouchMove, { passive: true });
+        }
       }
+      watchScrolling(origin);
       updateTarget();
       stopLoop();
       frame.current = requestAnimationFrame(() => tickRef.current());
     },
-    [dayAt, place, stopLoop, updateTarget],
+    [dayAt, onPointerMove, onTouchMove, place, release, stopLoop, updateTarget, watchScrolling],
   );
 
   const onDragMove = useCallback(
     (event: DragMoveEvent) => {
-      if (!activeRef.current) return;
+      // Pointer drags are positioned from the cursor. This delta includes scroll, which is what ran away.
+      if (!tracking.current || !activeRef.current || pointerDriven.current) return;
       const { left, top, width, height } = start.current;
-      const x = left + event.delta.x;
-      const y = top + event.delta.y;
+      const now = scrollOf(scrollNodes.current);
+      const x = left + event.delta.x - (now.x - scrollBase.current.x);
+      const y = top + event.delta.y - (now.y - scrollBase.current.y);
       center.current = { x: x + width / 2, y: y + height / 2 };
       place(x, y, 1.03);
       updateTarget();
@@ -311,12 +482,13 @@ export function useBoardDnd(params: Params) {
 
   const finish = useCallback(() => {
     stopLoop();
+    release();
     activeRef.current = null;
     targetRef.current = null;
     setActive(null);
     setTargetState(null);
     setLanding(false);
-  }, [stopLoop]);
+  }, [release, stopLoop]);
 
   const onDragEnd = useCallback(
     () => {
@@ -324,6 +496,7 @@ export function useBoardDnd(params: Params) {
       const over = targetRef.current;
       if (!current) return;
       stopLoop();
+      release();
 
       if (current.kind === 'day') {
         finish();
@@ -374,6 +547,9 @@ export function useBoardDnd(params: Params) {
 
   const setOverlay = useCallback((el: HTMLDivElement | null) => {
     overlay.current = el;
+    if (!el) return;
+    const { left, top, scale } = placed.current;
+    el.style.transform = `translate3d(${left}px, ${top}px, 0) scale(${scale})`;
   }, []);
 
   return {

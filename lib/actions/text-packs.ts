@@ -14,7 +14,7 @@ export async function startTextPackCheckout(
   if (!tenantId) return { error: 'Not signed in' };
 
   const products = await getTenantProducts();
-  if (!products.hasRounds) return { error: 'Text packs are part of Rounds.' };
+  if (!products.hasRounds && !products.hasLite) return { error: 'Text packs are part of Rounds.' };
 
   const supabase = await createClient();
   const {
@@ -26,7 +26,7 @@ export async function startTextPackCheckout(
       tenantId,
       userEmail: user?.email ?? null,
       packKey: packKey as TextPackKey,
-      returnTo: 'dashboard',
+      returnTo: products.hasRounds ? 'dashboard' : 'lite',
     });
   } catch (err) {
     console.error('[startTextPackCheckout]', err);

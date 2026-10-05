@@ -47,6 +47,9 @@ import {
 } from '@/components/rounds/visit-actions';
 import { SkipRemainingDialog } from '@/components/rounds/skip-remaining-dialog';
 import { UndoChangeBar } from '@/components/rounds/undo-change-bar';
+import { KeyFigure } from '@/components/look';
+import { formatGbp } from '@/lib/money/pence';
+import { summariseToday } from '@/lib/rounds/today-strip';
 import { VisitStopCard } from '@/components/rounds/visit-stop-card';
 
 function toYmd(date: Date): Ymd {
@@ -107,6 +110,7 @@ export function RoundsDayPlan({
   }, [order, visitById, initialVisits]);
 
   const leftovers = orderedVisits.filter((v) => isLeftover(v.status));
+  const summary = summariseToday(orderedVisits);
   const replyCount = repliesToReview(orderedVisits);
   const dayDate = parseISO(date);
   const prev = toYmd(subDays(dayDate, 1));
@@ -245,6 +249,15 @@ export function RoundsDayPlan({
         </div>
       </div>
 
+      {orderedVisits.length > 0 ? (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-(--look-card-shadow) sm:grid-cols-4">
+          <KeyFigure label="Stops" value={String(summary.stops)} />
+          <KeyFigure label="Planned" value={formatGbp(summary.plannedAmount)} tone="indigo" />
+          <KeyFigure label="Done so far" value={`${summary.done} · ${formatGbp(summary.doneAmount)}`} tone="emerald" />
+          <KeyFigure label="Still to do" value={String(summary.toGo)} tone="sky" />
+        </div>
+      ) : null}
+
       {lastDistanceKm != null ? (
         <p className="text-sm text-muted-foreground">
           Last optimise: {lastDistanceKm.toFixed(1)} km
@@ -254,7 +267,7 @@ export function RoundsDayPlan({
       {replyCount > 0 ? (
         <Link
           href="/messages"
-          className="block rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-foreground"
+          className="block rounded-xl border border-(--tone-sky-line) bg-(--tone-sky-soft) px-4 py-3 text-sm font-semibold text-foreground"
         >
           {replyCount} {replyCount === 1 ? 'reply' : 'replies'} about this day to review
         </Link>
@@ -271,8 +284,9 @@ export function RoundsDayPlan({
         </div>
       ) : (
         <ul className="space-y-3">
-          {groupHouseStops(orderedVisits).map((group, index) => {
+          {groupHouseStops(orderedVisits).map((group, index, all) => {
             const lead = group[0]!;
+            const isNext = all.findIndex((g) => g.some((visit) => isLeftover(visit.status))) === index;
             return (
             <div
               key={lead.id}
@@ -286,6 +300,7 @@ export function RoundsDayPlan({
                 visits={group}
                 orderIndex={index + 1}
                 dimmed={group.some((visit) => dragId === visit.id)}
+                isNext={isNext}
                 brand={brand}
                 leading={
                   <div className="flex flex-col items-center gap-1 pt-0.5">

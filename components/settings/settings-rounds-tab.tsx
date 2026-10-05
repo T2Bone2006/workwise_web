@@ -232,6 +232,7 @@ export function SettingsRoundsTab({ settings, onSaved, onDirtyChange }: Settings
       <Card className="glass-card rounded-xl border border-border/60 bg-card/80">
         <CardHeader>
           <CardTitle>Planning</CardTitle>
+          <CardDescription>How far ahead visits are planned, and where your day starts.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">

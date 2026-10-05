@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { Landmark } from 'lucide-react';
+import { IconChip } from '@/components/look';
 import { CopyField } from '@/components/pay/copy-field';
 import type { PublicBank } from '@/lib/data/payments/public-pay';
 import { formatGbp } from '@/lib/money/pence';
@@ -18,9 +19,7 @@ export function BankTransferCard(props: {
   return (
     <section className="space-y-2">
       <h2 className="flex items-center gap-2 text-sm font-semibold">
-        <span className="flex size-7 items-center justify-center rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300">
-          <Landmark className="size-3.5" />
-        </span>
+        <IconChip icon={Landmark} tone="rounds" size="sm" />
         {heading}
       </h2>
       <div className="space-y-2">

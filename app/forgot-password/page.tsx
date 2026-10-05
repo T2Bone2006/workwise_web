@@ -1,18 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
+import Link from 'next/link';
+import { Loader2, MailCheck } from 'lucide-react';
 import { requestPasswordReset } from '@/lib/actions/auth';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import {
+  AuthAlert,
+  AuthShell,
+  authButtonClassName,
+  authInputClassName,
+  authLabelClassName,
+  authLinkClassName,
+  authSecondaryButtonClassName,
+} from '@/components/auth/auth-shell';
 
 type Phase = 'form' | 'sent';
 
@@ -43,86 +45,73 @@ export default function ForgotPasswordPage() {
 
   if (phase === 'sent') {
     return (
-      <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mb-6 flex justify-center">
-            <Image
-              src="/workwise_logo.png"
-              alt="WorkWise"
-              width={120}
-              height={120}
-              className="h-auto w-[120px] object-contain"
-              priority
-            />
+      <AuthShell
+        title="Check your email"
+        subtitle={`If there's an account for ${email}, a reset link is on its way.`}
+      >
+        <div className="space-y-6">
+          <div className="flex items-start gap-3 rounded-xl border border-[#EBEBEA] bg-[#FAFAF8] p-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <span className="flex size-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300">
+              <MailCheck className="size-[18px]" aria-hidden />
+            </span>
+            <p className="text-sm leading-relaxed text-[#5E5A54] dark:text-[#A9B6C8]">
+              Open the link in the email to choose a new password. Didn&apos;t get it? Check your
+              spam folder.
+            </p>
           </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            Check your email
-          </CardTitle>
-          <CardDescription className="space-y-2">
-            <span className="block">
-              If an account exists for {email}, we&apos;ve sent a reset link.
-            </span>
-            <span className="block">
-              Click the link in the email to set a new password.
-            </span>
-            <span className="block">
-              Didn&apos;t get it? Check your spam folder.
-            </span>
-          </CardDescription>
-        </CardHeader>
-      </Card>
+          <Link href="/login" className={authSecondaryButtonClassName}>
+            Back to sign in
+          </Link>
+        </div>
+      </AuthShell>
     );
   }
 
   return (
-    <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-      <CardHeader className="space-y-1 text-center">
-        <div className="mb-6 flex justify-center">
-          <Image
-            src="/workwise_logo.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
+    <AuthShell
+      title="Reset your password"
+      subtitle="Enter the email you sign in with and we'll send you a link."
+    >
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {error ? <AuthAlert>{error}</AuthAlert> : null}
+        <div className="grid gap-2">
+          <Label htmlFor="email" className={authLabelClassName}>
+            Email
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            autoComplete="email"
+            autoFocus
+            required
+            disabled={isSubmitting}
+            className={authInputClassName}
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setError(null);
+            }}
           />
         </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight">
-          Reset your password
-        </CardTitle>
-        <CardDescription>
-          Enter your email and we&apos;ll send you a reset link
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-              disabled={isSubmitting}
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setError(null);
-              }}
-            />
-          </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button
-            type="submit"
-            variant="gradient"
-            className="w-full"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Sending…' : 'Send Reset Link'}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        <div className="pt-1">
+          <button type="submit" className={authButtonClassName} disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                Sending…
+              </>
+            ) : (
+              'Send reset link'
+            )}
+          </button>
+        </div>
+        <p className="text-center text-sm">
+          <Link href="/login" className={authLinkClassName}>
+            Back to sign in
+          </Link>
+        </p>
+      </form>
+    </AuthShell>
   );
 }

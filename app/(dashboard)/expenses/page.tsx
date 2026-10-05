@@ -8,7 +8,6 @@ import {
   currentMonth,
   londonDateOf,
   parsePeriodParam,
-  periodParam,
   periodRange,
   taxYearFor,
   type Period,
@@ -71,7 +70,7 @@ export default async function ExpensesPage({ searchParams }: ExpensesPageProps) 
           <InAndOutPanel
             summary={summary}
             audience="trader"
-            monthHref={(year, month) => `/expenses?tab=in-out&period=${periodParam({ kind: 'month', year, month })}`}
+            monthBase="/expenses?tab=in-out"
           />
         ) : (
           <Card>

@@ -50,13 +50,13 @@ export function PayByBankButton(props: {
       <input type="hidden" name="kind" value="pay_by_bank" />
       <button
         type="submit"
-        className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'w-full gap-2')}
+        className={cn(buttonVariants({ variant: 'default', size: 'lg' }), 'h-12 w-full gap-2 rounded-full text-[15px]')}
       >
         <Landmark className="size-4" />
         Pay {formatGbp(props.amount, { always2dp: true })} by bank
       </button>
       <p className="text-center text-sm text-muted-foreground">
-        Approve it in your banking app — no card needed.
+        Approve it in your banking app. No card needed.
       </p>
     </form>
   );

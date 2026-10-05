@@ -25,6 +25,26 @@ import {
   fieldLabelFromHeader,
   type WorkerVisibleField,
 } from '@/lib/jobs/worker-visible-fields';
+import { linkLeadToCustomer } from '@/lib/lite/leads-core';
+
+const LEAD_LINK_WARNING = "Customer added, but it couldn't be linked to the enquiry.";
+
+async function linkFromLead(leadId: string, customerId: string): Promise<string | undefined> {
+  try {
+    const tenantId = await getTenantIdForCurrentUser();
+    if (!tenantId) return LEAD_LINK_WARNING;
+    const linked = await linkLeadToCustomer(createAdminClient(), {
+      tenantId,
+      leadId,
+      customerId,
+    });
+    if (linked === 'linked') return undefined;
+    return LEAD_LINK_WARNING;
+  } catch (error) {
+    console.error('[createRoundsCustomer] link lead', error);
+    return LEAD_LINK_WARNING;
+  }
+}
 
 const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'in_progress'] as const;
 
@@ -158,6 +178,10 @@ export async function createRoundsCustomer(formData: FormData): Promise<
   }
   formData.delete('owesFromBefore');
 
+  const fromLeadRaw = formData.get('fromLeadId');
+  formData.delete('fromLeadId');
+  const fromLeadId = typeof fromLeadRaw === 'string' && fromLeadRaw.trim() !== '' ? fromLeadRaw.trim() : null;
+
   const result = await createCustomer(formData);
   if (!result.success || !('id' in result) || typeof result.id !== 'string') {
     return {
@@ -166,6 +190,8 @@ export async function createRoundsCustomer(formData: FormData): Promise<
     };
   }
   revalidatePath('/customers');
+
+  const linkWarning = fromLeadId ? await linkFromLead(fromLeadId, result.id) : undefined;
 
   const owesFromBefore = owes.data ?? 0;
   if (owesFromBefore > 0) {
@@ -186,17 +212,18 @@ export async function createRoundsCustomer(formData: FormData): Promise<
         })
       : null;
     if (!charge?.success) {
+      const owedWarning =
+        "Customer added, but the amount owed from before wasn't saved — add it on their page.";
       return {
         success: true,
         id: result.id,
-        warning:
-          "Customer added, but the amount owed from before wasn't saved — add it on their page.",
+        warning: linkWarning ? `${linkWarning} ${owedWarning}` : owedWarning,
       };
     }
     revalidatePath('/payments');
   }
 
-  return { success: true, id: result.id };
+  return linkWarning ? { success: true, id: result.id, warning: linkWarning } : { success: true, id: result.id };
 }
 
 /** Minimal create for the import wizard (name + bulk_client). Returns new customer id. */

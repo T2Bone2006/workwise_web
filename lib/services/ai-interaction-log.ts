@@ -17,7 +17,11 @@ export type StructuredAiLogParams = {
     | 'column_mapping'
     | 'message_classification'
     | 'receipt_extraction'
-    | 'customer_row_extraction';
+    | 'customer_row_extraction'
+    | 'widget_chat'
+    | 'lite_interview'
+    | 'lite_text_draft'
+    | 'conversation_summary';
   prompt: string;
   inputData: Record<string, unknown>;
   parsedOutput: unknown;

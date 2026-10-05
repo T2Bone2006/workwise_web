@@ -94,6 +94,35 @@ async function fetchWeeks(
   return { ok: true, visits };
 }
 
+/**
+ * Soft edge on the week scroller: days blur, then fade into the page,
+ * instead of ending on a hard cut. Shown only while that side is clipped.
+ */
+function BoardEdgeFade({ side, on }: { side: 'left' | 'right'; on: boolean }): JSX.Element {
+  const left = side === 'left';
+  return (
+    <div
+      aria-hidden
+      className={`pointer-events-none absolute inset-y-0 z-10 w-8 transition-opacity duration-200 ${
+        left ? 'left-0' : 'right-0'
+      } ${on ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <div
+        className={`absolute inset-0 backdrop-blur-sm ${
+          left
+            ? '[mask-image:linear-gradient(to_right,black,transparent)] [-webkit-mask-image:linear-gradient(to_right,black,transparent)]'
+            : '[mask-image:linear-gradient(to_left,black,transparent)] [-webkit-mask-image:linear-gradient(to_left,black,transparent)]'
+        }`}
+      />
+      <div
+        className={`absolute inset-y-0 w-5 from-background to-transparent ${
+          left ? 'left-0 bg-gradient-to-r' : 'right-0 bg-gradient-to-l'
+        }`}
+      />
+    </div>
+  );
+}
+
 /** The Week view: days side by side, a gap between weeks, scrolling left and right. */
 export function WeekBoard(props: {
   initialVisits: VisitRow[];
@@ -119,6 +148,8 @@ export function WeekBoard(props: {
   const [busyStopId, setBusyStopId] = useState<string | null>(null);
   const shownVisits = optimistic ?? visits;
   const [loadingEdge, setLoadingEdge] = useState<'earlier' | 'later' | null>(null);
+  /** A side is faded only while days are actually cut off there. */
+  const [clipped, setClipped] = useState({ left: false, right: false });
 
   const [panel, setPanel] = useState<{ stopId: string; date: Ymd } | null>(null);
   const [moving, setMoving] = useState<{ stopId: string; date: Ymd; jobId?: string } | null>(null);
@@ -239,10 +270,10 @@ export function WeekBoard(props: {
   const scrollToDay = useCallback((date: Ymd) => {
     const el = scroller.current;
     const column = el?.querySelector<HTMLElement>(`[data-date="${date}"]`);
-    if (!el || !column) return;
-    const left = column.offsetLeft;
-    const visible = left >= el.scrollLeft && left + column.offsetWidth <= el.scrollLeft + el.clientWidth;
-    if (!visible) el.scrollTo({ left: Math.max(0, left - 48), behavior: 'smooth' });
+    const week = column?.closest<HTMLElement>('[data-week-start]');
+    if (!el || !week) return;
+    const left = week.offsetLeft;
+    if (Math.abs(el.scrollLeft - left) > 2) el.scrollTo({ left, behavior: 'smooth' });
   }, []);
 
   /** Bring a day into view, loading the weeks around it first if it is further away than the board reaches. */
@@ -508,16 +539,27 @@ export function WeekBoard(props: {
 
   // ---------- scrolling ----------
 
+  /** Fade a side only when a day is cut off there (a fully on-screen day stays sharp). */
+  const syncEdges = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const left = el.scrollLeft > 24;
+    const right = el.scrollWidth - el.clientWidth - el.scrollLeft > 24;
+    setClipped((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
   // Open on this week's Monday.
   useLayoutEffect(() => {
-    if (didInitialScroll.current) return;
-    const el = scroller.current;
-    const week = el?.querySelector<HTMLElement>(`[data-week-start="${mondayOf(today)}"]`);
-    if (el && week) {
-      el.scrollLeft = week.offsetLeft - 8;
-      didInitialScroll.current = true;
+    if (!didInitialScroll.current) {
+      const el = scroller.current;
+      const week = el?.querySelector<HTMLElement>(`[data-week-start="${mondayOf(today)}"]`);
+      if (el && week) {
+        el.scrollLeft = week.offsetLeft;
+        didInitialScroll.current = true;
+      }
     }
-  }, [today, weeks]);
+    syncEdges();
+  }, [today, weeks, syncEdges]);
 
   // After the weeks change: keep the same column where it was, or bring a far-away day into view.
   useLayoutEffect(() => {
@@ -533,7 +575,8 @@ export function WeekBoard(props: {
       pendingReveal.current = null;
       scrollToDay(date);
     }
-  }, [range, scrollToDay]);
+    syncEdges();
+  }, [range, scrollToDay, syncEdges]);
   const loadMore = useCallback(
     async (dir: 'earlier' | 'later') => {
       if (loadingRef.current) return;
@@ -562,7 +605,17 @@ export function WeekBoard(props: {
     [],
   );
 
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    syncEdges();
+    const observer = new ResizeObserver(() => syncEdges());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [syncEdges, weeks]);
+
   const onScroll = () => {
+    syncEdges();
     const el = scroller.current;
     if (!el || loadingRef.current) return;
     if (el.scrollLeft < EDGE_PX) void loadMore('earlier');
@@ -576,23 +629,28 @@ export function WeekBoard(props: {
         id="week-board-dnd"
         sensors={dnd.sensors}
         accessibility={{ announcements: dnd.announcements }}
-        autoScroll={false}
+        // The board scrolls itself. dnd-kit's own scroll, and its one-off "layout
+        // shift" scroll, both get added back onto the drag and throw the card off the cursor.
+        autoScroll={{ enabled: false, layoutShiftCompensation: false }}
         {...dnd.handlers}
       >
-      <div className="relative">
+      <div className="@container/board relative">
         <div
           ref={scroller}
           onScroll={onScroll}
-          className="relative flex gap-6 overflow-x-auto overscroll-x-contain pb-3"
+          className="relative flex gap-4 overflow-x-auto overscroll-x-contain pb-3"
         >
-          {weeks.map((week) => (
-            <div key={week.weekStart} data-week-start={week.weekStart} className="shrink-0">
+          {weeks.map((week) => {
+            const days = week.days.filter((day) => day.weekday <= 5);
+            const stops = days.reduce((sum, day) => sum + day.total, 0);
+            const amount = days.reduce((sum, day) => sum + day.plannedAmount, 0);
+            return (
+            <div key={week.weekStart} data-week-start={week.weekStart} className="w-max shrink-0 @min-[960px]/board:w-full @min-[960px]/board:min-w-0">
               <p className="mb-2 px-1 text-xs text-muted-foreground">
-                {week.label} · {week.stops} {week.stops === 1 ? 'stop' : 'stops'} ·{' '}
-                {formatGbp(week.amount)}
+                {week.label} · {stops} {stops === 1 ? 'stop' : 'stops'} · {formatGbp(amount)}
               </p>
-              <div className="flex gap-2">
-                {week.days.map((day) => (
+              <div className="flex gap-2 @min-[960px]/board:w-full @min-[960px]/board:min-w-0">
+                {days.map((day) => (
                   <BoardDayColumn
                     key={day.date}
                     day={day}
@@ -610,19 +668,22 @@ export function WeekBoard(props: {
                 ))}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
         {loadingEdge ? (
           <div
             className={
               loadingEdge === 'earlier'
-                ? 'pointer-events-none absolute left-2 top-1/2'
-                : 'pointer-events-none absolute right-2 top-1/2'
+                ? 'pointer-events-none absolute left-2 top-1/2 z-20'
+                : 'pointer-events-none absolute right-2 top-1/2 z-20'
             }
           >
             <Loader2 className="size-5 animate-spin text-muted-foreground" aria-label="Loading more weeks" />
           </div>
         ) : null}
+        <BoardEdgeFade side="left" on={clipped.left} />
+        <BoardEdgeFade side="right" on={clipped.right} />
       </div>
 
       <BoardDragOverlay

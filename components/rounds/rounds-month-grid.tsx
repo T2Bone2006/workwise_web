@@ -154,8 +154,8 @@ export function RoundsMonthGrid({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border/80">
-        <div className="grid grid-cols-7 border-b border-border/60 bg-muted/30">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-(--look-card-shadow)">
+        <div className="grid grid-cols-7 border-b border-border bg-muted/50">
           {WEEKDAYS.map((label) => (
             <div
               key={label}
@@ -188,9 +188,9 @@ export function RoundsMonthGrid({
               : 0;
 
             const baseShade = isBlackout
-              ? 'bg-amber-500/10'
+              ? 'bg-(--tone-amber-soft)'
               : !isWorking
-                ? 'bg-muted/40'
+                ? 'bg-muted/50'
                 : '';
 
             return (
@@ -198,17 +198,17 @@ export function RoundsMonthGrid({
                 key={ymd}
                 href={`/calendar?view=day&date=${ymd}`}
                 className={cn(
-                  'relative min-h-[4.75rem] border-b border-r border-border/40 p-1.5 transition-colors sm:min-h-[6.25rem] sm:p-2',
+                  'relative min-h-[4.75rem] border-b border-r border-border p-1.5 transition-colors sm:min-h-[6.25rem] sm:p-2',
                   'hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                   !inMonth && 'opacity-40',
                   baseShade,
-                  isToday && 'ring-1 ring-inset ring-emerald-500/50',
+                  isToday && 'ring-2 ring-inset ring-(--tone-sky-solid)',
                 )}
               >
                 {heat > 0 && inMonth ? (
                   <div
-                    className="pointer-events-none absolute inset-0 bg-emerald-500"
-                    style={{ opacity: heat }}
+                    className="pointer-events-none absolute inset-0 bg-(--tone-indigo-solid)"
+                    style={{ opacity: heat * 0.6 }}
                     aria-hidden
                   />
                 ) : null}
@@ -218,14 +218,14 @@ export function RoundsMonthGrid({
                     className={cn(
                       'inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold sm:size-7 sm:text-sm',
                       isToday
-                        ? 'bg-emerald-600 text-white dark:bg-emerald-500'
+                        ? 'bg-(--tone-sky-solid) text-white'
                         : 'text-foreground',
                     )}
                   >
                     {format(day, 'd')}
                   </span>
                   {isBlackout ? (
-                    <span className="text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400 sm:text-[10px]">
+                    <span className="rounded-full bg-card/70 px-1.5 text-[9px] font-semibold text-(--tone-amber-text) sm:text-[10px]">
                       Off
                     </span>
                   ) : null}
@@ -252,16 +252,16 @@ export function RoundsMonthGrid({
                           className={cn(
                             'h-full rounded-full transition-[width]',
                             progress >= 1
-                              ? 'bg-emerald-500'
+                              ? 'bg-(--tone-emerald-solid)'
                               : progress > 0
-                                ? 'bg-emerald-400'
+                                ? 'bg-(--tone-emerald-solid)/70'
                                 : 'bg-transparent',
                           )}
                           style={{ width: `${Math.round(progress * 100)}%` }}
                         />
                       </div>
                     ) : bucket!.skipped > 0 ? (
-                      <p className="text-[10px] text-rose-700/90 dark:text-rose-300/90">
+                      <p className="text-[10px] text-(--tone-rose-text)">
                         All skipped
                       </p>
                     ) : null}
@@ -283,11 +283,24 @@ export function RoundsMonthGrid({
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Greener cells are busier (£). Progress bar is done vs still to do.
-        Shaded / “Off” days are usual days off or bank holidays — shade only,
-        not a ban.
-      </p>
+      <ul className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
+        <li className="flex items-center gap-2">
+          <span className="flex overflow-hidden rounded-sm" aria-hidden="true">
+            {[0.1, 0.25, 0.4, 0.55].map((o) => (
+              <span key={o} className="h-3 w-4 bg-(--tone-indigo-solid)" style={{ opacity: o }} />
+            ))}
+          </span>
+          Lighter = quieter, darker = busier
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className="h-1.5 w-5 rounded-full bg-(--tone-emerald-solid)" aria-hidden="true" />
+          Bar = done so far
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className="size-3 rounded-sm bg-(--tone-amber-soft) ring-1 ring-(--tone-amber-line)" aria-hidden="true" />
+          Off = bank holiday or day off (shade only, not a ban)
+        </li>
+      </ul>
     </div>
   );
 }

@@ -31,16 +31,13 @@ import {
 import { createClient } from '@/lib/supabase/server';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, todayInLondon } from '@/lib/rounds/dates';
-import { PageGradientHeader } from '@/components/layout/page-gradient-header';
-import { CustomerPlacesMapCard } from '@/components/rounds/customer-places-map';
+import { CustomerHeader, type CustomerHeaderTag } from '@/components/rounds/customer-header';
+import { NextVisitsCard, type NextVisit } from '@/components/rounds/next-visits-card';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
-import { CalendarDays, MapPin } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { CustomerDetailsCard, CustomerSendCard } from '@/components/rounds/customer-details-card';
-import { CustomerSectionTitle } from '@/components/rounds/customer-section-title';
+import { CustomerEditFields, CustomerSendCard } from '@/components/rounds/customer-details-card';
 import { getCustomerLedger } from '@/lib/data/payments/ledger';
 import { CustomerMoneyCard } from '@/components/payments/customer-money-card';
 import { getCustomerDirectDebit } from '@/lib/data/direct-debit/customer';
@@ -52,58 +49,6 @@ import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { contactChoiceFromColumn } from '@/lib/messaging/channel';
 import { flagToChoice } from '@/lib/messaging/customer-flag';
 import { splitHouse } from '@/lib/rounds/house';
-
-function NextVisitBox({
-  dateLabel,
-  overdue,
-  services,
-  money,
-}: {
-  dateLabel: string | null;
-  overdue: boolean;
-  services: { id: string; title: string }[];
-  money: string | null;
-}) {
-  return (
-    <Card className="glass-card border-border/80">
-      <CardHeader className="pb-2">
-        <CustomerSectionTitle
-          icon={CalendarDays}
-          title="Next visit"
-          tone={overdue ? 'rose' : 'amber'}
-          hint={dateLabel ?? 'Nothing booked'}
-        />
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {services.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No visit booked yet.</p>
-        ) : (
-          <ul className="space-y-1">
-            {services.map((service) => (
-              <li key={service.id} className="text-sm font-medium">
-                {service.title}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-2">
-          <p className="text-xs text-muted-foreground">This visit</p>
-          <p className="text-lg font-semibold">{money ?? '—'}</p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function formatVisitDay(ymd: string): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  if (!y || !m || !d) return ymd;
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  }).format(new Date(Date.UTC(y, m - 1, d)));
-}
 
 function forecastRowsForCustomer(
   agreements: AgreementListRow[],
@@ -203,11 +148,21 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     const sendsInvoice = customer.payment_terms === 'invoice';
     const forecast = forecastRowsForCustomer(agreements, upcoming, settings);
     const today = todayInLondon();
-    const nextDate = [...upcoming, ...forecast]
-      .map((visit) => visit.scheduled_date)
-      .filter((date): date is string => Boolean(date))
-      .sort((a, b) => compareYmd(a, b))[0] ?? null;
-    const nextOverdue = nextDate != null && compareYmd(nextDate, today) < 0;
+    const nextVisits: NextVisit[] = [
+      ...upcoming.map((visit) => ({ ...visit, planned: false })),
+      ...forecast.map((visit) => ({ ...visit, planned: true })),
+    ]
+      .filter((visit): visit is typeof visit & { scheduled_date: string } => Boolean(visit.scheduled_date))
+      .sort((a, b) => compareYmd(a.scheduled_date, b.scheduled_date))
+      .slice(0, 3)
+      .map((visit) => ({
+        id: visit.id,
+        date: visit.scheduled_date,
+        time: visit.scheduled_time,
+        title: visit.job_description || 'Visit',
+        amount: visit.quoted_amount,
+        planned: visit.planned,
+      }));
     const live = agreements.filter((agreement) => agreement.status === 'active');
     const places = live
       .filter((agreement) => agreement.lat != null && agreement.lng != null)
@@ -220,79 +175,41 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
         lng: agreement.lng as number,
       }));
     const primary = live[0] ?? agreements[0] ?? null;
-    const priceFormat = new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-    });
-    const nextServices = nextDate
-      ? [
-          ...upcoming
-            .filter((visit) => visit.scheduled_date === nextDate)
-            .map((visit) => ({
-              id: visit.id,
-              title: visit.job_description || 'Visit',
-              amount: visit.quoted_amount,
-            })),
-          ...forecast
-            .filter((visit) => visit.scheduled_date === nextDate)
-            .map((visit) => ({
-              id: visit.id,
-              title: visit.job_description || 'Visit',
-              amount: visit.quoted_amount,
-            })),
-        ]
-      : [];
-    const nextAmounts = nextServices
-      .map((service) => service.amount)
-      .filter((amount): amount is number => amount != null);
-    const nextMoney =
-      nextAmounts.length === 0
-        ? null
-        : priceFormat.format(nextAmounts.reduce((sum, amount) => sum + amount, 0));
     const place = [primary?.address, primary?.postcode].filter(Boolean).join(', ') || customer.address;
 
+    const optedOut =
+      typeof messaging.flags?.messaging_opt_out_at === 'string' && messaging.flags.messaging_opt_out_at.trim() !== '';
+    const tags: CustomerHeaderTag[] = [];
+    if (!customer.is_active) tags.push({ tone: 'slate', label: 'Inactive' });
+    if (customer.is_active && agreements.length > 0 && live.length === 0) {
+      tags.push(
+        agreements.every((agreement) => agreement.status === 'ended')
+          ? { tone: 'slate', label: 'Ended' }
+          : { tone: 'amber', label: 'Paused' },
+      );
+    }
+    if (sendsInvoice) tags.push({ tone: 'violet', label: 'Sends invoice' });
+    if (directDebit?.status === 'active') tags.push({ tone: 'emerald', label: 'Direct Debit' });
+    if (directDebit?.status === 'pending' || directDebit?.status === 'setting_up') {
+      tags.push({ tone: 'amber', label: 'Direct Debit pending' });
+    }
+    if (optedOut) tags.push({ tone: 'amber', label: 'Opted out of texts' });
+
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
         <SetBreadcrumbName id={customerId} name={customer.name} />
         <HistoryBackButton fallbackHref={paths.customers} />
-        <PageGradientHeader
-          eyebrow={
-            customer.is_active
-              ? sendsInvoice
-                ? 'Sends invoice'
-                : undefined
-              : 'Inactive'
-          }
-          title={customer.name}
-          subtitle={
-            !customer.is_active
-              ? 'Inactive — they stay on file but drop off the round'
-              : place || undefined
-          }
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
-              {customer.is_active ? (
-                <CustomerDeleteButton
-                  customerId={customerId}
-                  customerName={customer.name}
-                  useDeactivate
-                  redirectTo={paths.customers}
-                />
-              ) : null}
-            </div>
-          }
-        />
-
-        <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="min-w-0 space-y-6">
-            {ledgerResult.ledger ? (
-              <CustomerMoneyCard
-                ledger={ledgerResult.ledger}
-                payLinkAvailable
-                directDebit={directDebit}
-              />
-            ) : null}
-            <CustomerDetailsCard
+        <CustomerHeader
+          name={customer.name}
+          place={place || null}
+          phone={customer.phone}
+          phoneE164={customer.phone_e164}
+          email={customer.email}
+          accessNotes={customer.access_notes}
+          tags={tags}
+          places={places}
+          editPanel={
+            <CustomerEditFields
               customer={customer}
               house={
                 customer.address
@@ -301,6 +218,62 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                     ? { address: primary.address, postcode: primary.postcode }
                     : { address: null, postcode: null }
               }
+            />
+          }
+          actions={
+            customer.is_active ? (
+              <CustomerDeleteButton
+                customerId={customerId}
+                customerName={customer.name}
+                useDeactivate
+                redirectTo={paths.customers}
+              />
+            ) : null
+          }
+        />
+
+        {!customer.is_active ? (
+          <p className="rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-sm text-muted-foreground">
+            Inactive: they stay on file but drop off the round.
+          </p>
+        ) : null}
+
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_1fr] lg:items-start">
+          {ledgerResult.ledger ? (
+            <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+              <CustomerMoneyCard ledger={ledgerResult.ledger} payLinkAvailable directDebit={directDebit} />
+            </div>
+          ) : null}
+
+          <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+            <NextVisitsCard customerId={customerId} visits={nextVisits} today={today} />
+            <AgreementsCard
+              customerId={customerId}
+              agreements={agreements}
+              fetchError={agreementsError?.message ?? null}
+            />
+            <div id="visits" className="scroll-mt-4">
+              <CustomerVisitsCard
+                upcoming={upcoming}
+                forecast={forecast}
+                recent={recent}
+                upcomingError={upcomingError?.message ?? null}
+                recentError={recentError?.message ?? null}
+              />
+            </div>
+            <CustomerActivity
+              visits={recent}
+              payments={ledgerResult.ledger?.payments ?? []}
+              notes={customer.notes}
+            />
+          </div>
+
+          <div className="min-w-0 space-y-5 lg:col-start-2 lg:row-start-2">
+            <CustomerMessagesCard
+              name={customer.name}
+              phoneE164={customer.phone_e164}
+              optedOut={optedOut}
+              recent={messaging.recentMessages}
             />
             <CustomerSendCard
               customerId={customerId}
@@ -317,56 +290,6 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                 chaseFirstDays: messaging.messagingSettings.chase_first_days,
                 chaseSecondDays: messaging.messagingSettings.chase_second_days,
               }}
-            />
-            <AgreementsCard
-              customerId={customerId}
-              agreements={agreements}
-              fetchError={agreementsError?.message ?? null}
-            />
-            <CustomerVisitsCard
-              upcoming={upcoming}
-              forecast={forecast}
-              recent={recent}
-              upcomingError={upcomingError?.message ?? null}
-              recentError={recentError?.message ?? null}
-            />
-          </div>
-          <div className="min-w-0 space-y-6">
-            <NextVisitBox
-              dateLabel={
-                nextDate
-                  ? nextOverdue
-                    ? `Was ${formatVisitDay(nextDate)}`
-                    : formatVisitDay(nextDate)
-                  : null
-              }
-              overdue={nextOverdue}
-              services={nextServices.map(({ id, title }) => ({ id, title }))}
-              money={nextMoney}
-            />
-            <CustomerMessagesCard
-              name={customer.name}
-              phoneE164={customer.phone_e164}
-              optedOut={
-                typeof messaging.flags?.messaging_opt_out_at === 'string' &&
-                messaging.flags.messaging_opt_out_at.trim() !== ''
-              }
-              recent={messaging.recentMessages}
-            />
-            {places.length > 0 ? (
-              <Card className="glass-card min-w-0 overflow-hidden border-border/80">
-                <CardHeader className="pb-2">
-                  <CustomerSectionTitle icon={MapPin} title="Where they are" tone="sky" />
-                </CardHeader>
-                <CardContent className="min-w-0">
-                  <CustomerPlacesMapCard places={places} />
-                </CardContent>
-              </Card>
-            ) : null}
-            <CustomerActivity
-              visits={recent}
-              payments={ledgerResult.ledger?.payments ?? []}
-              notes={customer.notes}
             />
           </div>
         </div>
