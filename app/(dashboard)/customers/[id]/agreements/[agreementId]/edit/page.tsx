@@ -6,6 +6,7 @@ import { getAgreementById } from '@/lib/data/rounds/agreements';
 import { getServiceCatalog } from '@/lib/data/rounds/service-catalog';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
+import { splitHouse } from '@/lib/rounds/house';
 import { AgreementForm } from '@/components/rounds/agreement-form';
 import { HistoryBackButton } from '@/components/layout/history-back-button';
 import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
@@ -47,6 +48,13 @@ export default async function EditAgreementPage({
     redirect(paths.customer(customerId));
   }
 
+  // The customer's own address. A service at another property shows its own.
+  const stored = splitHouse(customer.address);
+  const house =
+    stored.address && stored.postcode
+      ? stored
+      : { address: agreement.address, postcode: agreement.postcode };
+
   return (
     <div className="space-y-6">
       <SetBreadcrumbName id={customerId} name={customer.name} />
@@ -73,7 +81,7 @@ export default async function EditAgreementPage({
         services={services}
         today={todayInLondon()}
         agreement={agreement}
-        house={{ address: agreement.address, postcode: agreement.postcode }}
+        house={house}
       />
     </div>
   );

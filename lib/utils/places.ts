@@ -18,6 +18,9 @@ export type PlaceSuggestion = {
 export type PlaceAddressDetails = {
   address: string;
   postcode: string;
+  /** Where Google puts the place. Used to centre the pin map on a searched address. */
+  lat?: number;
+  lng?: number;
 };
 
 type AutocompleteApiResponse = {
@@ -158,9 +161,87 @@ export async function getPlaceAddressDetails(
     return {
       address: addressLine || data.formattedAddress || '',
       postcode,
+      ...(data.location?.latitude != null && data.location?.longitude != null
+        ? { lat: data.location.latitude, lng: data.location.longitude }
+        : {}),
     };
   } catch (error) {
     console.error('[getPlaceAddressDetails] failed:', error);
     return null;
   }
+}
+
+type GeocodeComponent = { long_name?: string; types?: string[] };
+
+/** The street line and postcode out of a Google Geocoding result's components. */
+export function addressFromGeocode(components: GeocodeComponent[]): { address: string; postcode: string } {
+  const find = (type: string) => components.find((c) => c.types?.includes(type))?.long_name ?? '';
+  const street = [find('subpremise'), find('street_number'), find('route')].filter(Boolean).join(' ');
+  const town = find('postal_town') || find('locality');
+  return {
+    address: [street, town].filter((part) => part.trim()).join(', '),
+    postcode: find('postal_code'),
+  };
+}
+
+export type PinLookup = { address: string; postcode: string; exact: boolean };
+
+/**
+ * Works out the address for a spot dropped on the map. The postcode comes from
+ * Google when it has one, else from the nearest postcode on postcodes.io (free,
+ * no key). The street line only comes from Google; without it the address reads
+ * "Pin near M3 2ER" so the required field is never empty, and the trader can
+ * retype it. `exact` is true when a real street address was found.
+ */
+export async function lookupPin(lat: number, lng: number): Promise<PinLookup | null> {
+  let address = '';
+  let postcode = '';
+
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (apiKey) {
+    try {
+      const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+      url.searchParams.set('latlng', `${lat},${lng}`);
+      url.searchParams.set('result_type', 'street_address|premise|subpremise|route');
+      url.searchParams.set('key', apiKey);
+      const response = await fetch(url.toString());
+      if (response.ok) {
+        const data = (await response.json()) as {
+          status?: string;
+          results?: Array<{ address_components?: GeocodeComponent[] }>;
+        };
+        if (data.status === 'OK') {
+          for (const result of data.results ?? []) {
+            const found = addressFromGeocode(result.address_components ?? []);
+            if (found.address) {
+              address = found.address;
+              postcode = found.postcode;
+              break;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[lookupPin] google failed:', error);
+    }
+  }
+
+  if (!postcode) {
+    try {
+      const response = await fetch(
+        `https://api.postcodes.io/postcodes?lon=${lng}&lat=${lat}&limit=1&radius=500`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        postcode = data?.result?.[0]?.postcode ?? '';
+      }
+    } catch {
+      // handled below: no postcode, no answer
+    }
+  }
+
+  if (!postcode) return null;
+  return address
+    ? { address, postcode, exact: true }
+    : { address: `Pin near ${postcode}`, postcode, exact: false };
 }

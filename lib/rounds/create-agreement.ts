@@ -5,6 +5,7 @@ import {
   generateVisitsForAgreement,
   mapAgreementRow,
 } from '@/lib/rounds/generate-visits';
+import { pinOf } from '@/lib/rounds/pin';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import { resolveJobCoordinates } from '@/lib/utils/geocoding';
 import type { AgreementValues } from '@/lib/validations/rounds/agreement';
@@ -59,6 +60,9 @@ async function geocodeAgreement(values: AgreementValues): Promise<{
   lat: number | null;
   lng: number | null;
 }> {
+  // A dropped pin beats the postcode's centre.
+  const pin = pinOf(values);
+  if (pin) return pin;
   const coords = await resolveJobCoordinates({
     postcode: values.postcode,
     fullAddress: `${values.address}, ${values.postcode}`,

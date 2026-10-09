@@ -30,7 +30,7 @@ type PlaceSuggestion = {
 interface AddressAutocompleteInputProps {
   value: string;
   onValueChange: (value: string) => void;
-  onAddressSelect: (details: { address: string; postcode: string }) => void;
+  onAddressSelect: (details: { address: string; postcode: string; lat?: number; lng?: number }) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -125,6 +125,9 @@ export function AddressAutocompleteInput({
         onAddressSelect({
           address: details.address ?? suggestion.text,
           postcode: details.postcode ?? '',
+          ...(typeof details.lat === 'number' && typeof details.lng === 'number'
+            ? { lat: details.lat, lng: details.lng }
+            : {}),
         });
       } else {
         // Details lookup failed — still fill in the suggestion text so the

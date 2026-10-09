@@ -1,14 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AGREEMENT_COLUMNS, mapAgreementRow } from '@/lib/rounds/generate-visits';
-import { joinHouse } from '@/lib/rounds/house';
+import { joinHouse, splitHouse } from '@/lib/rounds/house';
 import { updateAgreementCore } from '@/lib/rounds/update-agreement';
 
 /**
  * The address belongs to the customer. It is stored on the customer row and
- * copied onto each of their services, because visits take the address from
+ * copied onto the services that are at it, because visits take the address from
  * the service they came from.
  *
- * Expects an already validated address and a normalised postcode.
+ * A customer can have services at other properties. Those keep their own
+ * address: only services still at the customer's previous address move, so
+ * saving the customer form (or changing the address) never pulls a second
+ * property back to the first.
+ *
+ * Expects an already validated address and a normalised postcode. `pin` is an
+ * exact spot dropped on the map; it goes onto the services that move.
  */
 export async function setCustomerHouseCore(
   supabase: SupabaseClient,
@@ -17,9 +23,20 @@ export async function setCustomerHouseCore(
     customerId: string;
     address: string;
     postcode: string;
+    pin?: { lat: number; lng: number } | null;
   },
 ): Promise<{ success: true } | { success: false; error: string }> {
   const { tenantId, customerId, address, postcode } = params;
+  const pin = params.pin ?? null;
+
+  const { data: current, error: currentError } = await supabase
+    .from('customers')
+    .select('billing_address')
+    .eq('id', customerId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+  if (currentError) return { success: false, error: currentError.message };
+  const before = splitHouse((current as { billing_address: string | null } | null)?.billing_address);
 
   const { error } = await supabase
     .from('customers')
@@ -38,10 +55,23 @@ export async function setCustomerHouseCore(
     .eq('customer_id', customerId);
   if (loadError) return { success: false, error: loadError.message };
 
-  for (const raw of data ?? []) {
-    const agreement = mapAgreementRow(raw as unknown as Record<string, unknown>);
-    if (!agreement || agreement.status === 'ended') continue;
-    if (agreement.address === address && agreement.postcode === postcode) continue;
+  const agreements = (data ?? [])
+    .map((raw) => mapAgreementRow(raw as unknown as Record<string, unknown>))
+    .filter((agreement): agreement is NonNullable<typeof agreement> => agreement != null && agreement.status !== 'ended');
+
+  // Customers saved before the address moved onto them have no stored address.
+  // The first service's address stood in for it, so it is "the previous address".
+  const previous =
+    before.address && before.postcode
+      ? before
+      : (agreements.find((row) => row.address.trim() && row.postcode.trim()) ?? null);
+
+  for (const agreement of agreements) {
+    const atPrevious =
+      previous != null && agreement.address === previous.address && agreement.postcode === previous.postcode;
+    if (!atPrevious) continue;
+    const unchanged = agreement.address === address && agreement.postcode === postcode;
+    if (unchanged && !pin) continue;
 
     const result = await updateAgreementCore(supabase, {
       tenantId,
@@ -53,6 +83,8 @@ export async function setCustomerHouseCore(
         title: agreement.title,
         address,
         postcode,
+        pin_lat: pin?.lat ?? null,
+        pin_lng: pin?.lng ?? null,
         price: agreement.price,
         duration_minutes: agreement.duration_minutes,
         frequency_days: agreement.frequency_days,

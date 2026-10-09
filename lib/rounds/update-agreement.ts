@@ -7,6 +7,7 @@ import {
   mapAgreementRow,
   type AgreementRow,
 } from '@/lib/rounds/generate-visits';
+import { pinOf, samePin } from '@/lib/rounds/pin';
 import { firstOccurrenceOnOrAfter } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import {
@@ -38,6 +39,12 @@ function timeKey(value: string | null | undefined): string | null {
   return time ? time.slice(0, 5) : null;
 }
 
+/** A pin that puts the service somewhere new. Visits carry the position, so they are rebuilt. */
+function pinMoved(existing: AgreementRow, values: AgreementValues): boolean {
+  const pin = pinOf(values);
+  return pin != null && !samePin(existing, pin);
+}
+
 function scheduleChanged(existing: AgreementRow, values: AgreementValues): boolean {
   return (
     existing.frequency_days !== values.frequency_days ||
@@ -46,6 +53,7 @@ function scheduleChanged(existing: AgreementRow, values: AgreementValues): boole
     timeKey(existing.preferred_time) !== timeKey(values.preferred_time) ||
     existing.address !== values.address ||
     existing.postcode !== values.postcode ||
+    pinMoved(existing, values) ||
     existing.schedule_mode !== values.schedule_mode
   );
 }
@@ -138,8 +146,10 @@ export async function updateAgreementCore(
 
   const today = todayInLondon();
   const changedSchedule = scheduleChanged(existing, values);
-  const coords =
-    existing.address !== values.address || existing.postcode !== values.postcode
+  const pin = pinOf(values);
+  const coords = pin
+    ? pin
+    : existing.address !== values.address || existing.postcode !== values.postcode
       ? await (async () => {
           const geocoded = await resolveJobCoordinates({
             postcode: values.postcode,

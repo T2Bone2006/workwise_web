@@ -13,7 +13,7 @@ import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
 
 interface NewAgreementPageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ first?: string; address?: string; postcode?: string }>;
+  searchParams: Promise<{ first?: string; address?: string; postcode?: string; lat?: string; lng?: string }>;
 }
 
 export default async function NewAgreementPage({
@@ -21,7 +21,7 @@ export default async function NewAgreementPage({
   searchParams,
 }: NewAgreementPageProps) {
   const { id: customerId } = await params;
-  const { first, address, postcode } = await searchParams;
+  const { first, address, postcode, lat, lng } = await searchParams;
   const [tenantId, products] = await Promise.all([
     getTenantIdForCurrentUser(),
     getTenantProducts(),
@@ -53,6 +53,24 @@ export default async function NewAgreementPage({
           ? { address, postcode }
           : null;
 
+  // The exact spot for that address: dropped when the customer was created, or
+  // already on one of their services there.
+  const urlPin =
+    lat != null && lng != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+      ? { lat: Number(lat), lng: Number(lng) }
+      : null;
+  const atHouse = house
+    ? agreements.find(
+        (row) =>
+          row.status !== 'ended' &&
+          row.address === house.address &&
+          row.postcode === house.postcode &&
+          row.lat != null &&
+          row.lng != null,
+      )
+    : null;
+  const initialPin = urlPin ?? (atHouse ? { lat: atHouse.lat as number, lng: atHouse.lng as number } : null);
+
   return (
     <div className="space-y-6">
       <SetBreadcrumbName id={customerId} name={customer.name} />
@@ -80,6 +98,7 @@ export default async function NewAgreementPage({
         today={todayInLondon()}
         showFirstBanner={showFirstBanner}
         house={house}
+        initialPin={initialPin}
       />
     </div>
   );

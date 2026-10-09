@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { format, parseISO } from 'date-fns';
-import { ArrowLeft, CalendarIcon, ClipboardList, Loader2 } from 'lucide-react';
+import { ArrowLeft, CalendarIcon, ClipboardList, Loader2, MapPin } from 'lucide-react';
 import { Avatar, LookCard } from '@/components/look';
 import { formatGbp } from '@/lib/money/pence';
 import { toast } from 'sonner';
@@ -31,6 +31,7 @@ import {
   unhookChromeAddressFill,
 } from '@/components/ui/address-autocomplete-input';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
+import { PinPickerDialog } from '@/components/rounds/pin-picker-dialog';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -104,6 +105,7 @@ export function AgreementForm({
   agreement = null,
   showFirstBanner = false,
   house = null,
+  initialPin = null,
 }: {
   mode: 'create' | 'edit';
   customerId: string;
@@ -112,8 +114,13 @@ export function AgreementForm({
   today: Ymd;
   agreement?: AgreementListRow | null;
   showFirstBanner?: boolean;
-  /** When set, the service uses the customer's address and does not ask again. */
+  /**
+   * The customer's address. A service starts at it and does not ask again, but
+   * "different property" lets it have its own (a landlord with two houses).
+   */
   house?: { address: string; postcode: string } | null;
+  /** An exact spot already known for the customer's address (dropped when they were created). */
+  initialPin?: { lat: number; lng: number } | null;
 }) {
   const router = useRouter();
   const cancelHref = `/customers/${customerId}`;
@@ -123,6 +130,12 @@ export function AgreementForm({
   const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
   const [afterCreateOpen, setAfterCreateOpen] = useState(false);
   const [afterCreateGenerated, setAfterCreateGenerated] = useState(0);
+  // Own address: this service is at a different property from the customer's.
+  const [ownAddress, setOwnAddress] = useState(
+    !house ||
+      (agreement != null && (agreement.address !== house.address || agreement.postcode !== house.postcode)),
+  );
+  const [pinOpen, setPinOpen] = useState(false);
 
   const initialFrequency = agreement?.frequency_days ?? 28;
   const initialParts = frequencyParts(initialFrequency);
@@ -133,8 +146,10 @@ export function AgreementForm({
       customer_id: customerId,
       service_catalog_id: agreement?.service_catalog_id ?? null,
       title: agreement?.title ?? '',
-      address: house?.address ?? agreement?.address ?? '',
-      postcode: house?.postcode ?? agreement?.postcode ?? '',
+      address: agreement?.address ?? house?.address ?? '',
+      postcode: agreement?.postcode ?? house?.postcode ?? '',
+      pin_lat: mode === 'create' ? (initialPin?.lat ?? null) : null,
+      pin_lng: mode === 'create' ? (initialPin?.lng ?? null) : null,
       price: agreement?.price ?? 0,
       duration_minutes: agreement?.duration_minutes ?? 30,
       frequency_days: initialFrequency,
@@ -157,6 +172,10 @@ export function AgreementForm({
   const [frequencyMonths, setFrequencyMonths] = useState(initialParts.months);
   const [frequencyWeeks, setFrequencyWeeks] = useState(initialParts.weeks);
 
+  const watchPinLat = form.watch('pin_lat');
+  const watchPinLng = form.watch('pin_lng');
+  const watchPostcode = form.watch('postcode');
+  const hasPin = watchPinLat != null && watchPinLng != null;
   const watchScheduleMode = form.watch('schedule_mode');
   const watchPrice = form.watch('price');
   const watchTitle = form.watch('title');
@@ -200,6 +219,32 @@ export function AgreementForm({
     form.setValue('frequency_days', frequencyDaysFromParts(months, safeWeeks), {
       shouldValidate: true,
     });
+  };
+
+  const clearPin = () => {
+    if (form.getValues('pin_lat') == null) return;
+    form.setValue('pin_lat', null);
+    form.setValue('pin_lng', null);
+  };
+
+  const startOwnAddress = () => {
+    // A new service at another property starts blank; an existing one keeps what it has.
+    if (mode === 'create') {
+      form.setValue('address', '');
+      form.setValue('postcode', '');
+      form.setValue('pin_lat', null);
+      form.setValue('pin_lng', null);
+    }
+    setOwnAddress(true);
+  };
+
+  const useCustomersAddress = () => {
+    if (!house) return;
+    form.setValue('address', house.address, { shouldValidate: true });
+    form.setValue('postcode', house.postcode, { shouldValidate: true });
+    form.setValue('pin_lat', mode === 'create' ? (initialPin?.lat ?? null) : null);
+    form.setValue('pin_lng', mode === 'create' ? (initialPin?.lng ?? null) : null);
+    setOwnAddress(false);
   };
 
   const save = async (values: FormValues, applyPriceToFuture: boolean) => {
@@ -340,10 +385,24 @@ export function AgreementForm({
                   )}
                 />
 
-                {house ? (
-                  <p className="text-sm text-muted-foreground">
-                    {house.address}, {house.postcode}
-                  </p>
+                {!ownAddress && house ? (
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+                    <p className="font-medium text-foreground">
+                      {house.address}, {house.postcode}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {customerName}&apos;s address
+                      {hasPin ? ' · exact spot saved from the map' : ''}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={startOwnAddress}
+                      disabled={isSubmitting}
+                      className="mt-1.5 text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                    >
+                      This service is at a different property
+                    </button>
+                  </div>
                 ) : (
                 <>
                 <FormField
@@ -355,8 +414,12 @@ export function AgreementForm({
                       <FormControl>
                         <AddressAutocompleteInput
                           value={field.value}
-                          onValueChange={field.onChange}
+                          onValueChange={(value) => {
+                            field.onChange(value);
+                            clearPin(); // a different address, so the dropped pin no longer fits
+                          }}
                           onAddressSelect={({ address, postcode }) => {
+                            clearPin();
                             field.onChange(address);
                             if (postcode) {
                               form.setValue('postcode', postcode, {
@@ -385,6 +448,10 @@ export function AgreementForm({
                           {...field}
                           name="outward"
                           autoComplete="off"
+                          onChange={(event) => {
+                            field.onChange(event);
+                            clearPin();
+                          }}
                           disabled={isSubmitting}
                           className="uppercase"
                         />
@@ -392,6 +459,52 @@ export function AgreementForm({
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPinOpen(true)}
+                    disabled={isSubmitting}
+                  >
+                    <MapPin className="size-4" />
+                    {hasPin ? 'Move the pin' : 'Not sure? Drop a pin on the map'}
+                  </Button>
+                  {hasPin ? (
+                    <>
+                      <span className="text-xs text-muted-foreground">Exact spot saved from the map</span>
+                      <button
+                        type="button"
+                        onClick={clearPin}
+                        className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                      >
+                        Clear pin
+                      </button>
+                    </>
+                  ) : null}
+                  {house ? (
+                    <button
+                      type="button"
+                      onClick={useCustomersAddress}
+                      disabled={isSubmitting}
+                      className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                    >
+                      Use {customerName}&apos;s address instead
+                    </button>
+                  ) : null}
+                </div>
+                <PinPickerDialog
+                  open={pinOpen}
+                  onOpenChange={setPinOpen}
+                  postcode={watchPostcode}
+                  start={hasPin ? { lat: Number(watchPinLat), lng: Number(watchPinLng) } : null}
+                  onPick={(picked) => {
+                    form.setValue('address', picked.address, { shouldValidate: true });
+                    form.setValue('postcode', picked.postcode, { shouldValidate: true });
+                    form.setValue('pin_lat', picked.lat);
+                    form.setValue('pin_lng', picked.lng);
+                  }}
                 />
                 </>
                 )}

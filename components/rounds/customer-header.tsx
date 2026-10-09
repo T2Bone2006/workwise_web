@@ -48,6 +48,10 @@ export function CustomerHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const phoneLabel = formatUkPhoneDisplay(phoneE164) || phone?.trim() || null;
+  const otherProperties = Math.max(
+    0,
+    new Set(places.map((p) => `${p.address}|${p.postcode}`)).size - 1,
+  );
   const mapHref = place ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}` : null;
   const access = accessNotes?.trim() || null;
 
@@ -72,6 +76,11 @@ export function CustomerHeader({
               <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <MapPin className="size-3.5 shrink-0" aria-hidden />
                 <span className="min-w-0 truncate">{place}</span>
+                {otherProperties > 0 ? (
+                  <span className="shrink-0 text-xs">
+                    +{otherProperties} other {otherProperties === 1 ? 'property' : 'properties'}
+                  </span>
+                ) : null}
                 {mapHref ? (
                   <a
                     href={mapHref}

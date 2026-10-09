@@ -335,18 +335,19 @@ export async function regenerateAgreementVisits(
   return { success: true, inserted };
 }
 
-/** The house belongs to the customer. Every service at that customer uses it. */
+/** The house belongs to the customer. Services at that address follow it; services at another property keep theirs. */
 export async function setCustomerHouse(
   customerId: string,
   address: string,
   postcode: string,
+  pin?: { lat: number; lng: number } | null,
 ): Promise<ActionResult> {
   const tenantId = await getTenantIdForCurrentUser();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const parsed = agreementSchema
-    .pick({ address: true, postcode: true })
-    .safeParse({ address, postcode });
+    .pick({ address: true, postcode: true, pin_lat: true, pin_lng: true })
+    .safeParse({ address, postcode, pin_lat: pin?.lat, pin_lng: pin?.lng });
   if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
 
   const supabase = await createClient();
@@ -355,6 +356,10 @@ export async function setCustomerHouse(
     customerId,
     address: parsed.data.address,
     postcode: parsed.data.postcode,
+    pin:
+      parsed.data.pin_lat != null && parsed.data.pin_lng != null
+        ? { lat: parsed.data.pin_lat, lng: parsed.data.pin_lng }
+        : null,
   });
   if (!result.success) return result;
 

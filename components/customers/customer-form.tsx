@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, ArrowLeft, Building2, User, Wallet } from 'lucide-react';
+import { Loader2, ArrowLeft, Building2, MapPin, User, Wallet } from 'lucide-react';
+import { PinPickerDialog } from '@/components/rounds/pin-picker-dialog';
 import { LookCard } from '@/components/look';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { toast } from 'sonner';
@@ -92,6 +93,9 @@ export function CustomerForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  // An exact spot dropped on the map when the address isn't known. It goes onto their services.
+  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
   const isRounds = variant === 'rounds';
   const cancelHref =
     mode === 'edit' && customer?.id ? `/customers/${customer.id}` : '/customers';
@@ -183,7 +187,7 @@ export function CustomerForm({
         const address = (values.address ?? '').trim();
         const postcode = (values.postcode ?? '').trim();
         if (mode === 'edit' && customer?.id) {
-          const houseResult = await setCustomerHouse(customer.id, address, postcode);
+          const houseResult = await setCustomerHouse(customer.id, address, postcode, pin);
           if (!houseResult.success) {
             toast.error(houseResult.error);
             return;
@@ -195,6 +199,10 @@ export function CustomerForm({
             address,
             postcode,
           });
+          if (pin) {
+            params.set('lat', String(pin.lat));
+            params.set('lng', String(pin.lng));
+          }
           router.push(`/customers/${result.id}/agreements/new?${params.toString()}`);
         } else if (customer?.id) {
           leaveViaHistory(router, `/customers/${customer.id}`);
@@ -371,8 +379,12 @@ export function CustomerForm({
           <FormControl>
             <AddressAutocompleteInput
               value={field.value ?? ''}
-              onValueChange={field.onChange}
+              onValueChange={(value) => {
+                field.onChange(value);
+                setPin(null); // typing a different address, so the dropped pin no longer fits
+              }}
               onAddressSelect={({ address, postcode }) => {
+                setPin(null);
                 field.onChange(address);
                 if (postcode) {
                   form.setValue('postcode', postcode, { shouldValidate: true });
@@ -402,6 +414,10 @@ export function CustomerForm({
               name="outward"
               autoComplete="off"
               value={field.value ?? ''}
+              onChange={(event) => {
+                field.onChange(event);
+                setPin(null);
+              }}
               disabled={isSubmitting}
               className="uppercase"
             />
@@ -632,6 +648,41 @@ export function CustomerForm({
                   {emailField}
                   {addressField}
                   {postcodeField}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPinOpen(true)}
+                      disabled={isSubmitting}
+                    >
+                      <MapPin className="size-4" />
+                      {pin ? 'Move the pin' : 'Not sure? Drop a pin on the map'}
+                    </Button>
+                    {pin ? (
+                      <>
+                        <span className="text-xs text-muted-foreground">Exact spot saved from the map</span>
+                        <button
+                          type="button"
+                          onClick={() => setPin(null)}
+                          className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                        >
+                          Clear pin
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                  <PinPickerDialog
+                    open={pinOpen}
+                    onOpenChange={setPinOpen}
+                    postcode={form.watch('postcode') ?? ''}
+                    start={pin}
+                    onPick={(picked) => {
+                      form.setValue('address', picked.address, { shouldValidate: true });
+                      form.setValue('postcode', picked.postcode, { shouldValidate: true });
+                      setPin({ lat: picked.lat, lng: picked.lng });
+                    }}
+                  />
                 </div>
               </LookCard>
               <LookCard title="How they pay and what to know" icon={Wallet} tone="emerald">

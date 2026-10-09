@@ -20,12 +20,21 @@ export const hhmmTimeSchema = z
   .optional()
   .or(z.literal(''));
 
+/**
+ * An exact spot dropped on the map. Optional; when present it is saved on the
+ * service instead of the postcode's centre. Roughly the United Kingdom's box.
+ */
+export const pinLatSchema = z.coerce.number().min(49).max(61).nullable().optional();
+export const pinLngSchema = z.coerce.number().min(-9).max(2.5).nullable().optional();
+
 export const agreementSchema = z.object({
   customer_id: z.string().uuid('Invalid customer'),
   service_catalog_id: z.string().uuid('Invalid service').nullable().optional(),
   title: z.string().trim().min(2).max(120),
   address: z.string().trim().min(5).max(200),
   postcode: ukPostcodeSchema,
+  pin_lat: pinLatSchema,
+  pin_lng: pinLngSchema,
   price: z.coerce.number().min(0).max(100000),
   duration_minutes: z.coerce.number().int().min(5).max(600).default(30),
   frequency_days: z.coerce.number().int().min(1).max(365),
