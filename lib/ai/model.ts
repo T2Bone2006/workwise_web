@@ -71,10 +71,12 @@ export const CONVERSATION_SUMMARY_AI_MODEL =
   process.env.CONVERSATION_SUMMARY_AI_MODEL?.trim() || 'claude-haiku-4-5';
 
 /**
- * Your assistant (2026-10-07): the in-app chat on the dashboard and phone.
- * Sonnet, low effort: owner-approved at about 1-3p a question.
+ * Your assistant (Lily in the app, dashboard and phone). Haiku 5.5 since 2026-10-09: the eval
+ * (scripts/assistant-eval/report-haiku-5-5.md, report-pro-haiku-5-5.md) ran 74 questions at about
+ * 0.04p each against 0.5-0.7p on Sonnet, with only wording nits. Set ASSISTANT_AI_MODEL=claude-sonnet-5-5
+ * to go back.
  */
-export const ASSISTANT_AI_MODEL = process.env.ASSISTANT_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+export const ASSISTANT_AI_MODEL = process.env.ASSISTANT_AI_MODEL?.trim() || 'claude-haiku-5-5';
 
 /**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
