@@ -79,9 +79,10 @@ export const ASSISTANT_AI_MODEL = process.env.ASSISTANT_AI_MODEL?.trim() || 'cla
 /**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
  * among them), so it can only be sent when the configured model supports it.
+ * Haiku 5.5 is the first Haiku that accepts it.
  */
 export function supportsEffort(model: string): boolean {
-  return /^claude-(opus-(5|4-[5-9])|sonnet-5|fable-5|mythos-5)/.test(model);
+  return /^claude-(opus-(5|4-[5-9])|sonnet-5|haiku-5|fable-5|mythos-5)/.test(model);
 }
 
 /** Per-million-token USD rates for cost logging. Falls back to Sonnet rates. */
@@ -90,6 +91,8 @@ const MODEL_RATES: Record<string, { input: number; output: number }> = {
   'claude-opus-5': { input: 5, output: 25 },
   'claude-sonnet-5-5': { input: 2, output: 10 },
   'claude-sonnet-5': { input: 2, output: 10 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5 }, // up to 100k-token prompts; $0.5 / $2.5 above that
+  'claude-haiku-5': { input: 0.1, output: 0.5 },
   'claude-haiku-4-5': { input: 1, output: 5 },
 };
 
