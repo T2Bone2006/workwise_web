@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { LogOut, Moon, Sun } from 'lucide-react';
 import { logout } from '@/lib/actions/auth';
@@ -12,6 +13,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+
+const emptySubscribe = () => () => {};
+
+/**
+ * True only after hydration. Server render and the hydration pass both see
+ * false, so they paint the same button. Radix then mounts on the client.
+ * Its trigger id comes from useId, and that id does not match across the
+ * server and client in this shell (the tree above the menu differs), which
+ * otherwise leaves the account button unpatched.
+ */
+function useHydrated(): boolean {
+  return useSyncExternalStore(emptySubscribe, () => true, () => false);
+}
 
 /**
  * The signed-in user's menu in the new look: theme and sign out (they used to
@@ -32,6 +46,7 @@ export function LookUserMenu({
   triggerLabel?: string;
   children: React.ReactNode;
 }) {
+  const hydrated = useHydrated();
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
@@ -42,13 +57,23 @@ export function LookUserMenu({
     await logout();
   };
 
+  const triggerClass = cn(
+    'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+    triggerClassName,
+  );
+
+  if (!hydrated) {
+    return (
+      <button type="button" aria-label={triggerLabel} className={triggerClass}>
+        {children}
+      </button>
+    );
+  }
+
   return (
     <DropdownMenu>
       {/* No asChild: Slot+useId can mismatch SSR vs client under Next 16 / React 19 */}
-      <DropdownMenuTrigger
-        aria-label={triggerLabel}
-        className={cn('focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', triggerClassName)}
-      >
+      <DropdownMenuTrigger aria-label={triggerLabel} className={triggerClass}>
         {children}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side={side} className="min-w-[220px] rounded-xl border-border bg-popover shadow-lg">

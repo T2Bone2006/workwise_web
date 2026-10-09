@@ -13,6 +13,8 @@ import {
   resumeAgreement,
 } from '@/lib/actions/rounds/agreements';
 import type { AgreementListRow } from '@/lib/data/rounds/agreements';
+import { RoundChip } from '@/components/rounds/round-chip';
+import type { RoundRow } from '@/lib/rounds/rounds';
 import { frequencyLabel } from '@/lib/rounds/parse-frequency';
 import type { Ymd } from '@/lib/rounds/dates';
 import { Badge } from '@/components/ui/badge';
@@ -90,10 +92,13 @@ function scheduleLabel(agreement: AgreementListRow): string {
 export function AgreementsCard({
   customerId,
   agreements,
+  roundByAgreement,
   fetchError = null,
 }: {
   customerId: string;
   agreements: AgreementListRow[];
+  /** The named round each place is in, if any. */
+  roundByAgreement?: Record<string, RoundRow>;
   fetchError?: string | null;
 }) {
   const router = useRouter();
@@ -158,6 +163,7 @@ export function AgreementsCard({
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium text-foreground">{agreement.title}</p>
             {statusBadge(agreement.status)}
+            {roundByAgreement?.[agreement.id] ? <RoundChip round={roundByAgreement[agreement.id]!} /> : null}
           </div>
           <p className="text-sm text-muted-foreground">
             {[agreement.address, agreement.postcode].filter(Boolean).join(', ')}

@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { getSettingsPageData } from '@/lib/data/settings';
 import { getBillingSummary, type BillingSummary } from '@/lib/data/billing';
 import { getPlanSummary } from '@/lib/billing/manage';
+import { getProPlanSummary } from '@/lib/billing/pro-plan';
 import { getReferralData } from '@/lib/data/referral-page';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { getTenantProducts, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
@@ -16,6 +17,7 @@ import { getPaymentSettings } from '@/lib/data/payments/settings';
 import { goCardlessConfig, isGoCardlessConfigured } from '@/lib/gocardless/config';
 import { createClient } from '@/lib/supabase/server';
 import { SettingsBillingTab } from '@/components/settings/settings-billing-tab';
+import { ProPlanTab } from '@/components/settings/plan-billing/pro-plan-tab';
 import { SettingsView } from '@/components/settings/settings-view';
 import {
   PlanBillingLoadError,
@@ -29,7 +31,7 @@ import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; gc?: string }>;
+  searchParams: Promise<{ tab?: string; gc?: string; wording?: string }>;
 }) {
   const raw = await searchParams;
   const [data, billing, products] = await Promise.all([
@@ -86,8 +88,15 @@ export default async function SettingsPage({
   const selfServeBilling = isSelfServeBilling(billing, products.isPro);
   const hasRoundsAccount =
     products.hasRounds || billing.subscriptions.some((sub) => sub.product === 'rounds');
+  const proStripeBilling = isProStripeBilling(billing, products.isPro);
   const billingPanel =
-    selfServeBilling && data.user?.role === 'admin' && data.tenantId ? (
+    proStripeBilling && data.user?.role === 'admin' && data.tenantId ? (
+      <Suspense fallback={<PlanBillingSkeleton />}>
+        <ProBilling tenantId={data.tenantId} billing={billing} />
+      </Suspense>
+    ) : proStripeBilling ? (
+      <PlanBillingOwnerNotice />
+    ) : selfServeBilling && data.user?.role === 'admin' && data.tenantId ? (
       <Suspense fallback={<PlanBillingSkeleton />}>
         <SelfServeBilling tenantId={data.tenantId} billing={billing} />
       </Suspense>
@@ -109,7 +118,7 @@ export default async function SettingsPage({
             initialData={data}
             initialTenantSkills={initialTenantSkills}
             billingPanel={billingPanel}
-            selfServeBilling={selfServeBilling}
+            selfServeBilling={selfServeBilling || proStripeBilling}
             hasRounds={hasRoundsAccount}
             rounds={rounds}
             payments={payments}
@@ -117,6 +126,7 @@ export default async function SettingsPage({
             companyLogoUrl={companyLogoUrl}
             showSkills={products.isPro}
             defaultTab={raw.tab}
+            wording={raw.wording}
             gc={raw.gc ?? null}
             verifyUrl={verifyUrl}
           />
@@ -126,7 +136,7 @@ export default async function SettingsPage({
           initialData={data}
           initialTenantSkills={initialTenantSkills}
           billingPanel={billingPanel}
-          selfServeBilling={selfServeBilling}
+          selfServeBilling={selfServeBilling || proStripeBilling}
           hasRounds={hasRoundsAccount}
           rounds={rounds}
           payments={payments}
@@ -148,6 +158,21 @@ function isSelfServeBilling(billing: BillingSummary, isPro: boolean): boolean {
   if (!billing.hasStripeCustomer) return false;
   const proTiers = new Set<string>(PRO_TIER_PRODUCTS);
   return !billing.subscriptions.some((sub) => sub.source === 'manual' || proTiers.has(sub.product));
+}
+
+/** A Pro business paying through Stripe (not one WorkWise set up by hand) gets the full plan page. */
+function isProStripeBilling(billing: BillingSummary, isPro: boolean): boolean {
+  if (!isPro || !billing.hasStripeCustomer) return false;
+  const proTiers = new Set<string>(PRO_TIER_PRODUCTS);
+  const pro = billing.subscriptions.filter((sub) => proTiers.has(sub.product));
+  return pro.length > 0 && pro.every((sub) => sub.source === 'stripe') && !billing.subscriptions.some((sub) => sub.source === 'manual');
+}
+
+async function ProBilling({ tenantId, billing }: { tenantId: string; billing: BillingSummary }) {
+  const summary = await getProPlanSummary(tenantId);
+  if (summary.kind === 'managed') return <SettingsBillingTab billing={billing} />;
+  if (summary.kind === 'unavailable') return <PlanBillingLoadError />;
+  return <ProPlanTab summary={summary} />;
 }
 
 async function SelfServeBilling({ tenantId, billing }: { tenantId: string; billing: BillingSummary }) {

@@ -17,6 +17,7 @@ export const FALLBACK_SUBJECTS: Record<MessageKind, (biz: string) => string> = {
   reply_ack: (biz) => `${biz}: change to your visit`,
   dd_invite: (biz) => `${biz}: pay by Direct Debit`,
   dd_failed: (biz) => `${biz}: payment not collected`,
+  refund: (biz) => `${biz}: your refund`,
   // Never used — reminders have no email fallback.
   reminder: (biz) => `${biz}: reminder`,
 };

@@ -983,6 +983,8 @@ export function JobsTable({
         <Card
           className={cn(
             'overflow-hidden border-border/80 transition-all duration-300',
+            // The new look sizes the card to its rows; the kit Card's own padding would leave a blank band.
+            'in-data-[look=new]:gap-0 in-data-[look=new]:py-0',
             isDayView
               ? 'border bg-card shadow-sm dark:border-white/[0.08]'
               : cn(
@@ -1445,6 +1447,8 @@ export function JobsTable({
         <Card
           className={cn(
             'overflow-hidden border-border/80 transition-all duration-300',
+            // The new look sizes the card to its rows; the kit Card's own padding would leave a blank band.
+            'in-data-[look=new]:gap-0 in-data-[look=new]:py-0',
             isDayView
               ? 'border bg-card shadow-sm dark:border-white/[0.08]'
               : cn(
@@ -1874,8 +1878,7 @@ export function JobsTable({
                         <TableRow
                           key={job.id}
                           className={cn(
-                            'cursor-pointer transition-all duration-200',
-                            'hover:shadow-[0_0_20px_-8px_var(--glow-primary)]',
+                            'cursor-pointer',
                             // Members share the header's tint so the group reads as one
                             // block; the last member closes it with a firmer edge so the
                             // plain rows below are clearly outside it.
@@ -1888,7 +1891,7 @@ export function JobsTable({
                                     : 'border-b border-border/40'
                                 )
                               : cn(
-                                  'border-border/60 hover:bg-primary/5 dark:hover:bg-primary/10',
+                                  'border-border/60',
                                   i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
                                 )
                           )}

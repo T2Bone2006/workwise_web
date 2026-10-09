@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { getTenantSkills } from '@/lib/actions/skills';
-import { getWorkersForTenant } from '@/lib/data/workers';
+import { countTeamWorkers, getWorkersForTenant } from '@/lib/data/workers';
 import {
   getJobsForTenant,
   getJobsStatusSummary,
@@ -24,6 +24,16 @@ import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banne
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getDeclinedJobs } from '@/lib/data/dashboard';
+import { getProHomeData } from '@/lib/data/pro-home';
+import { namesLine, summariseDay, teamForDay } from '@/lib/jobs/pro-day';
+import { LilyWelcome } from '@/components/assistant/lily-welcome';
+import { GetStartedPanel } from '@/components/jobs/overview/get-started-panel';
+import { getGetStartedState } from '@/lib/data/get-started';
+import { ProKpiTiles } from '@/components/jobs/overview/pro-kpi-tiles';
+import { ProNeedsCard } from '@/components/jobs/overview/pro-needs-card';
+import { TeamTodayCard } from '@/components/jobs/overview/team-today-card';
 import { loadBooksSummary } from '@/lib/books/summary';
 import { currentMonth } from '@/lib/books/periods';
 import { getRoundsHomeData } from '@/lib/data/rounds/home';
@@ -37,7 +47,12 @@ import { getAuthUser } from '@/lib/supabase/auth-user';
 import { createClient } from '@/lib/supabase/server';
 import { RoundsHome } from '@/components/rounds/rounds-home';
 import { NoProducts } from '@/components/dashboard/no-products';
+import { getWorkerLink } from '@/lib/auth/worker-link';
+import { dashboardShouldGoToWorker } from '@/lib/auth/worker-link-core';
+import { WORKER_HOME } from '@/lib/auth/worker-web-access';
 import { PlanEnded } from '@/components/dashboard/plan-ended';
+import { ProPlanEnded } from '@/components/dashboard/pro-plan-ended';
+import { proRestartChoice } from '@/lib/billing/pro-restart';
 import { parsePlanChoice, type PlanChoice } from '@/lib/billing/plans';
 
 interface DashboardPageProps {
@@ -181,6 +196,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const products = await getTenantProducts();
   const rawParams = await searchParams;
 
+  // A self-employed worker with no plan of their own (or only Lite) lands on their worker area.
+  if (products.primary === null || products.primary === 'lite') {
+    const workerLink = await getWorkerLink();
+    if (dashboardShouldGoToWorker({ primary: products.primary, hasWorkerLink: workerLink !== null })) {
+      redirect(WORKER_HOME);
+    }
+  }
+
   // Non-Pro tenants get their product's home here; /dashboard stays the one
   // URL every login lands on.
   if (products.primary === 'rounds') {
@@ -237,11 +260,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   if (products.primary === null) {
     const choice = await restartChoice(tenantId);
     if (choice) return <PlanEnded defaultChoice={choice} />;
+    const proChoice = await proRestartChoice(tenantId);
+    if (proChoice) {
+      const team = await countTeamWorkers(tenantId, { includePending: true });
+      return <ProPlanEnded defaultChoice={proChoice} teamSize={team ?? 0} />;
+    }
     return <NoProducts tenantName={tenantName} />;
   }
 
   const day = parseDayParam(rawParams.date);
   const filters = parseSearchParams(rawParams, day);
+
+  const newLook = (await getTenantLook(products)) === 'new';
 
   const [
     statusSummary,
@@ -250,6 +280,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     visibleColumns,
     { workers },
     { jobs, totalCount, error },
+    proHome,
+    declinedJobs,
+    getStarted,
   ] = await Promise.all([
     getJobsStatusSummary(tenantId, { date_from: day, date_to: day }),
     getPendingSendJobsForTenant(tenantId),
@@ -257,6 +290,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     getJobsListColumnsForTenant(tenantId),
     getWorkersForTenant(tenantId),
     getJobsForTenant(tenantId, filters),
+    newLook ? getProHomeData(tenantId, day) : Promise.resolve(null),
+    newLook ? getDeclinedJobs(tenantId) : Promise.resolve([]),
+    newLook ? getGetStartedState(tenantId) : Promise.resolve(null),
   ]);
 
   const fieldFilterOptions = SYSTEM_FILTER_FIELDS.map((f) => ({
@@ -289,8 +325,53 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         actions={<DashboardDayNav selectedDate={day} />}
       />
 
-      <DeclinedJobsBanner variant="red" />
-      <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+      {newLook && proHome ? (
+        <>
+          {getStarted ? <GetStartedPanel state={getStarted} /> : null}
+          <LilyWelcome pro />
+          <ProKpiTiles
+            day={day}
+            isToday={isToday}
+            counts={summariseDay(proHome.dayJobs)}
+            onJobNames={namesLine(
+              teamForDay(
+                workers.map((w) => ({ id: w.id, name: w.full_name })),
+                proHome.dayJobs,
+              )
+                .filter((m) => m.onJob)
+                .map((m) => m.name),
+            )}
+            declined={declinedJobs.length}
+            unassigned={proHome.needs.unassigned.count}
+            notCompleted={proHome.needs.notCompleted.count}
+          />
+          <div className="grid gap-4 sm:gap-5 lg:grid-cols-5">
+            <div className="min-w-0 lg:col-span-3">
+              <ProNeedsCard
+                fill
+                declined={declinedJobs}
+                pendingSend={pendingSendJobs}
+                needs={proHome.needs}
+                tenantSkills={tenantSkills}
+              />
+            </div>
+            <div className="min-w-0 lg:col-span-2">
+              <TeamTodayCard
+                team={teamForDay(
+                  workers.map((w) => ({ id: w.id, name: w.full_name })),
+                  proHome.dayJobs,
+                )}
+                isToday={isToday}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <DeclinedJobsBanner variant="red" />
+          <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+        </>
+      )}
 
       <JobsTable
         initialJobs={Array.isArray(jobs) ? jobs : []}

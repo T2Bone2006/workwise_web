@@ -21,6 +21,7 @@ import type { TenantSkillRow } from '@/lib/actions/skills';
 import type { CustomerRow } from '@/lib/data/customers';
 import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
 import { cn } from '@/lib/utils';
+import { useLook } from '@/components/look/use-look';
 
 const JobLocationMap = dynamic(
   () => import('@/components/maps/job-location-map').then((mod) => mod.JobLocationMap),
@@ -59,6 +60,8 @@ interface JobDetailViewProps {
   receivingBusinessName?: string | null;
   /** Originating tenant view of a job dispatched to the network (read-only assignment/actions). */
   isNetworkDispatched?: boolean;
+  /** New look: what happened and why, shown above the cards for declined and not-completed jobs. */
+  outcomeNotice?: React.ReactNode;
 }
 
 export function JobDetailView({
@@ -74,7 +77,9 @@ export function JobDetailView({
   isNetworkOriginView = false,
   receivingBusinessName = null,
   isNetworkDispatched = false,
+  outcomeNotice = null,
 }: JobDetailViewProps) {
+  const look = useLook();
   const isCompleted = job.status === 'completed';
   const hasPhotoGroups =
     attachmentPhotos.before.length > 0 || attachmentPhotos.after.length > 0;
@@ -82,6 +87,8 @@ export function JobDetailView({
     industryData !== undefined && !isCompleted && !isIndustryDataEmpty(industryData);
 
   return (
+    <div className="min-w-0 space-y-6">
+    {outcomeNotice}
     <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       {/* Left column — min-w-0 so Leaflet/map content cannot blow out the page width */}
       <div className="min-w-0 space-y-6">
@@ -209,7 +216,8 @@ export function JobDetailView({
             />
           )}
         </div>
-        {!isNetworkDispatched && (
+        {/* A not-completed job has no buttons here, so in the new look the card would be an empty box. */}
+        {!isNetworkDispatched && !(look === 'new' && job.status === 'incomplete') && (
           <JobDetailActionsCard
             jobId={job.id}
             status={job.status}
@@ -217,12 +225,15 @@ export function JobDetailView({
             isNetworkOriginView={isNetworkOriginView}
           />
         )}
-        <JobDetailEmailCard
-          jobId={job.id}
-          status={job.status}
-          defaultRecipient={job.customer?.email ?? null}
-        />
+        <div id="email">
+          <JobDetailEmailCard
+            jobId={job.id}
+            status={job.status}
+            defaultRecipient={job.customer?.email ?? null}
+          />
+        </div>
       </div>
+    </div>
     </div>
   );
 }

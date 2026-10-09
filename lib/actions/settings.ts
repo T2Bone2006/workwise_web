@@ -362,7 +362,7 @@ export async function dangerDeleteTenant(companyName: string, password: string):
     !billingTenant?.stripe_customer_id ||
     (subs ?? []).some(
       (row: { source: string | null; product: string | null }) =>
-        row.source === 'manual' || (row.product != null && proTiers.has(row.product)),
+        row.source === 'manual' || (row.product != null && proTiers.has(row.product) && row.source !== 'stripe'),
     );
   if (!managed) return { success: false, error: 'Use Close my account instead.' };
 

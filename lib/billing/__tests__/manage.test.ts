@@ -607,6 +607,15 @@ describe('cancel and card', () => {
     expect(stripe.subscriptions.update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
   });
 
+  it('lets a Stripe-billed Pro business update its card, but not a hand-set-up one', async () => {
+    stripe.billingPortal.sessions.create.mockResolvedValue({ url: 'https://billing.stripe.com/p/session' });
+    subs = [{ source: 'stripe', product: 'starter' }];
+    await expect(cardUpdateUrl(TENANT)).resolves.toBe('https://billing.stripe.com/p/session');
+
+    subs = [{ source: 'manual', product: 'pro' }];
+    await expect(cardUpdateUrl(TENANT)).rejects.toThrow(MANAGED);
+  });
+
   it('opens the portal at the card form and passes the configuration only when it is set', async () => {
     stripe.billingPortal.sessions.create.mockResolvedValue({ url: 'https://billing.stripe.com/p/session' });
     await expect(cardUpdateUrl(TENANT)).resolves.toBe('https://billing.stripe.com/p/session');

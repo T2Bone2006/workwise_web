@@ -1,4 +1,5 @@
 import { visitDoneSms } from '@/lib/messaging/templates';
+import type { MessageWording } from '@/lib/messaging/wording';
 import { formatGbp } from '@/lib/money/pence';
 import { formatSortCode } from '@/lib/payments/bank-format';
 
@@ -213,6 +214,7 @@ export function composeVisitDoneSms(
     today: string;
     invoiceUrl: string | null;
     contactPhone: string | null;
+    wording?: MessageWording | null;
   },
 ): string | null {
   if (input.visitStatus === 'waived') return null;
@@ -229,10 +231,12 @@ export function composeVisitDoneSms(
     address: input.address,
     dayLabel,
   };
+  const sentence = (key: keyof MessageWording) => extra.wording?.[key] ?? null;
 
   if (input.directDebit && (input.visitStatus === 'partial' || input.visitStatus === 'unpaid')) {
     return visitDoneSms({
       ...base,
+      wording: sentence('visit_done_direct_debit'),
       outcome: {
         kind: 'direct_debit',
         amount: input.visitOutstanding,
@@ -246,6 +250,7 @@ export function composeVisitDoneSms(
       input.visitOutstanding > 0 ? input.visitOutstanding : input.visitDue;
     return visitDoneSms({
       ...base,
+      wording: sentence('visit_done_invoice'),
       outcome: {
         kind: 'invoice',
         number: input.invoiceNumber,
@@ -258,6 +263,7 @@ export function composeVisitDoneSms(
   if (input.paidNow) {
     return visitDoneSms({
       ...base,
+      wording: sentence('visit_done_paid_now'),
       outcome: {
         kind: 'paid_now',
         amount: input.paidNow.amount,
@@ -270,6 +276,7 @@ export function composeVisitDoneSms(
   if (input.visitStatus === 'paid') {
     return visitDoneSms({
       ...base,
+      wording: sentence('visit_done_paid_credit'),
       outcome: { kind: 'paid_by_credit', creditLeft: input.customerCredit },
     });
   }
@@ -282,6 +289,7 @@ export function composeVisitDoneSms(
 
   return visitDoneSms({
     ...base,
+    wording: sentence('visit_done_to_pay'),
     outcome: {
       kind: 'to_pay',
       amount: input.visitOutstanding,

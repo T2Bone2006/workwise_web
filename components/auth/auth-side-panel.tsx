@@ -1,19 +1,34 @@
-import { Check, CloudSun, MessageSquare, Navigation, Receipt, Sparkles, UserPlus } from 'lucide-react';
+import {
+  BadgeCheck,
+  Check,
+  CloudSun,
+  Handshake,
+  MessageSquare,
+  Navigation,
+  Receipt,
+  Send,
+  Sparkles,
+  UserPlus,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type AuthSide = 'rounds' | 'lite' | 'both' | 'neutral';
+export type AuthSide = 'rounds' | 'lite' | 'both' | 'neutral' | 'pro';
 
 /**
  * The brand side is a framed window in the plan's colour (Rounds blue, Lite
  * purple, both blended) with the phone app rising out of the bottom and live
- * notifications landing around it. Everything is code-drawn (owner: no screenshots).
+ * notifications landing around it. Pro is the exception to the blue family: deep navy
+ * with gold, and the phone shows the whole team's day. Everything is code-drawn (owner: no screenshots).
  */
+
+const GOLD = '#F0A500';
 
 export const SIDE_COLOUR: Record<AuthSide, string> = {
   neutral: '#0C66E4',
   rounds: '#0C66E4',
   lite: '#9B30D9',
   both: 'linear-gradient(135deg, #0C66E4 0%, #5A47E0 50%, #9B30D9 100%)',
+  pro: GOLD,
 };
 
 const WINDOW_BG: Record<AuthSide, string> = {
@@ -21,10 +36,11 @@ const WINDOW_BG: Record<AuthSide, string> = {
   rounds: 'linear-gradient(160deg, #1A75F0 0%, #0C66E4 45%, #0750B8 100%)',
   lite: 'linear-gradient(160deg, #AE48EA 0%, #9B30D9 45%, #7A1FB5 100%)',
   both: 'linear-gradient(135deg, #0C66E4 0%, #4F4BE3 48%, #9B30D9 100%)',
+  pro: 'linear-gradient(155deg, #17356B 0%, #0F2347 38%, #0A1A2E 72%, #050F1C 100%)',
 };
 
 type Chip = {
-  icon: 'paid' | 'text' | 'lead' | 'booked' | 'invoice' | 'night';
+  icon: 'paid' | 'text' | 'lead' | 'booked' | 'invoice' | 'night' | 'assign' | 'signoff' | 'partner';
   title: string;
   detail: string;
   /** Position inside the stage. */
@@ -37,7 +53,9 @@ const SIDES: Record<
     tag: string | null;
     lines: string[];
     sub: string;
-    screen: 'stops' | 'jobs' | 'chat';
+    screen: 'stops' | 'jobs' | 'chat' | 'team';
+    /** Index of the headline line set in the accent colour (Pro gold). */
+    accent?: number;
     chips: Chip[];
     label: string;
   }
@@ -90,6 +108,19 @@ const SIDES: Record<
     ],
     label: "A drawn preview of WorkWise: today's round of 24 stops worth £486, a new enquiry from your website and it joining your round.",
   },
+  pro: {
+    tag: 'WorkWise Pro',
+    lines: ['Send the job.', 'Track the visit.', 'Sign it off.'],
+    accent: 1,
+    sub: 'Give every job to the right worker, see each visit as it happens, and bring in partners when you are full.',
+    screen: 'team',
+    chips: [
+      { icon: 'assign', title: 'Job sent to Callum', detail: '14 Mill Lane, 13:00 today', at: 'left-0 top-[60px]' },
+      { icon: 'signoff', title: 'Signed off', detail: 'Priya, boiler service, £140', at: 'right-[-24px] top-[300px]' },
+      { icon: 'partner', title: 'Partner accepted', detail: 'Overflow job, Thursday', at: 'left-[-24px] top-[430px]' },
+    ],
+    label: "A drawn preview of WorkWise Pro: the team's day on one screen, with 12 jobs across 5 workers, a job sent to a worker, a visit signed off and a partner accepting overflow work.",
+  },
 };
 
 const CHIP_ICON = {
@@ -98,6 +129,9 @@ const CHIP_ICON = {
   invoice: { Icon: Receipt, bg: 'bg-[#0A1A2E]' },
   lead: { Icon: UserPlus, bg: 'bg-[#9B30D9]' },
   booked: { Icon: Check, bg: 'bg-[#F0A500]' },
+  assign: { Icon: Send, bg: 'bg-[#0F2347]' },
+  signoff: { Icon: BadgeCheck, bg: 'bg-[#F0A500]' },
+  partner: { Icon: Handshake, bg: 'bg-[#0A1A2E]' },
   night: { Icon: Sparkles, bg: 'bg-[#9B30D9]' },
 } as const;
 
@@ -235,12 +269,69 @@ function ChatScreen() {
   );
 }
 
-function Phone({ screen }: { screen: 'stops' | 'jobs' | 'chat' }) {
+const TEAM = [
+  { who: 'Priya', initials: 'PS', job: 'Boiler service, 8 Elm Road', status: 'done' },
+  { who: 'Dave', initials: 'DM', job: 'Radiator swap, The Oaks', status: 'site' },
+  { who: 'Callum', initials: 'CR', job: 'Leak repair, 14 Mill Lane', status: 'travel' },
+  { who: 'Aisha', initials: 'AK', job: 'Annual gas check, Dr Khan', status: 'site' },
+  { who: 'Ben', initials: 'BH', job: 'Bathroom fit, 6 Mill Lane', status: 'travel' },
+] as const;
+
+const TEAM_STATUS = {
+  done: { label: 'Done', pill: 'bg-[#FFF4D6] text-[#8A5A00]', ring: 'bg-[#F0A500] text-[#0A1A2E]' },
+  site: { label: 'On site', pill: 'bg-emerald-50 text-emerald-700', ring: 'bg-[#0F2347] text-white' },
+  travel: { label: 'On the way', pill: 'bg-blue-50 text-blue-700', ring: 'bg-[#0F2347] text-white' },
+} as const;
+
+/** Pro's phone: the owner's view of the whole team's day, navy header with a gold progress bar. */
+function TeamScreen() {
+  return (
+    <>
+      <div className="bg-gradient-to-b from-[#12294F] to-[#0A1A2E] px-4 pb-4 pt-9 text-white">
+        <div className="flex items-center justify-between text-[12px] font-semibold">
+          <span>Wednesday 7 October</span>
+          <span className="flex items-center gap-1 text-[#F5C451]">
+            <span className="size-1.5 rounded-full bg-[#F0A500]" aria-hidden />
+            Live
+          </span>
+        </div>
+        <p className="mt-3 text-[34px] font-semibold leading-none tracking-[-0.03em]">12 jobs</p>
+        <p className="mt-1.5 text-[12px] text-white/70">5 workers out, 4 done, 2 on site</p>
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/15">
+          <span className="auth-bar block h-full rounded-full bg-[#F0A500]" style={{ width: '33%' }} />
+        </div>
+      </div>
+      <div className="space-y-1.5 bg-[#EEF2F8] p-2.5">
+        {TEAM.map((t) => {
+          const st = TEAM_STATUS[t.status];
+          return (
+            <div key={t.who} className="flex items-center gap-2.5 rounded-xl bg-white px-2.5 py-2 shadow-[0_1px_0_rgba(10,26,46,0.04)]">
+              <span className={cn('flex size-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold', st.ring)}>
+                {t.initials}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold">{t.who}</p>
+                <p className="truncate text-[11px] text-[#64748B]">{t.job}</p>
+              </div>
+              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold', st.pill)}>{st.label}</span>
+            </div>
+          );
+        })}
+        <div className="flex items-center justify-between rounded-xl border border-dashed border-[#F0A500]/70 bg-[#FFFAEB] px-2.5 py-2">
+          <p className="text-[12px] font-semibold text-[#8A5A00]">1 job needs a worker</p>
+          <span className="rounded-full bg-[#0A1A2E] px-2.5 py-0.5 text-[10px] font-semibold text-[#F5C451]">Assign</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Phone({ screen }: { screen: 'stops' | 'jobs' | 'chat' | 'team' }) {
   return (
     <div className="auth-phone relative w-[292px] rounded-[44px] bg-[#0A1220] p-2.5 shadow-[0_40px_80px_-30px_rgba(5,10,30,0.7)] ring-1 ring-white/20">
       <div className="relative h-[560px] overflow-hidden rounded-[36px] bg-white text-[#0A1A2E]">
         <span aria-hidden className="absolute left-1/2 top-2.5 z-10 h-[22px] w-[86px] -translate-x-1/2 rounded-full bg-[#0A1220]" />
-        {screen === 'chat' ? <ChatScreen /> : <DayScreen voice={screen} />}
+        {screen === 'chat' ? <ChatScreen /> : screen === 'team' ? <TeamScreen /> : <DayScreen voice={screen} />}
       </div>
     </div>
   );
@@ -251,6 +342,7 @@ const WEEK: Record<AuthSide, { title: string; total: string; bars: number[]; ink
   rounds: { title: 'Paid this week', total: '£1,578', bars: [21, 24, 18, 22, 16], ink: '#0C66E4' },
   lite: { title: 'Enquiries this week', total: '14 answered', bars: [2, 4, 1, 3, 4], ink: '#9B30D9' },
   both: { title: 'Paid this week', total: '£1,578', bars: [21, 24, 18, 22, 16], ink: '#5A47E0' },
+  pro: { title: 'Jobs signed off this week', total: '46 jobs', bars: [8, 11, 9, 10, 8], ink: '#0F2347' },
 };
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
@@ -273,7 +365,7 @@ function WeekCard({ side }: { side: AuthSide }) {
               className="auth-grow w-full rounded-md"
               style={{
                 height: `${Math.round(12 + ((b - lo) / (hi - lo || 1)) * 30)}px`,
-                background: i === 1 ? ink : `${ink}33`,
+                background: i === 1 ? (side === 'pro' ? GOLD : ink) : `${ink}33`,
                 animationDelay: `${2000 + i * 80}ms`,
               }}
             />
@@ -302,16 +394,28 @@ const MOTION = `
 `;
 
 /** Big soft rings and a fine grid, so the colour has depth without a photo. */
-function WindowBackdrop() {
+function WindowBackdrop({ side }: { side: AuthSide }) {
+  const pro = side === 'pro';
   return (
     <>
+      {pro ? (
+        <>
+          <span aria-hidden className="pointer-events-none absolute -right-32 -top-32 size-[640px] rounded-full bg-[radial-gradient(circle,rgba(240,165,0,0.28)_0%,rgba(240,165,0,0.08)_40%,transparent_70%)]" />
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#F0A500]/60 to-transparent" />
+        </>
+      ) : null}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.14] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_70%_70%,#000_10%,transparent_70%)]"
+        className={cn(
+          'pointer-events-none absolute inset-0 [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_70%_70%,#000_10%,transparent_70%)]',
+          pro
+            ? 'opacity-[0.10] [background-image:linear-gradient(rgba(245,196,81,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(245,196,81,.7)_1px,transparent_1px)]'
+            : 'opacity-[0.14] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)]'
+        )}
       />
-      <span aria-hidden className="pointer-events-none absolute -bottom-40 -right-24 size-[620px] rounded-full border-[60px] border-white/[0.07]" />
-      <span aria-hidden className="pointer-events-none absolute -bottom-10 right-28 size-[360px] rounded-full bg-white/[0.08] blur-2xl" />
-      <span aria-hidden className="pointer-events-none absolute -left-20 -top-28 size-[340px] rounded-full border-[40px] border-white/[0.06]" />
+      <span aria-hidden className={cn('pointer-events-none absolute -bottom-40 -right-24 size-[620px] rounded-full border-[60px]', pro ? 'border-[#F0A500]/[0.08]' : 'border-white/[0.07]')} />
+      <span aria-hidden className={cn('pointer-events-none absolute -bottom-10 right-28 size-[360px] rounded-full blur-2xl', pro ? 'bg-[#2451A0]/30' : 'bg-white/[0.08]')} />
+      <span aria-hidden className={cn('pointer-events-none absolute -left-20 -top-28 size-[340px] rounded-full border-[40px]', pro ? 'border-white/[0.04]' : 'border-white/[0.06]')} />
     </>
   );
 }
@@ -326,7 +430,7 @@ export function AuthSidePanel({
   className?: string;
   children?: React.ReactNode;
 }) {
-  const { tag, lines, sub, screen, chips, label } = SIDES[side];
+  const { tag, lines, sub, screen, chips, label, accent } = SIDES[side];
   return (
     <aside className={cn('h-full min-h-0 p-3', className)}>
       <style>{MOTION}</style>
@@ -334,23 +438,29 @@ export function AuthSidePanel({
         className="relative flex h-full w-full flex-col overflow-hidden rounded-[28px] px-14 pt-14 text-white"
         style={{ background: WINDOW_BG[side] }}
       >
-        <WindowBackdrop />
+        <WindowBackdrop side={side} />
         {children}
 
         <div className="relative z-10 max-w-[520px]">
           {tag ? (
-            <span className="mb-6 inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-[13px] font-semibold ring-1 ring-inset ring-white/25">
+            <span
+              className={cn(
+                'mb-6 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[13px] font-semibold ring-1 ring-inset',
+                side === 'pro' ? 'bg-[#F0A500]/15 text-[#F5C451] ring-[#F0A500]/40' : 'bg-white/15 ring-white/25'
+              )}
+            >
+              {side === 'pro' ? <span aria-hidden className="size-1.5 rounded-full bg-[#F0A500]" /> : null}
               {tag}
             </span>
           ) : null}
           <h2 className="text-[48px] font-semibold leading-[0.98] tracking-[-0.04em] xl:text-[64px]">
-            {lines.map((line) => (
-              <span key={line} className="block">
+            {lines.map((line, i) => (
+              <span key={line} className={cn('block', i === accent && 'text-[#F5B31B]')}>
                 {line}
               </span>
             ))}
           </h2>
-          <p className="mt-5 max-w-[380px] text-pretty text-[16px] leading-relaxed text-white/80">{sub}</p>
+          <p className={cn('mt-5 max-w-[380px] text-pretty text-[16px] leading-relaxed', side === 'pro' ? 'text-white/70' : 'text-white/80')}>{sub}</p>
         </div>
 
         <div
@@ -384,17 +494,17 @@ export function AuthSideStrip({
   className?: string;
   children: React.ReactNode;
 }) {
-  const { lines, chips } = SIDES[side];
+  const { lines, chips, accent } = SIDES[side];
   const first = chips[0];
   const { Icon, bg } = CHIP_ICON[first.icon];
   return (
     <header className={cn('p-3 pb-0', className)}>
       <div className="relative overflow-hidden rounded-[22px] px-4 pb-4 pt-3.5 text-white" style={{ background: WINDOW_BG[side] }}>
-        <span aria-hidden className="pointer-events-none absolute -right-16 -top-20 size-[220px] rounded-full border-[28px] border-white/[0.08]" />
+        <span aria-hidden className={cn('pointer-events-none absolute -right-16 -top-20 size-[220px] rounded-full border-[28px]', side === 'pro' ? 'border-[#F0A500]/[0.12]' : 'border-white/[0.08]')} />
         <div className="relative flex items-center justify-between">{children}</div>
         <p className="relative mt-4 text-[24px] font-semibold leading-[1.02] tracking-[-0.035em]">
-          {lines.map((line) => (
-            <span key={line} className="block">
+          {lines.map((line, i) => (
+            <span key={line} className={cn('block', i === accent && 'text-[#F5B31B]')}>
               {line}
             </span>
           ))}

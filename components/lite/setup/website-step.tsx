@@ -89,7 +89,7 @@ export function WebsiteStep({
           aria-invalid={fieldError?.field === 'website'}
           onChange={(event) => edit(() => setWebsite(event.target.value))}
         />
-        <p className="text-xs text-muted-foreground">The assistant only works on this website.</p>
+        <p className="text-xs text-muted-foreground">Lily only works on this website.</p>
         {fieldError?.field === 'website' ? (
           <p className="text-sm text-destructive" role="alert">
             {fieldError.error}

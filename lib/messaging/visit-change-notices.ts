@@ -625,7 +625,7 @@ export async function notifyVisitChangeUndone(p: {
       .select('id, customer_id, channel, status, job_ids, segments, billed_from, billed_month')
       .eq('tenant_id', p.tenantId)
       .eq('visit_change_id', p.changeId)
-      // A reply ack ("no problem, we'll come on Mon") told them too.
+      // A reply ack ("we'd like to come on Mon") told them too.
       .in('kind', ['visit_change', 'reply_ack']);
     if (messageError) {
       console.error('[notifyVisitChangeUndone] messages', messageError.message);

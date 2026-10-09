@@ -360,7 +360,7 @@ export function MonitorView({
                       <TableRow
                         key={job.id}
                         className={cn(
-                          'border-border/60 transition-all duration-200',
+                          'border-border/60',
                           index % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
                         )}
                       >

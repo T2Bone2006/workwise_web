@@ -102,7 +102,7 @@ export function RoomCard({
                       <td key={weekday} className="h-11 rounded-lg p-0" style={{ backgroundColor: `color-mix(in srgb, var(--tone-teal-solid) ${Math.round(8 + strength * 30)}%, transparent)` }}>
                         <Link
                           href={`/calendar?view=day&date=${day.date}`}
-                          className="flex h-full flex-col items-center justify-center rounded-lg hover:bg-muted/40"
+                          className="flex h-full flex-col items-center justify-center rounded-lg transition-colors hover:bg-muted/50"
                           aria-label={`${WEEKDAY[weekday - 1]} ${date}: ${plural(day.stops, 'stop', 'stops')}`}
                         >
                           <span className="text-[10px] text-muted-foreground">{date}</span>

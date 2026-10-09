@@ -167,8 +167,15 @@ export interface TenantSettings {
     payments?: boolean;
   };
   rounds?: Partial<RoundsSettings>;
+  /**
+   * Pro businesses only: 'new' switches the dashboard to the new look. Absent or
+   * anything else keeps the classic look. Rounds and Lite always get the new look.
+   */
+  look?: 'new' | 'classic';
   /** Phase 3 messaging. Always read through parseMessagingSettings. */
   messaging?: unknown;
+  /** Pro sign-up: the worker number from the pricing slider (advice for the Get started panel; never used for billing). */
+  onboarding?: { expected_workers?: number };
 }
 
 export interface TenantForSettings {

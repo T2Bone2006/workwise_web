@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Check, CheckCircle2, PartyPopper, Route, SkipForward } from 'lucide-react';
 import { Tag } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { formatGbp } from '@/lib/money/pence';
 import type { StopRow, TodayRound } from '@/lib/rounds/today-strip';
 import type { GlanceDay } from '@/lib/rounds/week-glance';
@@ -85,8 +86,8 @@ function StopList({ stops, href }: { stops: StopRow[]; href: string }) {
               <Link
                 href={href}
                 className={cn(
-                  'flex items-center gap-3 rounded-xl px-3.5 py-2.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-                  stop.state === 'next' ? 'bg-(--tone-rounds-soft) ring-1 ring-(--tone-rounds-solid)/40' : 'bg-background hover:bg-muted',
+                  'flex items-center gap-3 rounded-xl px-3.5 py-2.5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  stop.state === 'next' ? 'bg-(--tone-rounds-soft) ring-1 ring-(--tone-rounds-solid)/40' : cn('bg-background', rowHover),
                 )}
               >
                 <StateDot state={stop.state} />

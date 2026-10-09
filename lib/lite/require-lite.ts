@@ -63,7 +63,7 @@ export async function requireLite(): Promise<{ ok: true; ctx: LiteContext } | Li
 
   const products = await getTenantProducts();
   if (!products.hasLite) {
-    return { ok: false, status: 403, error: 'The website assistant is part of Lite.' };
+    return { ok: false, status: 403, error: 'Lily on your website is part of Lite.' };
   }
 
   try {

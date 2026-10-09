@@ -21,6 +21,7 @@ import {
   deactivateCustomer,
   reactivateCustomer,
 } from '@/lib/actions/customers';
+import { rowHover } from '@/components/look/row-hover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Avatar, EmptyState, Tag } from '@/components/look';
+import { RoundChip } from '@/components/rounds/round-chip';
 import {
   Dialog,
   DialogContent,
@@ -57,7 +59,7 @@ import { formatGbp } from '@/lib/money/pence';
 const DEBOUNCE_MS = 300;
 
 type StatusFilter = 'active' | 'inactive' | 'all';
-export type CustomerFilterField = 'service' | 'postcode' | 'payment' | 'frequency';
+export type CustomerFilterField = 'service' | 'postcode' | 'payment' | 'frequency' | 'round';
 export type CustomerFieldFilter = { field: CustomerFilterField; value: string };
 
 const FILTER_FIELDS: { key: CustomerFilterField; label: string }[] = [
@@ -65,6 +67,7 @@ const FILTER_FIELDS: { key: CustomerFilterField; label: string }[] = [
   { key: 'postcode', label: 'Postcode' },
   { key: 'payment', label: 'Payment' },
   { key: 'frequency', label: 'How often' },
+  { key: 'round', label: 'Round' },
 ];
 
 const MAX_FILTERS = 4;
@@ -126,6 +129,7 @@ function valuesForField(
     }
     if (field === 'frequency') customer.frequencies.forEach((value) => values.add(value));
     if (field === 'payment') values.add(paymentLabel(customer.payment_terms));
+    if (field === 'round') customer.rounds.forEach((round) => values.add(round.name));
   }
   return [...values].sort((a, b) => a.localeCompare(b, 'en-GB'));
 }
@@ -154,6 +158,7 @@ function matchesFieldFilters(
     if (filter.field === 'service') return customer.services.includes(filter.value);
     if (filter.field === 'postcode') return postcodeFilterMatches(customer.postcodes, filter.value);
     if (filter.field === 'frequency') return customer.frequencies.includes(filter.value);
+    if (filter.field === 'round') return customer.rounds.some((round) => round.name === filter.value);
     return paymentLabel(customer.payment_terms) === filter.value;
   });
 }
@@ -362,6 +367,7 @@ export function RoundsCustomersTable({
     }
   };
 
+  const hasRounds = customers.some((customer) => customer.rounds.length > 0);
   const appliedFilters = committedFilters(filterRows);
   const narrowed = customers.filter((customer) => {
     if (!matchesFieldFilters(customer, appliedFilters)) return false;
@@ -488,6 +494,7 @@ export function RoundsCustomersTable({
               {filterRows.map((row, index) => {
                 const field = row.field;
                 const options = field ? valuesForField(customers, field) : [];
+                const fieldChoices = FILTER_FIELDS.filter((item) => item.key !== 'round' || hasRounds);
                 return (
                   <div key={row.id} className="flex flex-wrap items-end gap-3">
                     <div className="flex min-w-[160px] max-w-[min(100%,240px)] flex-col gap-1.5">
@@ -507,7 +514,7 @@ export function RoundsCustomersTable({
                         className="h-10 w-full"
                         options={[
                           { value: '__none__', label: 'Any field' },
-                          ...FILTER_FIELDS.map((item) => ({ value: item.key, label: item.label })),
+                          ...fieldChoices.map((item) => ({ value: item.key, label: item.label })),
                         ]}
                       />
                     </div>
@@ -622,7 +629,8 @@ export function RoundsCustomersTable({
               <li
                 key={customer.id}
                 className={cn(
-                  'relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors hover:bg-muted/50',
+                  'relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3',
+                  rowHover,
                   'md:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_7rem_9rem_7rem_2rem]',
                   !customer.is_active && 'opacity-70',
                 )}
@@ -642,6 +650,16 @@ export function RoundsCustomersTable({
                         .filter(Boolean)
                         .join(' · ') || 'No address or phone yet'}
                     </p>
+                    {customer.rounds.length > 0 ? (
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+                        {customer.rounds.slice(0, 2).map((round) => (
+                          <RoundChip key={round.id} round={round} className="max-w-[10rem] py-0.5" />
+                        ))}
+                        {customer.rounds.length > 2 ? (
+                          <span className="text-xs text-muted-foreground">+{customer.rounds.length - 2}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   {!customer.is_active ? <Tag tone="slate">Inactive</Tag> : null}
                 </div>

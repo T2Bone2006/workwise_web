@@ -5,9 +5,10 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
-import { addDays, compareYmd, isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
+import { compareYmd, type Ymd } from '@/lib/rounds/dates';
 import { createAgreementCore } from '@/lib/rounds/create-agreement';
 import { endAgreementCore } from '@/lib/rounds/end-agreement';
+import { pauseAgreementCore, resumeAgreementCore } from '@/lib/rounds/pause-agreement';
 import { setCustomerHouseCore } from '@/lib/rounds/customer-house';
 import { updateAgreementCore } from '@/lib/rounds/update-agreement';
 import {
@@ -16,10 +17,8 @@ import {
   mapAgreementRow,
   type AgreementRow,
 } from '@/lib/rounds/generate-visits';
-import { firstOccurrenceOnOrAfter } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
 import {
-  deleteUntouchedFutureVisits,
   repriceUntouchedFutureVisits,
   RESCHEDULE_STATUSES,
 } from '@/lib/rounds/visit-transitions';
@@ -259,58 +258,16 @@ export async function pauseAgreement(
 
   const idParsed = uuidSchema.safeParse(id);
   if (!idParsed.success) return { success: false, error: firstZodError(idParsed.error) };
-  if (pausedUntil != null && !isValidYmd(pausedUntil)) {
-    return { success: false, error: 'Invalid pause date' };
-  }
 
   const supabase = await createClient();
-  const existing = await loadAgreement(supabase, tenantId, idParsed.data);
-  if (!existing) return { success: false, error: 'Agreement not found' };
-  if (existing.status === 'ended') {
-    return { success: false, error: 'This agreement has ended' };
-  }
+  const result = await pauseAgreementCore(supabase, {
+    tenantId,
+    agreementId: idParsed.data,
+    pausedUntil,
+  });
+  if (!result.success) return result;
 
-  const today = todayInLondon();
-  let nextDueDate = existing.next_due_date;
-  if (pausedUntil) {
-    nextDueDate = firstOccurrenceOnOrAfter(
-      existing.next_due_date,
-      existing.frequency_days,
-      addDays(pausedUntil, 1),
-    );
-  }
-
-  try {
-    await deleteUntouchedFutureVisits(supabase, {
-      tenantId,
-      agreementId: existing.id,
-      fromDate: today,
-      toDate: pausedUntil ?? undefined,
-    });
-
-    const { error } = await supabase
-      .from('service_agreements')
-      .update({
-        status: 'paused',
-        paused_until: pausedUntil,
-        next_due_date: nextDueDate,
-      })
-      .eq('id', existing.id)
-      .eq('tenant_id', tenantId);
-
-    if (error) {
-      console.error('[pauseAgreement]', error);
-      return { success: false, error: error.message };
-    }
-  } catch (err) {
-    console.error('[pauseAgreement]', err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Failed to pause agreement',
-    };
-  }
-
-  revalidateAgreement(existing.customer_id);
+  revalidateAgreement(result.customerId);
   return { success: true };
 }
 
@@ -322,48 +279,10 @@ export async function resumeAgreement(id: string): Promise<ActionResult> {
   if (!idParsed.success) return { success: false, error: firstZodError(idParsed.error) };
 
   const supabase = await createClient();
-  const existing = await loadAgreement(supabase, tenantId, idParsed.data);
-  if (!existing) return { success: false, error: 'Agreement not found' };
-  if (existing.status === 'ended') {
-    return { success: false, error: 'This agreement has ended' };
-  }
+  const result = await resumeAgreementCore(supabase, { tenantId, agreementId: idParsed.data });
+  if (!result.success) return result;
 
-  const today = todayInLondon();
-  const nextDueDate = firstOccurrenceOnOrAfter(
-    existing.next_due_date,
-    existing.frequency_days,
-    today,
-  );
-
-  const { error } = await supabase
-    .from('service_agreements')
-    .update({
-      status: 'active',
-      paused_until: null,
-      next_due_date: nextDueDate,
-    })
-    .eq('id', existing.id)
-    .eq('tenant_id', tenantId);
-
-  if (error) {
-    console.error('[resumeAgreement]', error);
-    return { success: false, error: error.message };
-  }
-
-  const updated = await loadAgreement(supabase, tenantId, existing.id);
-  if (!updated) return { success: false, error: 'Agreement resumed but could not be reloaded' };
-
-  try {
-    await generateForAgreement(supabase, tenantId, updated);
-  } catch (err) {
-    console.error('[resumeAgreement] generate', err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Failed to generate visits',
-    };
-  }
-
-  revalidateAgreement(existing.customer_id);
+  revalidateAgreement(result.customerId);
   return { success: true };
 }
 

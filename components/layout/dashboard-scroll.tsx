@@ -66,16 +66,21 @@ export function DashboardScroll({ children }: { children: React.ReactNode }) {
     scrollToWhenReady(main, restore ? (positions.get(key) ?? 0) : 0);
   }, [pathname]);
 
+  // The map and Lily fill the whole page: no padding, no width cap. They scroll themselves.
+  const fullBleed = pathname === '/map' || pathname === '/assistant';
+
   return (
     <main
       ref={mainRef}
       className={cn(
         'flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain',
-        look === 'new' ? 'px-4 py-5 sm:px-8 sm:py-7' : 'p-4 sm:p-6',
+        fullBleed ? 'p-0' : look === 'new' ? 'px-4 py-5 sm:px-8 sm:py-7' : 'p-4 sm:p-6',
       )}
     >
       <BreadcrumbNamesProvider>
-        {look === 'new' ? (
+        {fullBleed ? (
+          <div className="flex min-h-0 w-full flex-1 flex-col">{children}</div>
+        ) : look === 'new' ? (
           <div className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col">{children}</div>
         ) : (
           children

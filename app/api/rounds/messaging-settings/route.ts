@@ -7,6 +7,7 @@ import {
 import { getMessagingSettings } from '@/lib/data/messaging/settings';
 import { getTenantMessagingContext } from '@/lib/messaging/brand';
 import { saveMessagingSettingsCore } from '@/lib/messaging/settings-core';
+import { wordingCatalogue } from '@/lib/messaging/wording';
 import { messagingSettingsSchema } from '@/lib/validations/messaging';
 
 export async function GET(request: Request) {
@@ -26,6 +27,7 @@ export async function GET(request: Request) {
       contactPhone: ctx?.contactPhone ?? settings.contact_phone,
     },
     companyPhone,
+    catalogue: wordingCatalogue(),
   });
 }
 

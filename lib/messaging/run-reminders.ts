@@ -216,6 +216,7 @@ export async function runRemindersForTenant(
             services: plan.services,
             time: plan.time,
             firstText,
+            wording: ctx.settings.wording?.reminder ?? null,
           }),
         email: null,
         jobIds: plan.jobIds,

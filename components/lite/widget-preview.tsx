@@ -136,7 +136,7 @@ export function WidgetPreview(props: {
         <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3.5 text-white" style={{ backgroundColor: colour }}>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{businessName}</div>
-            <div className="text-[11px] text-white/60">Website assistant</div>
+            <div className="text-[11px] text-white/60">Lily, AI assistant · Powered by WorkWise</div>
           </div>
           <button type="button" onClick={startAgain} className="shrink-0 text-xs text-white/80 underline">
             Start again

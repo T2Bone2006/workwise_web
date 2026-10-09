@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { WORKER_WEB_LOGIN_ERROR_PARAM } from '@/lib/auth/worker-web-access';
+import { WORKER_HOME } from '@/lib/auth/worker-web-access';
 import { redirect } from 'next/navigation';
 
 export default async function Home() {
@@ -16,8 +16,7 @@ export default async function Home() {
       .maybeSingle<{ role: string | null }>();
 
     if (profile?.role === 'worker') {
-      await supabase.auth.signOut();
-      redirect(`/login?error=${WORKER_WEB_LOGIN_ERROR_PARAM}`);
+      redirect(WORKER_HOME);
     }
 
     if (profile?.role === 'customer_portal') {

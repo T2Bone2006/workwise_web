@@ -1,4 +1,4 @@
-import { directDebitFailedSms, directDebitInviteSms } from '@/lib/messaging/templates';
+import { directDebitFailedSms, directDebitInviteSms, refundSms } from '@/lib/messaging/templates';
 import { formatGbp } from '@/lib/money/pence';
 import { firstNameForGreeting } from '@/lib/payments/messages';
 
@@ -86,5 +86,30 @@ export function composeDirectDebitFailed(p: {
       amount: p.amount,
       url: p.payUrl,
     }),
+  };
+}
+
+/** "Your refund is on its way". Pure. No button. */
+export function composeRefund(p: {
+  businessName: string;
+  customerName: string;
+  amount: number;
+  contactPhone: string | null;
+}): {
+  subject: string;
+  greeting: string;
+  emailParagraphs: string[];
+  sms: string;
+} {
+  const first = firstNameForGreeting(p.customerName);
+  const amount = formatGbp(p.amount, { always2dp: true });
+  return {
+    subject: `${p.businessName}: your refund`,
+    greeting: first ? `Hi ${first},` : 'Hello,',
+    emailParagraphs: [
+      `We've refunded ${amount} to the bank account you paid from.`,
+      'It can take a few days to show in your account.',
+    ],
+    sms: refundSms({ brand: { businessName: p.businessName, contactPhone: p.contactPhone }, amount: p.amount }),
   };
 }

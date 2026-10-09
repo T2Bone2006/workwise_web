@@ -1,6 +1,6 @@
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
-import { getWorkersListForTenant, getWorkerSkillsInUseForTenant } from '@/lib/data/workers';
+import { getWorkersListForTenant, getWorkerSkillsInUseForTenant, countTeamWorkers } from '@/lib/data/workers';
 import {
   getWorkerInvitesForTenant,
   getDeactivatedWorkersForTenant,
@@ -10,6 +10,15 @@ import { InvitedWorkersTable } from '@/components/workers/invited-workers-table'
 import { InactiveWorkersTable } from '@/components/workers/inactive-workers-table';
 import { WorkersPageErrorToast } from '@/components/workers/workers-page-error-toast';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { format } from 'date-fns';
+import { getWorkersForTenant } from '@/lib/data/workers';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getWorkerAllowance } from '@/lib/data/worker-allowance';
+import { usageLine } from '@/lib/billing/pro-allowance';
+import { getProDayJobs } from '@/lib/data/pro-home';
+import { teamForDay } from '@/lib/jobs/pro-day';
+import { WorkersKpiTiles } from '@/components/workers/workers-kpi-tiles';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkerStatus, WorkerType, WorkersFilters } from '@/lib/types/worker';
 
@@ -89,15 +98,34 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
     tenantSkills,
     { invites, error: invitesError },
     { workers: inactiveWorkers, error: inactiveError },
+    allowance,
+    acceptedTeamSize,
   ] = await Promise.all([
     getWorkersListForTenant(tenantId, filters),
     getWorkerSkillsInUseForTenant(tenantId),
     getTenantSkills(tenantId),
     getWorkerInvitesForTenant(tenantId),
     getDeactivatedWorkersForTenant(tenantId),
+    getWorkerAllowance(),
+    countTeamWorkers(tenantId, { includePending: false }),
   ]);
+  // Null for manual accounts (RS Locksmiths, Eden) and anyone we can't place on a tier: nothing shows.
+  const allowanceLine = allowance ? usageLine(allowance) : null;
 
   const workersFetchError = error ?? skillsError;
+
+  // New look: a strip about today's team above the table.
+  let team: ReturnType<typeof teamForDay> | null = null;
+  if ((await getTenantLook(await getTenantProducts())) === 'new') {
+    const [{ workers: assignable }, dayJobs] = await Promise.all([
+      getWorkersForTenant(tenantId),
+      getProDayJobs(tenantId, format(new Date(), 'yyyy-MM-dd')),
+    ]);
+    team = teamForDay(
+      assignable.map((w) => ({ id: w.id, name: w.full_name })),
+      dayJobs,
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -106,6 +134,14 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
         title="Workers"
         subtitle="Manage workers and assign jobs"
       />
+
+      {allowanceLine ? (
+        <p className="text-sm text-muted-foreground">
+          {allowanceLine}
+        </p>
+      ) : null}
+
+      {team ? <WorkersKpiTiles team={team} invitesWaiting={invites.length} teamSize={acceptedTeamSize} /> : null}
 
       <Tabs defaultValue={defaultTab} className="space-y-4">
         <TabsList>

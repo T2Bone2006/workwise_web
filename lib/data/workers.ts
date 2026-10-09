@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getAssignableWorkers } from '@/lib/actions/workers';
 import type {
@@ -9,6 +10,34 @@ import type {
 } from '@/lib/types/worker';
 
 const PAGE_SIZE = 50;
+
+/**
+ * Head count of the team for a business. One definition for the Workers page tile and the plan allowance.
+ * Leaves out deactivated workers and the owner's own login (worker_type platform_solo), which is not
+ * someone you send jobs to or pay for. Pending invites count only when asked: they will take a place.
+ * Returns null when the count can't be read.
+ */
+export async function countTeamWorkers(
+  tenantId: string,
+  opts: { includePending: boolean },
+  /** Pass the admin client when there is no signed-in user (the daily check). */
+  client?: SupabaseClient
+): Promise<number | null> {
+  const supabase = client ?? (await createClient());
+  let query = supabase
+    .from('workers')
+    .select('id', { count: 'exact', head: true })
+    .eq('primary_tenant_id', tenantId)
+    .neq('invite_status', 'deactivated')
+    .neq('worker_type', 'platform_solo');
+  if (!opts.includePending) query = query.neq('invite_status', 'pending');
+  const { count, error } = await query;
+  if (error) {
+    console.error('[countTeamWorkers]', error.message);
+    return null;
+  }
+  return count ?? 0;
+}
 
 export interface WorkerRow {
   id: string;

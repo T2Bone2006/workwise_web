@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { TenantSelector, type PortalTenantOption } from '@/components/portal/tenant-selector';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { JobsTableBlock } from '@/components/layout/page-skeletons';
 import { JobsTable } from '@/components/jobs/jobs-table';
 import {
   getJobsForCustomer,
@@ -301,11 +302,7 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
         </p>
       ) : null}
 
-      <Suspense
-        fallback={
-          <div className="h-[28rem] animate-pulse rounded-xl border border-border/70 bg-muted/25" />
-        }
-      >
+      <Suspense fallback={<JobsTableBlock filters={2} labelled />}>
         <JobsTable
           variant="portal"
           basePath="/portal"

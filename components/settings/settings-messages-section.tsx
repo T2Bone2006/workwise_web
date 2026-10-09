@@ -1,8 +1,11 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, type FormEvent, type JSX, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { MessageWording } from '@/components/settings/message-wording';
 import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
 import {
   Card,
@@ -67,9 +70,22 @@ export function SettingsMessagesSection(props: {
   settings: MessagingSettings;
   companyPhone: string | null;
   businessName: string;
+  /** `list`, a wording key, or omitted for the switches. */
+  wording?: string;
   onDirtyChange?: (dirty: boolean) => void;
 }): JSX.Element {
   const { settings, companyPhone, businessName, onDirtyChange } = props;
+  if (props.wording) {
+    return (
+      <MessageWording
+        screen={props.wording}
+        settings={settings}
+        companyPhone={companyPhone}
+        businessName={businessName}
+        onDirtyChange={onDirtyChange}
+      />
+    );
+  }
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
@@ -119,6 +135,7 @@ export function SettingsMessagesSection(props: {
     services: ['window clean'],
     time: null,
     firstText: true,
+    wording: settings.wording.reminder,
   });
   const textCount = Math.max(1, countSegments(preview).segments);
 
@@ -366,6 +383,19 @@ export function SettingsMessagesSection(props: {
           {phoneError ? <p className="text-sm text-destructive">{phoneError}</p> : null}
         </CardContent>
       </Card>
+
+      <Link
+        href="/settings?tab=messages&wording=list"
+        className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/80 px-4 py-3 hover:bg-muted/30 xl:col-span-2"
+      >
+        <span>
+          <span className="block font-medium">Wording</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Change what the reminder and the visit-done text say.
+          </span>
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+      </Link>
 
       <p className="text-sm text-muted-foreground xl:col-span-2">
         Texts come from WorkWise&apos;s number and start with your business name. 100 texts a

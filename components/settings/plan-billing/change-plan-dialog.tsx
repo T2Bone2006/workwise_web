@@ -69,7 +69,7 @@ function downCopy(preview: ReadyPreview, from: PlanChoice): string {
 function upCopy(preview: ReadyPreview, from: PlanChoice, periodEnd: string): string {
   const renews = 'renewsOn' in preview && typeof preview.renewsOn === 'string' ? formatBillDate(preview.renewsOn) : '';
   if (from.interval !== preview.target.interval && renews) {
-    return `That covers your plan until ${renews}. Then ${preview.thenLabel} from ${renews}.`;
+    return `Your new year starts today. Your next yearly bill is ${preview.thenLabel} on ${renews}.`;
   }
   const period = from.interval === 'month' ? 'month' : 'year';
   const when = formatBillDate(periodEnd);

@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { CreditCard, Loader2 } from 'lucide-react';
+import { CreditCard, Loader2, Receipt, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { openCardUpdate } from '@/lib/actions/billing';
 import { formatPence } from '@/lib/billing/plans';
 import type { InvoiceRow } from '@/lib/billing/manage';
 import { cn } from '@/lib/utils';
+import { SectionHeading, accentCardClass } from './section-accent';
 import { formatBillDate, isNextRedirect, type PlanActionRun, type StripePlanSummary } from './current-plan-card';
 
 const BRANDS: Record<string, string> = {
@@ -64,7 +65,7 @@ export function PaymentAndInvoices({
   pending,
   run,
 }: {
-  summary: StripePlanSummary;
+  summary: Pick<StripePlanSummary, 'card' | 'invoices'>;
   pending: boolean;
   run: PlanActionRun;
 }) {
@@ -92,10 +93,10 @@ export function PaymentAndInvoices({
   return (
     <div className="space-y-6">
       <section aria-labelledby="payment-heading">
-        <h2 id="payment-heading" className="text-sm font-semibold">
+        <SectionHeading id="payment-heading" icon={Wallet} tone="emerald">
           Payment
-        </h2>
-        <Card className="glass-card mt-3 gap-0 border-border/80 py-0">
+        </SectionHeading>
+        <Card className={cn('glass-card mt-3 gap-0 border-border/80 py-0', accentCardClass('emerald'))}>
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -121,9 +122,9 @@ export function PaymentAndInvoices({
       </section>
 
       <section aria-labelledby="invoices-heading">
-        <h2 id="invoices-heading" className="text-sm font-semibold">
+        <SectionHeading id="invoices-heading" icon={Receipt} tone="amber">
           Invoices
-        </h2>
+        </SectionHeading>
         <Card className="glass-card mt-3 gap-0 border-border/80 py-0">
           <CardContent className="p-4 sm:p-5">
             {summary.invoices.length === 0 ? (

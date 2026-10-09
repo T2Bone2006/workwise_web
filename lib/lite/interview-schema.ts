@@ -75,7 +75,7 @@ export const EXAMPLES_INTRO =
   "Okay, that's the profile done. Now let's do some pricing examples. I'll describe a job, and you tell me what you'd charge and why.";
 
 export const WEBSITE_QUESTION =
-  "That's the examples done. What's your website address? Something like daveplastering.co.uk — the assistant only works on that site.";
+  "That's the examples done. What's your website address? Something like daveplastering.co.uk — Lily only works on that site.";
 
 export const MOBILE_QUESTION =
   "What's your mobile, so customers can reach you from that text? Say skip if you'd rather leave it out.";

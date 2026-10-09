@@ -84,7 +84,7 @@ export function ConversationTranscript({
               <li key={`${message.at}-${index}`} className={cn('flex', theirs ? 'justify-end' : 'justify-start')}>
                 <div className={cn('max-w-[85%] min-w-0', theirs ? 'items-end' : 'items-start')}>
                   <p className={cn('mb-1 text-xs text-muted-foreground', theirs ? 'text-right' : 'text-left')}>
-                    {theirs ? 'Them' : 'Assistant'}
+                    {theirs ? 'Them' : 'Lily'}
                     {when ? ` · ${when.hm}` : ''}
                   </p>
                   <p

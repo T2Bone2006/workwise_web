@@ -201,7 +201,7 @@ export function CustomerDirectDebitSection(props: {
             {dd.recent.map((r) => (
               <li key={r.collectionId}>
                 {r.date ? `${day(r.date)} · ` : ''}
-                {money(r.amount)} · {RECENT_LABEL[r.status]}
+                {money(r.amount)} · {r.retrying ? 'Trying again' : RECENT_LABEL[r.status]}
               </li>
             ))}
           </ul>

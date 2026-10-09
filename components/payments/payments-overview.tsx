@@ -5,6 +5,7 @@ import { Area, Bar, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, 
 import Link from 'next/link';
 import { CalendarDays, CircleAlert, CircleCheck, TrendingUp, Wallet } from 'lucide-react';
 import { IconChip, Legend, LookCard, StatTile, toneClasses } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { ChaseList } from '@/components/payments/chase-list';
 import { PaymentFeed } from '@/components/payments/payment-feed';
 import { owedAge, summariseOwedBands } from '@/components/payments/owed-age';
@@ -242,7 +243,10 @@ export function PaymentsOverview({
                   <li key={band.key}>
                     <Link
                       href={`/payments?view=overdue&age=${band.key}`}
-                      className="flex items-center gap-2 rounded-md py-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className={cn(
+                        'flex items-center gap-2 rounded-md px-1.5 py-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                        rowHover,
+                      )}
                     >
                       <span className={cn('size-2.5 shrink-0 rounded-full', toneClasses(band.tone).solid)} aria-hidden="true" />
                       <span className="flex-1">{band.label}</span>

@@ -26,5 +26,16 @@ export const signupSchema = z.object({
   ref: z.string().trim().max(16).optional().or(z.literal('')),
 });
 
+/** Client-only check. startSignup still reads signupSchema and ignores this field. */
+export const signupFormSchema = signupSchema
+  .extend({
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+
 export type SignupInput = z.input<typeof signupSchema>;
+export type SignupFormInput = z.input<typeof signupFormSchema>;
 export type SignupValues = z.output<typeof signupSchema>;

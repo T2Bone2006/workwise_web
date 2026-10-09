@@ -57,8 +57,8 @@ export async function getFoundingStatus(): Promise<FoundingStatus> {
 export type Referrer = { tenantId: string; businessName: string; code: string };
 
 /** Service-role lookup. Valid only if: tenants.referral_code = code, closed_at IS NULL,
- *  a subscriptions row with source 'stripe', product rounds|lite, status in ENTITLED_STATUSES,
- *  and no manual / starter|growth|pro row. Otherwise null. */
+ *  a subscriptions row with source 'stripe', product rounds|lite|starter|growth|pro, status in ENTITLED_STATUSES,
+ *  and no manual row and no Pro-tier row that isn't Stripe-billed. Otherwise null. */
 export async function lookupReferrer(code: string): Promise<Referrer | null> {
   const normalised = normaliseReferralCode(code);
   if (!normalised) return null;
@@ -79,7 +79,9 @@ export async function lookupReferrer(code: string): Promise<Referrer | null> {
     if (subError || !subs) return null;
 
     const blocked = subs.some(
-      (row) => row.source === 'manual' || (PRO_TIER_PRODUCTS as readonly string[]).includes(row.product)
+      (row) =>
+        row.source === 'manual' ||
+        ((PRO_TIER_PRODUCTS as readonly string[]).includes(row.product) && row.source !== 'stripe')
     );
     if (blocked) return null;
 
@@ -87,7 +89,7 @@ export async function lookupReferrer(code: string): Promise<Referrer | null> {
     const live = subs.some(
       (row) =>
         row.source === 'stripe' &&
-        (row.product === 'rounds' || row.product === 'lite') &&
+        (row.product === 'rounds' || row.product === 'lite' || (PRO_TIER_PRODUCTS as readonly string[]).includes(row.product)) &&
         entitled.has(row.status)
     );
     if (!live) return null;

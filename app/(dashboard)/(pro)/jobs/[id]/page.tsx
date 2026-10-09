@@ -16,6 +16,10 @@ import {
   type JobAttachmentRow,
 } from '@/lib/utils/job-attachments';
 import { parseSourceFields } from '@/lib/jobs/job-search-matches';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getJobOutcomeSummary } from '@/lib/jobs/job-outcome-summary';
+import { JobOutcomeNotice } from '@/components/jobs/job-outcome-notice';
 
 interface JobDetailPageProps {
   params: Promise<{ id: string }>;
@@ -328,6 +332,17 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     );
   }
 
+  // New look: say what happened and why, up top, for a job that didn't go to plan.
+  // The job was just read through the caller's own session, so the tenant is already checked.
+  let outcomeNotice: React.ReactNode = null;
+  if (
+    (job.status === 'declined' || job.status === 'incomplete') &&
+    (await getTenantLook(await getTenantProducts())) === 'new'
+  ) {
+    const { summary } = await getJobOutcomeSummary(job.id);
+    if (summary) outcomeNotice = <JobOutcomeNotice summary={summary} />;
+  }
+
   return (
     <div className="min-w-0 space-y-6">
       <JobDetailHeader
@@ -358,6 +373,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         isNetworkOriginView={false}
         receivingBusinessName={null}
         isNetworkDispatched={isNetworkDispatched}
+        outcomeNotice={outcomeNotice}
       />
     </div>
   );

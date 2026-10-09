@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/look';
 import { Button } from '@/components/ui/button';
 import { WeatherNow } from '@/components/weather/day-weather';
 import { WeatherCredit } from '@/components/weather/weather-credit';
+import { LilyWelcome } from '@/components/assistant/lily-welcome';
 import { KpiTiles } from '@/components/rounds/overview/kpi-tiles';
 import { MoneyCard } from '@/components/rounds/overview/money-card';
 import { NeedsYouCard } from '@/components/rounds/overview/needs-you-card';
@@ -96,6 +97,8 @@ export function RoundsHome({
           </div>
         ) : null}
       </header>
+
+      <LilyWelcome />
 
       {data.catalogEmpty ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-(--tone-amber-line) bg-(--tone-amber-soft) px-4 py-3 text-sm">

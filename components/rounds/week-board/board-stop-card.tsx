@@ -3,6 +3,7 @@
 import { useState, type JSX } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { ChevronDown, GripVertical } from 'lucide-react';
+import { rowHover } from '@/components/look/row-hover';
 import { cn } from '@/lib/utils';
 import { formatGbp } from '@/lib/money/pence';
 import type { BoardJob, BoardStop } from '@/lib/rounds/week-board';
@@ -120,7 +121,7 @@ function JobRow(props: {
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button type="button" className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/60">
+          <button type="button" className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left', rowHover)}>
             <span className="min-w-0 flex-1 truncate font-medium text-foreground">{job.services}</span>
             <span className="shrink-0 text-muted-foreground">{formatGbp(job.amount)}</span>
             {job.state === 'done' ? (
@@ -187,10 +188,10 @@ export function BoardStopCard(props: {
     <div
       data-stop-id={stop.id}
       className={cn(
-        'relative overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md',
+        'relative overflow-hidden rounded-xl border border-border bg-card',
+        props.join ? 'bg-primary/10 ring-2 ring-primary' : rowHover,
         dimmed && 'opacity-60',
         props.flash && 'ring-2 ring-primary',
-        props.join && 'bg-primary/10 ring-2 ring-primary',
         props.lifted && 'hidden',
       )}
     >
@@ -239,7 +240,7 @@ export function BoardStopCard(props: {
             type="button"
             onClick={() => setShowJobs((open) => !open)}
             aria-expanded={showJobs}
-            className="flex w-full items-center justify-center gap-1 border-t border-border/50 py-0.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted/60"
+            className={cn('flex w-full items-center justify-center gap-1 border-t border-border/50 py-0.5 text-[11px] font-semibold text-muted-foreground', rowHover)}
           >
             {showJobs ? 'Hide jobs' : `Show ${stop.jobCount} jobs`}
             <ChevronDown className={cn('size-3 transition-transform', showJobs && 'rotate-180')} aria-hidden />

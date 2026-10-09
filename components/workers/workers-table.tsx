@@ -20,6 +20,7 @@ import {
   X,
   Check,
   Download,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -548,6 +549,12 @@ export function WorkersTable({
                     Invite worker
                   </Button>
                 </InviteWorkerDialog>
+                <Button asChild variant="outline" size="default" className="gap-1.5">
+                  <Link href="/workers/add-several">
+                    <Users className="size-4" />
+                    Add several
+                  </Link>
+                </Button>
               </div>
             </div>
           </div>
@@ -735,7 +742,7 @@ export function WorkersTable({
                     <TableRow
                       key={worker.id}
                       onClick={() => router.push(`/workers/${worker.id}`)}
-                      className="cursor-pointer border-border/60 transition-colors hover:bg-muted/40"
+                      className="cursor-pointer border-border/60"
                     >
                       <TableCell
                         onClick={(e) => e.stopPropagation()}
@@ -843,7 +850,7 @@ export function WorkersTable({
               {workers.map((worker) => (
                 <div
                   key={worker.id}
-                  className="flex flex-col gap-2 p-4 transition-colors hover:bg-muted/30"
+                  className="flex flex-col gap-2 p-4 transition-colors hover:bg-muted/50"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">

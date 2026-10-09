@@ -21,7 +21,8 @@ export type StructuredAiLogParams = {
     | 'widget_chat'
     | 'lite_interview'
     | 'lite_text_draft'
-    | 'conversation_summary';
+    | 'conversation_summary'
+    | 'assistant_chat';
   prompt: string;
   inputData: Record<string, unknown>;
   parsedOutput: unknown;
@@ -30,6 +31,8 @@ export type StructuredAiLogParams = {
   tokensOutput: number;
   latencyMs: number;
   importSourceId?: string | null;
+  /** When the caller knows the real cost (prompt caching), log that instead of the plain estimate. */
+  costUsd?: number;
 };
 
 export async function logStructuredAiInteraction(
@@ -49,7 +52,7 @@ export async function logStructuredAiInteraction(
     tokens_output: params.tokensOutput,
     tokens_total: params.tokensInput + params.tokensOutput,
     latency_ms: params.latencyMs,
-    cost_usd: estimateAiCostUsd(params.model, params.tokensInput, params.tokensOutput),
+    cost_usd: params.costUsd ?? estimateAiCostUsd(params.model, params.tokensInput, params.tokensOutput),
     accepted: true,
     import_source_id: params.importSourceId ?? null,
     environment: process.env.NODE_ENV || 'production',

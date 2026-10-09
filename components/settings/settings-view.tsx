@@ -48,6 +48,8 @@ interface SettingsViewProps {
   companyLogoUrl?: string | null;
   showSkills: boolean;
   defaultTab?: string;
+  /** `?wording=` on Customer messages: `list` or one message key. */
+  wording?: string;
   /** `?gc=` return code from the GoCardless connect flow. */
   gc?: string | null;
   /** GoCardless's verification page (null when not configured). */
@@ -85,6 +87,7 @@ export function SettingsView({
   companyLogoUrl = null,
   showSkills,
   defaultTab,
+  wording,
   gc,
   verifyUrl,
 }: SettingsViewProps) {
@@ -201,6 +204,7 @@ export function SettingsView({
               settings={messaging.settings}
               companyPhone={messaging.companyPhone}
               businessName={messaging.businessName}
+              wording={wording}
               onDirtyChange={setFormDirty}
             />
           </TabsContent>

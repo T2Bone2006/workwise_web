@@ -41,7 +41,7 @@ export function SignupSummary({ choice, offer }: { choice: PlanChoice; offer: Si
         {chargeLine(choice, offer)}
       </p>
       <p className="mt-2 text-[13px] leading-relaxed text-[#5E6B7D] dark:text-[#A9B6C8]">
-        Cancel any time from Settings. Prices include VAT where applicable.
+        Cancel any time from Settings.
       </p>
     </section>
   );

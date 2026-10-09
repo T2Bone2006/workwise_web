@@ -1,5 +1,6 @@
 export { LookPage } from './look-page';
 export { LookCard } from './look-card';
+export { rowHover } from './row-hover';
 export { StatTile } from './stat-tile';
 export { IconChip } from './icon-chip';
 export { Tag } from './tag';

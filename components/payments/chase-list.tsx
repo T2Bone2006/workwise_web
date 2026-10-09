@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Phone } from 'lucide-react';
 import { Avatar, Tag } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { CopyPayLinkButton } from '@/components/payments/copy-pay-link-button';
 import { formatDayShort } from '@/components/payments/method-style';
 import { OwedAgeTag } from '@/components/payments/owed-age';
@@ -28,7 +30,10 @@ export function ChaseList({ rows, today }: { rows: OwedCustomerRow[]; today: str
         {rows.map((row) => (
           <li
             key={row.customerId}
-            className="group relative flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors first:pt-0 last:pb-0 hover:bg-muted/50 has-[:focus-visible]:bg-muted/50 sm:flex-nowrap sm:gap-4 sm:px-5"
+            className={cn(
+              'group relative flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 first:pt-0 last:pb-0 sm:flex-nowrap sm:gap-4 sm:px-5',
+              rowHover,
+            )}
           >
             <button
               type="button"

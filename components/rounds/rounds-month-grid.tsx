@@ -199,7 +199,7 @@ export function RoundsMonthGrid({
                 href={`/calendar?view=day&date=${ymd}`}
                 className={cn(
                   'relative min-h-[4.75rem] border-b border-r border-border p-1.5 transition-colors sm:min-h-[6.25rem] sm:p-2',
-                  'hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  'hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                   !inMonth && 'opacity-40',
                   baseShade,
                   isToday && 'ring-2 ring-inset ring-(--tone-sky-solid)',

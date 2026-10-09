@@ -246,8 +246,15 @@ describe('closeAccount', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('refuses a Pro or managed business', async () => {
-    state.subs = [{ source: 'stripe', product: 'pro' }];
+  it('refuses a hand-set-up Pro or managed business', async () => {
+    state.subs = [{ source: 'manual', product: 'pro' }];
+    await expect(closeAccount(TENANT, USER)).resolves.toEqual({ ok: false, error: MANAGED });
+
+    state.subs = [{ source: 'stripe', product: 'growth' }, { source: 'manual', product: 'pro' }];
+    await expect(closeAccount(TENANT, USER)).resolves.toEqual({ ok: false, error: MANAGED });
+
+    // a Pro-tier row that isn't Stripe-billed is hand-set-up too
+    state.subs = [{ source: 'stripe', product: 'starter' }, { source: 'other', product: 'pro' }];
     await expect(closeAccount(TENANT, USER)).resolves.toEqual({ ok: false, error: MANAGED });
 
     state.subs = [{ source: 'manual', product: 'rounds' }];
@@ -264,6 +271,21 @@ describe('closeAccount', () => {
     expect(state.tenant.closed_at).toBeNull();
     expect(state.claims).toBe(0);
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it.each(['starter', 'growth', 'pro'])('closes a Stripe-billed %s business: claim, cancel the subscription, ban, email', async (tier) => {
+    state.subs = [{ source: 'stripe', product: tier }];
+    state.liveSubs = [{ id: 'sub_pro', status: 'active' }];
+    const result = await closeAccount(TENANT, USER);
+    expect(result.ok).toBe(true);
+    expect(state.claims).toBe(1);
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      'sub_pro',
+      { prorate: false, invoice_now: false },
+      { idempotencyKey: `close-${TENANT}-sub_pro` },
+    );
+    expect(state.bans.length).toBeGreaterThan(0);
+    expect(sendEmail).toHaveBeenCalled();
   });
 
   it('claims the close once; a second submit is already closed', async () => {

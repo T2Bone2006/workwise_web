@@ -129,7 +129,10 @@ export function BoardDayColumn(props: {
             ) : null}
           </p>
           <p className="truncate text-xs text-muted-foreground">{summary}</p>
-          {props.weather ? <DayWeather weather={props.weather} className="mt-0.5" /> : null}
+          {/* Always one line tall, so columns line up when a day has no forecast. */}
+          <div className="mt-0.5 flex h-4 items-center overflow-hidden">
+            {props.weather ? <DayWeather weather={props.weather} className="whitespace-nowrap" /> : null}
+          </div>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -44,3 +44,6 @@ supabase/jobs_rows*.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+scripts/assistant-eval/report.md
+scripts/assistant-eval/session-cost.txt
+scripts/assistant-eval/size.json

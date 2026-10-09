@@ -150,3 +150,62 @@ export async function validatePostcode(
     return { valid: false };
   }
 }
+
+/**
+ * Many postcodes at once (postcodes.io bulk lookup, 100 per request). Returns
+ * a map from the normalised postcode ("BS7 8AA") to its centre; postcodes it
+ * can't place are simply missing. Never throws.
+ */
+export async function postcodesToLatLng(postcodes: string[]): Promise<Map<string, { lat: number; lng: number }>> {
+  const out = new Map<string, { lat: number; lng: number }>();
+  const wanted = [...new Set(postcodes.map((p) => normalizeUkPostcode(p)).filter((p): p is string => p != null))];
+  for (let i = 0; i < wanted.length; i += 100) {
+    const batch = wanted.slice(i, i + 100);
+    try {
+      const response = await fetch('https://api.postcodes.io/postcodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postcodes: batch }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!response.ok) continue;
+      const body = (await response.json()) as {
+        result?: Array<{ query?: string; result?: { latitude?: number; longitude?: number } | null }>;
+      };
+      for (const row of body.result ?? []) {
+        const lat = row.result?.latitude;
+        const lng = row.result?.longitude;
+        const key = row.query ? normalizeUkPostcode(row.query) : null;
+        if (key && typeof lat === 'number' && typeof lng === 'number') out.set(key, { lat, lng });
+      }
+    } catch (error) {
+      console.error('Bulk postcode lookup failed:', error);
+    }
+  }
+  return out;
+}
+
+/**
+ * The centre of each postcode area ("M14" from "M14 5TY"), for postcodes the
+ * full lookup can't place (new builds, typos, made-up test data). One request
+ * per area. Never throws.
+ */
+export async function outcodesToLatLng(postcodes: string[]): Promise<Map<string, { lat: number; lng: number }>> {
+  const out = new Map<string, { lat: number; lng: number }>();
+  const outcodes = [...new Set(postcodes.map((p) => normalizeUkPostcode(p)?.split(' ')[0] ?? p.trim().split(/\s+/)[0]?.toUpperCase()).filter((p): p is string => Boolean(p)))];
+  await Promise.all(
+    outcodes.slice(0, 20).map(async (code) => {
+      try {
+        const response = await fetch(`https://api.postcodes.io/outcodes/${encodeURIComponent(code)}`, { signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return;
+        const body = (await response.json()) as { result?: { latitude?: number; longitude?: number } | null };
+        const lat = body.result?.latitude;
+        const lng = body.result?.longitude;
+        if (typeof lat === 'number' && typeof lng === 'number') out.set(code, { lat, lng });
+      } catch (error) {
+        console.error('Outcode lookup failed:', error);
+      }
+    }),
+  );
+  return out;
+}

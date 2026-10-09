@@ -6,6 +6,8 @@ import { OverdueBanner } from './overdue-banner';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { ViewAsBanner } from '@/components/admin/view-as-banner';
+import { AskDock } from '@/components/assistant/ask-dock';
+import { AskProvider } from '@/components/assistant/ask-provider';
 import { RestartedWelcome } from '@/components/dashboard/plan-ended';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { LookAttribute } from '@/components/look/look-attribute';
@@ -29,8 +31,13 @@ interface DashboardShellProps {
   showAddLite?: boolean;
   addLiteYearly?: boolean;
   showReferral?: boolean;
+  referralKind?: 'rounds_lite' | 'pro';
+  /** A self-employed worker who has not added Lite: shows the worker-price Add Lite card. */
+  workerLite?: boolean;
   /** Live self-serve subscription is past_due. Never set for Pro or managed businesses. */
   overdue?: boolean;
+  /** Lily: Rounds and Lite logins, and Pro offices on the new look. */
+  assistant?: { hasRounds: boolean; hasLite: boolean; hasPro: boolean } | null;
 }
 
 /**
@@ -49,7 +56,10 @@ export function DashboardShell({
   showAddLite = false,
   addLiteYearly = false,
   showReferral = false,
+  referralKind = 'rounds_lite',
+  workerLite = false,
   overdue = false,
+  assistant = null,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -68,8 +78,8 @@ export function DashboardShell({
     };
   }, []);
 
-  return (
-    <LookProvider value={look}>
+  const shell = (
+    <>
       <LookAttribute look={look} />
       <div
         data-look={look === 'new' ? 'new' : undefined}
@@ -88,6 +98,8 @@ export function DashboardShell({
           showAddLite={showAddLite}
           addLiteYearly={addLiteYearly}
           showReferral={showReferral}
+          referralKind={referralKind}
+          workerLite={workerLite}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {viewAsTenantName && <ViewAsBanner tenantName={viewAsTenantName} />}
@@ -105,7 +117,24 @@ export function DashboardShell({
             {children}
           </DashboardScroll>
         </div>
+        {assistant ? (
+          <Suspense fallback={null}>
+            <AskDock />
+          </Suspense>
+        ) : null}
       </div>
+    </>
+  );
+
+  return (
+    <LookProvider value={look}>
+      {assistant ? (
+        <AskProvider hasRounds={assistant.hasRounds} hasLite={assistant.hasLite} hasPro={assistant.hasPro}>
+          {shell}
+        </AskProvider>
+      ) : (
+        shell
+      )}
     </LookProvider>
   );
 }

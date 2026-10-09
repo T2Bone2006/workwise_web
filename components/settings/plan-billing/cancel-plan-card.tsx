@@ -13,10 +13,13 @@ export function CancellationBanner({
   endsOn,
   pending,
   run,
+  undo: undoAction = undoCancelAction,
 }: {
   endsOn: string;
   pending: boolean;
   run: PlanActionRun;
+  /** Defaults to the Rounds/Lite undo; Pro passes its own. */
+  undo?: () => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +32,7 @@ export function CancellationBanner({
     setUndoing(true);
     const started = run(async () => {
       try {
-        const result = await undoCancelAction();
+        const result = await undoAction();
         if (!result.ok) {
           setError(result.error);
           return;
@@ -65,10 +68,16 @@ export function CancelPlanCard({
   endsOn,
   pending,
   run,
+  cancel: cancelAction = cancelPlanAction,
+  description: descriptionOverride,
 }: {
   endsOn: string;
   pending: boolean;
   run: PlanActionRun;
+  /** Defaults to the Rounds/Lite cancel; Pro passes its own. */
+  cancel?: () => Promise<{ ok: true; endsOn: string } | { ok: false; error: string }>;
+  /** Defaults to the Rounds/Lite wording (texts, Direct Debit); Pro passes its own. */
+  description?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -78,7 +87,7 @@ export function CancelPlanCard({
   const stay = when
     ? `Your plan stays on until ${when}.`
     : 'Your plan stays on until the end of the period you have paid for.';
-  const description = `${stay} After that, reminders, texts and Direct Debit collections stop and you won't be charged again. Your customers and history are kept, so you can restart any time.`;
+  const description = descriptionOverride ?? `${stay} After that, reminders, texts and Direct Debit collections stop and you won't be charged again. Your customers and history are kept, so you can restart any time.`;
 
   const confirm = () => {
     if (pending) return;
@@ -86,7 +95,7 @@ export function CancelPlanCard({
     setCancelling(true);
     const started = run(async () => {
       try {
-        const result = await cancelPlanAction();
+        const result = await cancelAction();
         if (!result.ok) {
           setError(result.error);
           return;

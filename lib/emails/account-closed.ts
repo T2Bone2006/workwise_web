@@ -44,6 +44,7 @@ export async function sendAccountClosedEmail(p: {
     const { error } = await resend.emails.send({
       from: FROM_EMAIL,
       to: p.to,
+      replyTo: 'support@joinworkwise.com',
       subject: built.subject,
       html: built.html,
       text: built.text,

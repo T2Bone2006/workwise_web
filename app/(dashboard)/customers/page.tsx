@@ -87,7 +87,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
     const search = raw.search?.trim() || undefined;
     const status =
       raw.status === 'inactive' || raw.status === 'all' ? raw.status : 'active';
-    const fieldKeys: CustomerFilterField[] = ['service', 'postcode', 'payment', 'frequency'];
+    const fieldKeys: CustomerFilterField[] = ['service', 'postcode', 'payment', 'frequency', 'round'];
     const fieldFilters: CustomerFieldFilter[] = [];
     for (let i = 0; i < 4; i += 1) {
       const field = raw[`f${i}` as 'f0'];

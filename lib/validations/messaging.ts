@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isValidYmd } from '@/lib/rounds/dates';
+import { WORDING_KEYS } from '@/lib/messaging/wording';
 
 export const actOnReplySchema = z.object({
   threadId: z.string().uuid(),
@@ -29,6 +30,11 @@ export const messagingSettingsSchema = z
     message: 'Second reminder must be after the first',
     path: ['chase_second_days'],
   });
+
+export const messageWordingSchema = z.object({
+  key: z.enum(WORDING_KEYS),
+  body: z.string().max(500),
+});
 
 export const customerMessagingSchema = z.object({
   customerId: z.string().uuid(),

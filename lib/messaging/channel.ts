@@ -6,7 +6,8 @@ export type MessageKind =
   | 'visit_change'
   | 'reply_ack'
   | 'dd_invite'
-  | 'dd_failed';
+  | 'dd_failed'
+  | 'refund';
 
 export type MessageGroup = 'reminder' | 'money' | 'change';
 export type Channel = 'text' | 'email';

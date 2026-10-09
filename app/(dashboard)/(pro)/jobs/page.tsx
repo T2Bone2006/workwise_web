@@ -1,3 +1,4 @@
+import { format } from 'date-fns';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
 import { getWorkersForTenant } from '@/lib/data/workers';
@@ -26,6 +27,11 @@ import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banne
 import { JobsPageErrorToast } from '@/components/jobs/jobs-page-error-toast';
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getDeclinedJobs } from '@/lib/data/dashboard';
+import { getProNeeds } from '@/lib/data/pro-home';
+import { ProNeedsCard } from '@/components/jobs/overview/pro-needs-card';
 
 interface JobsPageProps {
   searchParams: Promise<{
@@ -193,6 +199,11 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       getWorkersForTenant(tenantId),
     ]);
 
+    const newLook = (await getTenantLook(await getTenantProducts())) === 'new';
+    const [declinedJobs, proNeeds] = newLook
+      ? await Promise.all([getDeclinedJobs(tenantId), getProNeeds(tenantId, format(new Date(), 'yyyy-MM-dd'))])
+      : [[], null];
+
     const fieldFilterOptions = [
       ...SYSTEM_FILTER_FIELDS.map((f) => ({
         value: f.key,
@@ -249,9 +260,20 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           title="Jobs"
           subtitle="Manage and track all your jobs"
         />
-        <DeclinedJobsBanner variant="red" />
-        <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
-        <JobsForReviewBanner count={unassignedCount} />
+        {newLook && proNeeds ? (
+          <ProNeedsCard
+            declined={declinedJobs}
+            pendingSend={pendingSendJobs}
+            needs={proNeeds}
+            tenantSkills={tenantSkills}
+          />
+        ) : (
+          <>
+            <DeclinedJobsBanner variant="red" />
+            <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+            <JobsForReviewBanner count={unassignedCount} />
+          </>
+        )}
 
         <JobsTable
           initialJobs={Array.isArray(jobs) ? jobs : []}

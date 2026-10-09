@@ -56,10 +56,10 @@ export default async function LiteSetupPage() {
     return (
       <div className="flex w-full min-w-0 flex-col gap-4">
         <PageGradientHeader
-          title="Set up your website assistant"
+          title="Set up Lily on your website"
           subtitle="About 10–15 minutes. Stop any time — it saves as you go."
         />
-        <p className="text-sm text-muted-foreground">Your website assistant isn&apos;t ready yet.</p>
+        <p className="text-sm text-muted-foreground">Lily isn&apos;t ready to go on your website yet.</p>
       </div>
     );
   }

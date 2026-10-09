@@ -10,8 +10,8 @@ describe('text packs', () => {
   it('exposes the two packs and looks them up by key', () => {
     expect(TEXT_ALLOWANCE_PER_MONTH).toBe(100);
     expect(TEXT_PACKS).toHaveLength(2);
-    expect(textPackByKey('texts_250')?.texts).toBe(250);
-    expect(textPackByKey('texts_1000')?.pricePence).toBe(3500);
+    expect(textPackByKey('texts_250')?.texts).toBe(300);
+    expect(textPackByKey('texts_1000')?.pricePence).toBe(4999);
     expect(textPackByKey('nope')).toBeNull();
   });
 });

@@ -5,15 +5,22 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/client';
 import { ENTITLED_STATUSES, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { choiceForPriceId, isPlanKey, monthlyPence, type PlanKey } from '@/lib/billing/plans';
+import { proChoiceForPriceId } from '@/lib/billing/pro-plan-prices';
+import { PRO_TIER_ORDER, isProTier } from '@/lib/billing/pro-plans';
+import {
+  billsNeeded,
+  isFullProBill,
+  paidValuePence as paidValue,
+  rewardPence as rewardFor,
+  type ReferralSide,
+} from '@/lib/billing/referral-reward';
 
 const STALE_MS = 10 * 60 * 1000;
 
 /** Pure. Amount the trader paid for the plan on this invoice, before customer-balance
  *  credit and after coupon discounts: subtotal − sum(total_discount_amounts). */
 export function paidValuePence(invoice: Pick<Stripe.Invoice, 'subtotal' | 'total_discount_amounts'>): number {
-  const discounts = invoice.total_discount_amounts ?? [];
-  const off = discounts.reduce((sum, row) => sum + row.amount, 0);
-  return invoice.subtotal - off;
+  return paidValue(invoice);
 }
 
 /** Pure. True when the invoice is paid and paidValuePence ≥ monthlyPence(plan). */
@@ -47,7 +54,13 @@ type ReferralRecord = {
   claimed_at: string | null;
 };
 
-type SubRow = { source: string | null; product: string | null; status: string | null; plan: string | null };
+type SubRow = {
+  source: string | null;
+  product: string | null;
+  status: string | null;
+  plan: string | null;
+  billing_interval?: string | null;
+};
 
 function logReferral(id: string | null, result: string, err?: unknown) {
   const name = err instanceof Error ? err.name : err ? 'Error' : undefined;
@@ -104,6 +117,52 @@ function planFromRows(rows: SubRow[]): PlanKey | null {
   return null;
 }
 
+/** The Pro plan on this invoice (its plan line, not the extra-worker line), or null when it isn't a Pro invoice. */
+function proSideFromInvoice(invoice: Stripe.Invoice): Extract<ReferralSide, { family: 'pro' }> | null {
+  let fallback: Extract<ReferralSide, { family: 'pro' }> | null = null;
+  for (const line of invoice.lines?.data ?? []) {
+    const choice = proChoiceForPriceId(priceIdOfLine(line));
+    if (!choice) continue;
+    const side = { family: 'pro' as const, tier: choice.tier, interval: choice.interval };
+    const subscriptionLine = line.parent?.type === 'subscription_item_details' || Boolean(line.subscription);
+    if (subscriptionLine && (line.amount ?? 0) > 0) return side;
+    fallback ??= side;
+  }
+  return fallback;
+}
+
+/** The business's live Stripe-billed Pro plan from our rows (highest tier wins), or null. */
+function proSideFromRows(rows: SubRow[]): Extract<ReferralSide, { family: 'pro' }> | null {
+  const entitled = new Set<string>(ENTITLED_STATUSES);
+  const live = rows.filter(
+    (row) => row.source === 'stripe' && isProTier(row.product) && row.status != null && entitled.has(row.status),
+  );
+  for (const tier of [...PRO_TIER_ORDER].reverse()) {
+    const row = live.find((r) => r.product === tier);
+    if (row) return { family: 'pro', tier, interval: row.billing_interval === 'year' ? 'year' : 'month' };
+  }
+  return null;
+}
+
+function referredSideFromRows(rows: SubRow[]): ReferralSide | null {
+  const pro = proSideFromRows(rows);
+  if (pro) return pro;
+  const plan = planFromRows(rows);
+  return plan ? { family: 'rounds_lite', plan } : null;
+}
+
+/** Did the referred business pay enough full bills? Reads Stripe fresh (never trusts the event alone) and counts distinct invoices. */
+async function referredQualifies(invoice: Stripe.Invoice, customerId: string, referred: ReferralSide): Promise<boolean> {
+  if (referred.family === 'rounds_lite') return invoiceQualifies(invoice, referred.plan);
+  if (invoice.status !== 'paid') return false;
+  const listed = await getStripe().invoices.list({ customer: customerId, status: 'paid', limit: 24 });
+  const ids = new Set<string>();
+  for (const paid of listed.data) {
+    if (paid.id && isFullProBill(paid, referred)) ids.add(paid.id);
+  }
+  return ids.size >= billsNeeded(referred);
+}
+
 function claimable(row: ReferralRecord, now: number): boolean {
   if (row.status === 'waiting') return true;
   if (row.status !== 'rewarding') return false;
@@ -155,9 +214,12 @@ export async function onInvoicePaid(invoice: Stripe.Invoice): Promise<Outcome> {
     return { result: 'already_handled' };
   }
 
-  const fromPrice = planFromInvoice(invoice);
-  const plan = fromPrice ?? (await referredPlan(admin, tenant.id));
-  if (!plan || !invoiceQualifies(invoice, plan)) {
+  const proFromPrice = proSideFromInvoice(invoice);
+  const planFromPrice = proFromPrice ? null : planFromInvoice(invoice);
+  const referred: ReferralSide | null =
+    proFromPrice ??
+    (planFromPrice ? { family: 'rounds_lite', plan: planFromPrice } : await referredSide(admin, tenant.id));
+  if (!referred || !(await referredQualifies(invoice, customerId, referred))) {
     logReferral(row.id, 'not_yet');
     return { result: 'not_yet' };
   }
@@ -179,7 +241,7 @@ export async function onInvoicePaid(invoice: Stripe.Invoice): Promise<Outcome> {
     return { result: 'void', reason: 'referrer_no_live_plan' };
   }
 
-  const rewardPence = monthlyPence(referrer.plan);
+  const rewardPence = rewardFor({ referrer: referrer.side, referred });
   const cutoff = new Date(Date.now() - STALE_MS).toISOString();
   const { data: claimed, error: claimError } = await admin
     .from('referrals')
@@ -333,13 +395,16 @@ function asStatus(value: unknown): ReferralRow['status'] | null {
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-async function referredPlan(admin: Admin, tenantId: string): Promise<PlanKey | null> {
-  const { data, error } = await admin.from('subscriptions').select('plan, product, source, status').eq('tenant_id', tenantId);
+async function referredSide(admin: Admin, tenantId: string): Promise<ReferralSide | null> {
+  const { data, error } = await admin
+    .from('subscriptions')
+    .select('plan, product, source, status, billing_interval')
+    .eq('tenant_id', tenantId);
   if (error) throw new Error(error.message);
-  return planFromRows((data ?? []) as SubRow[]);
+  return referredSideFromRows((data ?? []) as SubRow[]);
 }
 
-async function liveReferrer(admin: Admin, tenantId: string): Promise<{ customerId: string; plan: PlanKey } | null> {
+async function liveReferrer(admin: Admin, tenantId: string): Promise<{ customerId: string; side: ReferralSide } | null> {
   const { data: tenant, error } = await admin
     .from('tenants')
     .select('id, closed_at, stripe_customer_id')
@@ -349,15 +414,18 @@ async function liveReferrer(admin: Admin, tenantId: string): Promise<{ customerI
   if (!tenant || tenant.closed_at || !tenant.stripe_customer_id) return null;
   const { data: subs, error: subError } = await admin
     .from('subscriptions')
-    .select('plan, product, source, status')
+    .select('plan, product, source, status, billing_interval')
     .eq('tenant_id', tenantId);
   if (subError) throw new Error(subError.message);
   const rows = (subs ?? []) as SubRow[];
   const pro = new Set<string>(PRO_TIER_PRODUCTS);
-  if (rows.some((row) => row.source === 'manual' || (row.product != null && pro.has(row.product)))) return null;
-  const plan = planFromRows(rows);
-  if (!plan) return null;
-  return { customerId: tenant.stripe_customer_id, plan };
+  // A manual business is never a referrer, nor is one with a Pro row that isn't Stripe-billed.
+  if (rows.some((row) => row.source === 'manual' || (row.product != null && pro.has(row.product) && row.source !== 'stripe'))) {
+    return null;
+  }
+  const side = referredSideFromRows(rows);
+  if (!side) return null;
+  return { customerId: tenant.stripe_customer_id, side };
 }
 
 async function stripeCustomerId(admin: Admin, tenantId: string): Promise<string | null> {

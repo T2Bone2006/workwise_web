@@ -13,6 +13,7 @@ import {
   unlinkExistingMandate,
   type RefreshSummary,
 } from '@/lib/direct-debit/existing';
+import { refundGoCardlessPayment } from '@/lib/direct-debit/refund';
 import { getDirectDebitLink, sendDirectDebitInvite } from '@/lib/direct-debit/setup';
 import {
   directDebitState,
@@ -233,5 +234,29 @@ export async function cancelDirectDebitAction(input: {
   });
   if (!result.ok) return result;
   revalidateDirectDebit(parsed.data.customerId);
+  return result;
+}
+
+const refundSchema = z.object({
+  paymentId: uuid,
+  amount: z.number().finite().min(0.01, 'Enter an amount to refund.').max(100000, 'That is too much.'),
+});
+
+/** Refund all or part of a Direct Debit / Pay by Bank payment. Owner only. */
+export async function refundPaymentAction(input: {
+  paymentId: string;
+  amount: number;
+}): Promise<{ ok: true; refunded: number } | { ok: false; error: string }> {
+  const parsed = refundSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const owner = await requireOwner();
+  if (!owner.ok) return owner;
+  const result = await refundGoCardlessPayment(owner.admin, {
+    tenantId: owner.tenantId,
+    userId: owner.userId,
+    paymentId: parsed.data.paymentId,
+    amount: parsed.data.amount,
+  });
+  if (result.ok) revalidateDirectDebit();
   return result;
 }

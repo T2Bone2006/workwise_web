@@ -42,7 +42,9 @@ export async function provisionFromCheckoutSession(session: Stripe.Checkout.Sess
     .eq('id', intentId)
     .maybeSingle();
   const paid = choiceForPriceId(snap.stripePriceId);
-  if (intent && (paid?.plan !== intent.product || paid?.interval !== intent.billing_interval)) {
+  const paidPlan = snap.proChoice?.tier ?? paid?.plan;
+  const paidInterval = snap.proChoice?.interval ?? paid?.interval;
+  if (intent && (paidPlan !== intent.product || paidInterval !== intent.billing_interval)) {
     console.warn(`[provision] plan mismatch intent=${intentId}`);
   }
 

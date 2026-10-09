@@ -17,6 +17,12 @@ export type TenantFeatures = {
   autopilot: boolean;
   voice: boolean;
   payments: boolean;
+  /** This login has a live link to an employer (a worker area at /worker). */
+  worker: boolean;
+  /** An employee: no business of their own, so the sidebar is the worker area and nothing else. */
+  workerOnly: boolean;
+  /** The employer's business name, for the 'Work for …' block. */
+  workerEmployer: string | null;
 };
 
 export function featuresFromProducts(products: TenantProducts): TenantFeatures {
@@ -28,7 +34,31 @@ export function featuresFromProducts(products: TenantProducts): TenantFeatures {
     autopilot: false,
     voice: false,
     payments: products.hasRounds,
+    worker: false,
+    workerOnly: false,
+    workerEmployer: null,
   };
+}
+
+/** The sidebar shape for an employee: the worker area and nothing from the office. */
+export function employeeFeatures(employerName: string | null): TenantFeatures {
+  return {
+    pro: false,
+    rounds: false,
+    lite: false,
+    widget: false,
+    autopilot: false,
+    voice: false,
+    payments: false,
+    worker: true,
+    workerOnly: true,
+    workerEmployer: employerName,
+  };
+}
+
+/** A subcontractor keeps their own business's blocks and gains the 'Work for …' block. */
+export function withWorkerBlock(features: TenantFeatures, employerName: string | null): TenantFeatures {
+  return { ...features, worker: true, workerOnly: false, workerEmployer: employerName };
 }
 
 export async function getTenantFeatures(): Promise<TenantFeatures> {

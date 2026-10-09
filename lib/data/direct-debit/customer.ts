@@ -25,6 +25,7 @@ export type CustomerDirectDebit = {
     collectionId: string;
     amount: number;
     status: 'processing' | 'succeeded' | 'failed' | 'error' | 'cancelled';
+    retrying: boolean; // Success+ is resubmitting it
     date: string;
   }[]; // last 10
 };
@@ -89,7 +90,7 @@ export async function getCustomerDirectDebit(
       .eq('customer_id', customerId),
     supabase
       .from('direct_debit_collections')
-      .select('id, amount, status, resolution, charge_date, failure_code, submitted_at, finished_at, created_at')
+      .select('id, amount, status, resolution, charge_date, failure_code, gocardless_status, submitted_at, finished_at, created_at')
       .eq('tenant_id', tenantId)
       .eq('customer_id', customerId),
   ]);
@@ -149,6 +150,7 @@ export async function getCustomerDirectDebit(
     collectionId: String(r.id),
     amount: num(r.amount),
     status: (r.status === 'creating' ? 'processing' : r.status) as CustomerDirectDebit['recent'][number]['status'],
+    retrying: r.status === 'processing' && r.gocardless_status === 'retrying',
     date: day(str(r.finished_at) ?? str(r.submitted_at) ?? str(r.created_at)),
   }));
 

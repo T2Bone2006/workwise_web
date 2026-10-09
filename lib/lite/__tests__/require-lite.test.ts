@@ -115,7 +115,7 @@ describe('requireLite', () => {
     session.userRow = { data: { role: 'admin', tenant_id: 'tenant-1' }, error: null };
     getTenantProducts.mockResolvedValue({ hasLite: false, hasRounds: false, isPro: true });
     const pro = await requireLite();
-    expect(pro).toEqual({ ok: false, status: 403, error: 'The website assistant is part of Lite.' });
+    expect(pro).toEqual({ ok: false, status: 403, error: 'Lily on your website is part of Lite.' });
     expect(adminFrom).not.toHaveBeenCalled();
 
     getTenantProducts.mockResolvedValue({ hasLite: false, hasRounds: true, isPro: false });

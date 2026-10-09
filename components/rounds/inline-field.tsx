@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { rowHover } from '@/components/look/row-hover';
 import { cn } from '@/lib/utils';
 
 type EditScope = {
@@ -65,7 +66,7 @@ function EditableValue(props: {
       <button
         type="button"
         onClick={props.onEdit}
-        className="mt-0.5 flex w-full items-start justify-between gap-3 rounded-md py-0.5 text-left text-sm hover:bg-muted/60"
+        className={cn('mt-0.5 flex w-full items-start justify-between gap-3 rounded-md py-0.5 text-left text-sm', rowHover)}
       >
         <span className={cn('min-w-0 whitespace-pre-wrap', props.empty && 'text-muted-foreground')}>
           {props.children}

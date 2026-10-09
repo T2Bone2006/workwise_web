@@ -88,7 +88,7 @@ export function StatusCard({
       </div>
       <dl className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl bg-muted/50 p-3">
-          <dt className="text-xs font-medium text-muted-foreground">Assistant</dt>
+          <dt className="text-xs font-medium text-muted-foreground">Lily</dt>
           <dd className="mt-1"><Tag tone={paused ? 'slate' : 'emerald'}>{paused ? 'Paused' : 'Switched on'}</Tag></dd>
           <p className="mt-1 text-xs text-muted-foreground">
             {paused
@@ -121,7 +121,7 @@ export function StatusCard({
           <p className="text-sm">Your website won&apos;t show the chat until you switch it back on.</p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" disabled={pending} onClick={() => void save(false)}>
-              Pause the assistant
+              Pause Lily
             </Button>
             <Button type="button" variant="outline" disabled={pending} onClick={() => setConfirming(false)}>
               Cancel
@@ -138,7 +138,7 @@ export function StatusCard({
             else setConfirming(true);
           }}
         >
-          {paused ? 'Switch the assistant back on' : 'Pause the assistant'}
+          {paused ? 'Switch Lily back on' : 'Pause Lily'}
         </Button>
       )}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}

@@ -9,6 +9,7 @@ import { Avatar } from '@/components/look/avatar';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { AskSidebarButton } from '@/components/assistant/ask-sidebar-button';
 import { AddLiteCard } from './add-lite-card';
 import { ReferralCard } from './referral-card';
 import { LookUserMenu } from './look-user-menu';
@@ -63,6 +64,8 @@ export function LookSidebar({
   showAddLite = false,
   addLiteYearly = false,
   showReferral = false,
+  referralKind = 'rounds_lite',
+  workerLite = false,
 }: SidebarProps) {
   const pathname = usePathname();
   const collapsed = useSyncExternalStore(subscribeCollapsed, readCollapsed, () => false);
@@ -207,12 +210,19 @@ export function LookSidebar({
               <div className={cn('mb-1', expanded ? 'w-full' : 'flex w-[48px] justify-center')}>
                 <AddLiteCard collapsed={!expanded} yearly={addLiteYearly} />
               </div>
+            ) : workerLite ? (
+              <div className={cn('mb-1', expanded ? 'w-full' : 'flex w-[48px] justify-center')}>
+                <AddLiteCard collapsed={!expanded} yearly={false} worker />
+              </div>
             ) : null}
             {showReferral ? (
               <div className={cn('mb-1', expanded ? 'w-full' : 'flex w-[48px] justify-center')}>
-                <ReferralCard collapsed={!expanded} />
+                <ReferralCard collapsed={!expanded} kind={referralKind} />
               </div>
             ) : null}
+            <div className="mb-1">
+              <AskSidebarButton expanded={expanded} onOpened={isMobile ? onMobileClose : undefined} />
+            </div>
             {settingsSection?.items.map((item) => <div key={item.href}>{renderLink(item, homeAccent, isMobile)}</div>)}
           </div>
         </nav>

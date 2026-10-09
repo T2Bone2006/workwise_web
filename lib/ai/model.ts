@@ -71,6 +71,12 @@ export const CONVERSATION_SUMMARY_AI_MODEL =
   process.env.CONVERSATION_SUMMARY_AI_MODEL?.trim() || 'claude-haiku-4-5';
 
 /**
+ * Your assistant (2026-10-07): the in-app chat on the dashboard and phone.
+ * Sonnet, low effort: owner-approved at about 1-3p a question.
+ */
+export const ASSISTANT_AI_MODEL = process.env.ASSISTANT_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
  * among them), so it can only be sent when the configured model supports it.
  */
@@ -94,4 +100,23 @@ export function estimateAiCostUsd(
 ): number {
   const rate = MODEL_RATES[model] ?? { input: 3, output: 15 };
   return (tokensInput / 1_000_000) * rate.input + (tokensOutput / 1_000_000) * rate.output;
+}
+
+/**
+ * Cost with prompt caching: cache writes are billed at 1.25x the input rate
+ * (5-minute cache) or 2x (1-hour cache, `cacheWrite1h`, which is part of
+ * `cacheWrite`), cache reads at 0.1x. `uncachedInput` is the API's
+ * input_tokens (the part that was neither read from nor written to the cache).
+ */
+export function estimateCachedAiCostUsd(
+  model: string,
+  t: { uncachedInput: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number },
+): number {
+  const rate = MODEL_RATES[model] ?? { input: 3, output: 15 };
+  const write1h = Math.min(t.cacheWrite1h ?? 0, t.cacheWrite);
+  const write5m = t.cacheWrite - write1h;
+  return (
+    (t.uncachedInput * rate.input + write5m * rate.input * 1.25 + write1h * rate.input * 2 + t.cacheRead * rate.input * 0.1 + t.output * rate.output) /
+    1_000_000
+  );
 }

@@ -50,8 +50,8 @@ export type ChangePreview =
       todayPence: number;
       thenLabel: string;
       effectiveDate: string;
-      /** When the next full bill is due. After a monthly to yearly switch Stripe keeps the original
-       *  anniversary, so this is the end of the time charged now, not the old monthly renewal. */
+      /** When the next full bill is due. After a monthly to yearly switch the year starts today
+       *  (the billing day moves to the day they switched), so this is a year from now. */
       renewsOn: string;
     }
   | { ok: true; kind: 'down_at_renewal'; target: PlanChoice; todayPence: 0; thenLabel: string; effectiveDate: string }
@@ -72,6 +72,11 @@ const ENDED_ERROR = 'Your plan has ended.';
 const UNDO_FIRST = 'Undo your cancellation first.';
 const UPDATE_CARD = 'Update your card first, then you can change your plan.';
 const NOT_OFFERED = 'That change isn’t available here. Contact us and we’ll sort it.';
+/** Switching monthly to yearly starts the new year today, so the billing day moves to the day they switched. */
+function startsNewYear(from: PlanChoice, to: PlanChoice): boolean {
+  return from.interval === 'month' && to.interval === 'year';
+}
+
 const YEARLY_AFTER_OFFER = 'You can switch to yearly once your current offer has finished.';
 const CANCEL_WAITING = "Cancel the change that's waiting, then you can upgrade.";
 const AMOUNT_CHANGED = 'The amount has changed. Please check it and confirm again.';
@@ -97,12 +102,12 @@ type Loaded =
   | { kind: 'ended'; lastChoice: PlanChoice | null; endedAt: string | null }
   | Ready;
 
-function logStripe(scope: string, err: unknown) {
+export function logStripe(scope: string, err: unknown) {
   const name = err instanceof Error ? err.name : 'Error';
   console.error(`[billing] ${scope}`, name);
 }
 
-function iso(unixSeconds: number | null | undefined): string | null {
+export function iso(unixSeconds: number | null | undefined): string | null {
   return unixSeconds ? new Date(unixSeconds * 1000).toISOString() : null;
 }
 
@@ -112,7 +117,7 @@ function dayMonth(unixSeconds: number): string {
   );
 }
 
-function periodEndUnix(subscription: Stripe.Subscription): number | null {
+export function periodEndUnix(subscription: Stripe.Subscription): number | null {
   const item = subscription.items?.data?.[0];
   const legacy = (subscription as unknown as { current_period_end?: number }).current_period_end;
   return item?.current_period_end ?? legacy ?? null;
@@ -232,7 +237,7 @@ export async function undoCancel(tenantId: string): Promise<{ ok: true } | { ok:
 
 /** Billing portal session opened at the card form (STRIPE_PORTAL_CONFIGURATION_ID). */
 export async function cardUpdateUrl(tenantId: string): Promise<string> {
-  const account = await loadAccount(tenantId);
+  const account = await loadCardAccount(tenantId);
   if (account.kind === 'managed') throw new Error(MANAGED_ERROR);
   const configuration = process.env.STRIPE_PORTAL_CONFIGURATION_ID;
   const session = await getStripe().billingPortal.sessions.create({
@@ -244,7 +249,7 @@ export async function cardUpdateUrl(tenantId: string): Promise<string> {
   return session.url;
 }
 
-async function currentUserIsAdminOf(tenantId: string): Promise<boolean> {
+export async function currentUserIsAdminOf(tenantId: string): Promise<boolean> {
   try {
     const supabase = await createClient();
     const {
@@ -275,6 +280,26 @@ async function loadAccount(tenantId: string): Promise<Account> {
   const list = (rows ?? []) as SubRow[];
   const blocked = list.some((row) => row.source === 'manual' || (row.product != null && PRO_TIERS.has(row.product)));
   if (!customerId || blocked) return { kind: 'managed' };
+  return { kind: 'stripe', customerId };
+}
+
+/**
+ * Like loadAccount, but a Stripe-billed Pro business may update its card too. Plan changes and
+ * cancelling stay blocked for Pro (loadAccount): those are sorted out by hand.
+ */
+async function loadCardAccount(tenantId: string): Promise<Account> {
+  const supabase = await createClient();
+  const [{ data: tenant, error: tenantError }, { data: rows, error: rowsError }] = await Promise.all([
+    supabase.from('tenants').select('stripe_customer_id').eq('id', tenantId).maybeSingle(),
+    supabase.from('subscriptions').select('source, product').eq('tenant_id', tenantId),
+  ]);
+  if (tenantError || rowsError) {
+    console.error('[billing] account', 'read_failed');
+    throw new Error('Could not read the plan.');
+  }
+  const customerId = tenant?.stripe_customer_id;
+  const manual = ((rows ?? []) as SubRow[]).some((row) => row.source === 'manual');
+  if (!customerId || manual) return { kind: 'managed' };
   return { kind: 'stripe', customerId };
 }
 
@@ -375,6 +400,7 @@ async function previewLoaded(loaded: Loaded, target: PlanChoice): Promise<Change
     subscription: loaded.subscription.id,
     subscription_details: {
       items: [{ id: loaded.itemId, price: priceIdFor(target) }],
+      ...(startsNewYear(loaded.choice, target) ? { billing_cycle_anchor: 'now' as const } : {}),
       proration_behavior: 'always_invoice',
     },
   });
@@ -413,6 +439,7 @@ async function applyUpgrade(loaded: Ready, target: PlanChoice, nonce: string): P
     loaded.subscription.id,
     {
       items: [{ id: loaded.itemId, price: priceIdFor(target) }],
+      ...(startsNewYear(loaded.choice, target) ? { billing_cycle_anchor: 'now' as const } : {}),
       proration_behavior: 'always_invoice',
       payment_behavior: 'pending_if_incomplete',
       expand: ['latest_invoice'],
@@ -458,7 +485,7 @@ async function applyDowngrade(loaded: Ready, target: PlanChoice, nonce: string):
   return { ok: true, applied: 'at_renewal' };
 }
 
-async function hostedUrl(invoice: Stripe.Subscription['latest_invoice']): Promise<string | null> {
+export async function hostedUrl(invoice: Stripe.Subscription['latest_invoice']): Promise<string | null> {
   if (!invoice) return null;
   if (typeof invoice !== 'string') return invoice.hosted_invoice_url ?? null;
   try {
@@ -599,7 +626,10 @@ function pendingChange(
   return { choice, effectiveDate: new Date(next.start_date * 1000).toISOString() };
 }
 
-async function nextBillOf(loaded: Ready): Promise<{ date: string; amountPence: number } | null> {
+export async function nextBillOf(loaded: {
+  subscription: Stripe.Subscription;
+  customerId: string;
+}): Promise<{ date: string; amountPence: number } | null> {
   if (loaded.subscription.cancel_at_period_end) return null;
   try {
     const preview = await getStripe().invoices.createPreview({
@@ -614,7 +644,7 @@ async function nextBillOf(loaded: Ready): Promise<{ date: string; amountPence: n
   }
 }
 
-async function invoicesOf(customerId: string): Promise<InvoiceRow[]> {
+export async function invoicesOf(customerId: string): Promise<InvoiceRow[]> {
   try {
     const listed = await getStripe().invoices.list({ customer: customerId, limit: 12 });
     return listed.data
@@ -641,7 +671,7 @@ function invoiceRow(invoice: Stripe.Invoice): InvoiceRow | null {
   };
 }
 
-async function customerBitsOf(customerId: string): Promise<{ creditPence: number; card: CardSummary | null }> {
+export async function customerBitsOf(customerId: string): Promise<{ creditPence: number; card: CardSummary | null }> {
   try {
     const customer = await getStripe().customers.retrieve(customerId, {
       expand: ['invoice_settings.default_payment_method'],
@@ -656,7 +686,7 @@ async function customerBitsOf(customerId: string): Promise<{ creditPence: number
   }
 }
 
-async function cardFrom(paymentMethod: string | Stripe.PaymentMethod | null | undefined): Promise<CardSummary | null> {
+export async function cardFrom(paymentMethod: string | Stripe.PaymentMethod | null | undefined): Promise<CardSummary | null> {
   if (!paymentMethod) return null;
   if (typeof paymentMethod === 'string') {
     try {
@@ -680,7 +710,7 @@ function cardSummary(paymentMethod: Stripe.PaymentMethod): CardSummary | null {
   };
 }
 
-async function discountSummary(subscription: Stripe.Subscription): Promise<{ label: string; endsAt: string | null } | null> {
+export async function discountSummary(subscription: Stripe.Subscription): Promise<{ label: string; endsAt: string | null } | null> {
   for (const entry of subscription.discounts ?? []) {
     if (typeof entry === 'string') continue;
     const summary = await labelDiscount(entry);

@@ -3,13 +3,17 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { workerSchema } from '@/lib/validations/worker';
-import { inviteWorkerPayloadSchema } from '@/lib/validations/worker-invite';
 import { buildWorkerInviteEmail } from '@/lib/emails/worker-invite';
+import { buildWorkerBusinessInviteEmail } from '@/lib/emails/worker-business-invite';
+import { reconcileForWorker } from '@/lib/billing/worker-discount';
+import { parseInviteKind } from '@/lib/invites/worker-invite';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { findAuthUserIdByEmail } from '@/lib/supabase/find-auth-user';
+import { reconcileExtraWorkersAfterChange } from '@/lib/billing/extra-workers';
+import { createWorkerCore, inviteWorkerCore } from '@/lib/workers/worker-create-core';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const ACTIVE_JOB_STATUSES = ['pending', 'pending_send', 'assigned', 'in_progress'] as const;
@@ -114,281 +118,15 @@ function getRawFormData(formData: FormData) {
 }
 
 export async function createWorker(formData: FormData) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'Not authenticated' };
-
-  const { data: userData } = await supabase
-    .from('users')
-    .select('tenant_id')
-    .eq('id', user.id)
-    .single();
-
-  if (!userData?.tenant_id) {
-    return { success: false, error: 'No tenant found' };
-  }
-
-  const rawData = getRawFormData(formData);
-  const skillsRaw = rawData.skills;
-  const skills =
-    typeof skillsRaw === 'string'
-      ? (JSON.parse(skillsRaw || '[]') as string[])
-      : [];
-
-  const validated = workerSchema.parse({
-    ...rawData,
-    skills,
-  });
-
-  const coords = await postcodeToLatLng(validated.home_postcode);
-  if (!coords) {
-    return {
-      success: false,
-      error: 'Invalid postcode - could not find coordinates',
-    };
-  }
-
-  const { data: inserted, error } = await supabase
-    .from('workers')
-    .insert({
-      primary_tenant_id: userData.tenant_id,
-      full_name: validated.full_name,
-      phone: validated.phone,
-      email: validated.email || null,
-      home_postcode: validated.home_postcode,
-      home_lat: coords.lat,
-      home_lng: coords.lng,
-      worker_type: validated.worker_type,
-      status: validated.status,
-      skills: validated.skills,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single();
-
-  if (error || !inserted) {
-    console.error('Create worker error:', error);
-    return { success: false, error: error?.message ?? 'Failed to create worker record' };
-  }
-
-  const tenantId = userData.tenant_id;
-  const { error: junctionError } = await supabase.from('worker_tenants').insert({
-    worker_id: inserted.id,
-    tenant_id: tenantId,
-    status: 'active',
-    is_primary: true,
-    added_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-
-  if (junctionError) {
-    console.error('[createWorker] worker_tenants insert:', junctionError);
-  }
-
-  revalidatePath('/workers');
-  return { success: true };
+  const result = await createWorkerCore(formData);
+  if (result.success) revalidatePath('/workers');
+  return result;
 }
 
 export async function inviteWorker(formData: FormData) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { success: false, error: 'Not authenticated' };
-
-  const { data: userData } = await supabase
-    .from('users')
-    .select('tenant_id')
-    .eq('id', user.id)
-    .single();
-
-  if (!userData?.tenant_id) {
-    return { success: false, error: 'No tenant found' };
-  }
-
-  const rawData = getRawFormData(formData);
-  let skills: string[];
-  try {
-    const skillsRaw = rawData.skills;
-    skills =
-      typeof skillsRaw === 'string'
-        ? (JSON.parse(skillsRaw || '[]') as string[])
-        : [];
-  } catch {
-    return { success: false, error: 'Invalid skills data' };
-  }
-
-  const parsed = inviteWorkerPayloadSchema.safeParse({
-    full_name: typeof rawData.full_name === 'string' ? rawData.full_name : '',
-    phone: typeof rawData.phone === 'string' ? rawData.phone : '',
-    email: typeof rawData.email === 'string' ? rawData.email : '',
-    home_postcode:
-      typeof rawData.home_postcode === 'string' ? rawData.home_postcode : '',
-    worker_type: rawData.worker_type,
-    status: rawData.status,
-    skills,
-  });
-
-  if (!parsed.success) {
-    const fe = parsed.error.flatten().fieldErrors;
-    const message =
-      fe.full_name?.[0] ||
-      fe.phone?.[0] ||
-      fe.email?.[0] ||
-      fe.home_postcode?.[0] ||
-      fe.worker_type?.[0] ||
-      fe.status?.[0] ||
-      fe.skills?.[0] ||
-      parsed.error.message;
-    return { success: false, error: message ?? 'Validation failed' };
-  }
-
-  const coords = await postcodeToLatLng(parsed.data.home_postcode);
-  if (!coords) {
-    return {
-      success: false,
-      error: 'Invalid postcode - could not find coordinates',
-    };
-  }
-
-  const emailNorm = parsed.data.email.trim().toLowerCase();
-
-  const { data: existing } = await supabase
-    .from('workers')
-    .select('id')
-    .eq('primary_tenant_id', userData.tenant_id)
-    .eq('email', emailNorm)
-    .maybeSingle();
-
-  if (existing) {
-    return {
-      success: false,
-      error: 'A worker with this email already exists for your company.',
-    };
-  }
-
-  let admin;
-  try {
-    admin = createAdminClient();
-  } catch (e) {
-    return {
-      success: false,
-      error: e instanceof Error ? e.message : 'Server configuration error',
-    };
-  }
-
-  const tenantId = userData.tenant_id;
-
-  const { data: inviteData, error: inviteError } = await admin.auth.admin.generateLink({
-    type: 'invite',
-    email: emailNorm,
-    options: {
-      data: {
-        full_name: parsed.data.full_name,
-        primary_tenant_id: tenantId,
-      },
-    },
-  });
-
-  if (inviteError) {
-    console.error('[inviteWorker] generateLink:', inviteError);
-    return { success: false, error: inviteError.message };
-  }
-
-  const newUserId = inviteData?.user?.id;
-
-  const { data: inserted, error: insertError } = await supabase
-    .from('workers')
-    .insert({
-      primary_tenant_id: tenantId,
-      full_name: parsed.data.full_name,
-      phone: parsed.data.phone,
-      email: emailNorm,
-      home_postcode: parsed.data.home_postcode,
-      home_lat: coords.lat,
-      home_lng: coords.lng,
-      worker_type: parsed.data.worker_type,
-      status: parsed.data.status,
-      skills: parsed.data.skills,
-      invite_status: 'pending',
-      user_id: inviteData.user?.id ?? null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .select('id')
-    .single();
-
-  if (insertError || !inserted) {
-    console.error('[inviteWorker] insert:', insertError);
-    if (newUserId) {
-      const { error: delErr } = await admin.auth.admin.deleteUser(newUserId);
-      if (delErr) console.error('[inviteWorker] rollback deleteUser:', delErr);
-    }
-    return {
-      success: false,
-      error: insertError?.message ?? 'Failed to create worker record',
-    };
-  }
-
-  const { error: junctionError } = await supabase.from('worker_tenants').insert({
-    worker_id: inserted.id,
-    tenant_id: tenantId,
-    status: 'active',
-    is_primary: true,
-    added_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-
-  if (junctionError) {
-    console.error('[inviteWorker] worker_tenants insert:', junctionError);
-  }
-
-  const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  const { error: inviteTokenError } = await admin.from('worker_invites').insert({
-    token,
-    worker_id: inserted.id,
-    tenant_id: tenantId,
-    email: emailNorm,
-    expires_at: expiresAt,
-  });
-
-  if (inviteTokenError) {
-    console.error('[inviteWorker] worker_invites insert:', inviteTokenError);
-  }
-
-  const { data: tenantData } = await supabase
-    .from('tenants')
-    .select('name')
-    .eq('id', tenantId)
-    .single();
-
-  const inviteUrl = `https://app.joinworkwise.com/accept-invite?token=${token}`;
-  const { subject, html } = buildWorkerInviteEmail({
-    workerName: parsed.data.full_name,
-    inviteUrl,
-    tenantName: tenantData?.name ?? 'WorkWise',
-  });
-
-  const { error: resendError } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: emailNorm,
-    subject,
-    html,
-  });
-  if (resendError) {
-    console.error('[inviteWorker] resend error:', resendError);
-    return { success: false, error: 'Failed to send invitation email. Please try again.' };
-  }
-
-  revalidatePath('/workers');
-  return { success: true };
+  const result = await inviteWorkerCore(formData);
+  if (result.success) revalidatePath('/workers');
+  return result;
 }
 
 export async function updateWorker(workerId: string, formData: FormData) {
@@ -541,7 +279,7 @@ async function hardDeleteWorkerRecords(
   return { success: true as const };
 }
 
-export async function revokeWorkerInvite(inviteId: string) {
+async function revokeWorkerInviteImpl(inviteId: string) {
   const tenantId = await getTenantIdForCurrentUser();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
@@ -620,15 +358,17 @@ export async function resendWorkerInvite(inviteId: string) {
     };
   }
 
+  // select('*') so this works whether or not the invite kind column has been added yet.
   const { data: invite, error: inviteError } = await supabase
     .from('worker_invites')
-    .select('id, worker_id, tenant_id, email')
+    .select('*')
     .eq('id', inviteId)
     .single();
 
   if (inviteError || !invite || invite.tenant_id !== tenantId) {
     return { success: false, error: 'Invite not found or access denied' };
   }
+  const resendKind = parseInviteKind((invite as { kind?: unknown }).kind);
 
   const { data: worker, error: workerError } = await supabase
     .from('workers')
@@ -686,6 +426,8 @@ export async function resendWorkerInvite(inviteId: string) {
     tenant_id: tenantId,
     email: emailNorm,
     expires_at: expiresAt,
+    // A resent set-up invite stays a set-up invite.
+    ...(resendKind === 'business' ? { kind: 'business' } : {}),
   });
 
   if (insertError) {
@@ -694,7 +436,8 @@ export async function resendWorkerInvite(inviteId: string) {
   }
 
   const inviteUrl = `https://app.joinworkwise.com/accept-invite?token=${token}`;
-  const { subject, html } = buildWorkerInviteEmail({
+  const buildResendEmail = resendKind === 'business' ? buildWorkerBusinessInviteEmail : buildWorkerInviteEmail;
+  const { subject, html } = buildResendEmail({
     workerName: worker.full_name,
     inviteUrl,
     tenantName: tenantData?.name ?? 'WorkWise',
@@ -715,7 +458,7 @@ export async function resendWorkerInvite(inviteId: string) {
   return { success: true };
 }
 
-export async function deactivateWorker(workerId: string) {
+async function deactivateWorkerImpl(workerId: string) {
   const tenantId = await getTenantIdForCurrentUser();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
@@ -892,7 +635,7 @@ export async function deactivateWorker(workerId: string) {
   return { success: true };
 }
 
-export async function reactivateWorker(workerId: string) {
+async function reactivateWorkerImpl(workerId: string) {
   const tenantId = await getTenantIdForCurrentUser();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
@@ -947,7 +690,7 @@ export async function reactivateWorker(workerId: string) {
   return { success: true };
 }
 
-export async function deleteWorker(workerId: string) {
+async function deleteWorkerImpl(workerId: string) {
   const supabase = await createClient();
 
   const {
@@ -1036,7 +779,7 @@ export async function getWorkerActiveJobCount(workerId: string): Promise<number>
 }
 
 /** Bulk delete workers (only those without active jobs) */
-export async function bulkDeleteWorkers(workerIds: string[]) {
+async function bulkDeleteWorkersImpl(workerIds: string[]) {
   const supabase = await createClient();
 
   const {
@@ -1163,4 +906,49 @@ export async function bulkUpdateWorkerStatus(
 
   revalidatePath('/workers');
   return { success: true };
+}
+
+
+// After an employer deactivates, reactivates or deletes a worker, a self-employed worker's Lite price may need to
+// come off (or go back on). Best effort and idempotent: it never changes what the employer's action returns.
+// Awaited so it finishes before a serverless response ends.
+
+export async function revokeWorkerInvite(inviteId: string) {
+  const result = await revokeWorkerInviteImpl(inviteId);
+  if (result.success) reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  return result;
+}
+
+export async function deactivateWorker(workerId: string) {
+  const result = await deactivateWorkerImpl(workerId);
+  if (result.success) {
+    await reconcileForWorker(workerId);
+    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  }
+  return result;
+}
+
+export async function reactivateWorker(workerId: string) {
+  const result = await reactivateWorkerImpl(workerId);
+  if (result.success) {
+    await reconcileForWorker(workerId);
+    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  }
+  return result;
+}
+
+export async function deleteWorker(workerId: string) {
+  const result = await deleteWorkerImpl(workerId);
+  if (result.success) {
+    await reconcileForWorker(workerId);
+    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  }
+  return result;
+}
+
+export async function bulkDeleteWorkers(workerIds: string[]) {
+  const result = await bulkDeleteWorkersImpl(workerIds);
+  for (const id of workerIds) await reconcileForWorker(id);
+  reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  return result;
 }

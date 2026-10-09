@@ -4,8 +4,14 @@ import { previewPlanChangeAction } from '@/lib/actions/billing';
 import { addLiteInterval, shouldShowAddLite } from '@/lib/data/add-lite-nudge';
 import { getPlanSummary } from '@/lib/billing/manage';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { WorkerAddLiteView } from '@/components/billing/worker-add-lite-view';
+import { getWorkerLiteOffer } from '@/lib/data/worker-lite-offer';
 
 export default async function AddLitePage() {
+  // A self-employed worker gets the worker-price version; everyone else the Rounds one, exactly as before.
+  const workerOffer = await getWorkerLiteOffer();
+  if (workerOffer) return <WorkerAddLiteView employerName={workerOffer.employerName} />;
+
   if (!(await shouldShowAddLite())) redirect('/settings?tab=billing');
 
   const interval = await addLiteInterval();

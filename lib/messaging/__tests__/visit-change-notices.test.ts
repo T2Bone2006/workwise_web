@@ -311,10 +311,10 @@ describe('visit change notices', () => {
         return [input.customerId, input.text({ firstText: true })] as const;
       }),
     );
-    expect(byCustomer.get('cust-u')).toContain(`can't make it on ${oct1}`);
-    expect(byCustomer.get('cust-u')).toContain(`We'll come on ${oct6} instead`);
-    expect(byCustomer.get('cust-t')).toContain(`can't make it on ${oct6}`);
-    expect(byCustomer.get('cust-t')).toContain(`We'll come on ${oct1} instead`);
+    expect(byCustomer.get('cust-u')).toContain(`can't make ${oct1}`);
+    expect(byCustomer.get('cust-u')).toContain(`We'd like to come on ${oct6} instead`);
+    expect(byCustomer.get('cust-t')).toContain(`can't make ${oct6}`);
+    expect(byCustomer.get('cust-t')).toContain(`We'd like to come on ${oct1} instead`);
 
     const again = await notifyVisitChange({ tenantId: TENANT, changeId: CHANGE, now: NOW });
     expect(again).toEqual(ZEROS);
@@ -343,8 +343,8 @@ describe('visit change notices', () => {
 
     expect(counts).toEqual({ ...ZEROS, stops: 2, texted: 2 });
     const bodies = texts();
-    expect(bodies.some((t) => t.includes(`can't make it on ${formatVisitDay('2026-10-01')}`))).toBe(true);
-    expect(bodies.some((t) => t.includes(`can't make it on ${formatVisitDay('2026-10-06')}`))).toBe(true);
+    expect(bodies.some((t) => t.includes(`can't make ${formatVisitDay('2026-10-01')}`))).toBe(true);
+    expect(bodies.some((t) => t.includes(`can't make ${formatVisitDay('2026-10-06')}`))).toBe(true);
   });
 
   it('does nothing when the change did not ask to tell customers', async () => {
@@ -407,12 +407,12 @@ describe('visit change notices', () => {
     const fromDay = formatVisitDay('2026-10-01');
     const toDay = formatVisitDay('2026-10-06');
     for (const text of texts()) {
-      expect(text).toContain(`can't make it on ${fromDay}`);
-      expect(text).toContain(`We'll come on ${toDay} instead`);
+      expect(text).toContain(`can't make ${fromDay}`);
+      expect(text).toContain(`We'd like to come on ${toDay} instead`);
     }
   });
 
-  it('names the next visit on a skip, or says see you next time when there is none', async () => {
+  it('names the next visit on a skip, or asks them to get in touch when there is none', async () => {
     db.jobs = [
       job({
         id: 'job-1',
@@ -452,9 +452,9 @@ describe('visit change notices', () => {
 
     expect(counts).toEqual({ ...ZEROS, stops: 2, texted: 2 });
     const sent = texts();
-    expect(sent[0]).toContain(`See you next time on ${formatVisitDay('2026-10-30')}`);
-    expect(sent[1]).toContain('See you next time.');
-    expect(sent[1]).not.toContain('See you next time on');
+    expect(sent[0]).toContain(`come next on ${formatVisitDay('2026-10-30')}`);
+    expect(sent[1]).toContain('If you need another day, get in touch.');
+    expect(sent[1]).not.toContain('come next on');
   });
 
   it('sends after all only to stops already told, and refunds texts still held', async () => {

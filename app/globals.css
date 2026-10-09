@@ -393,6 +393,35 @@ html.dark[data-look="new"] {
 /* Shared widgets, calmed once for every page in the new look. In the components
    layer so a page's own utility classes can still win. */
 @layer components {
+/* Popups in the new look: a choice or a form is a sheet, a risky confirmation is a dialog. Same API, softer shape. */
+[data-look="new"] [data-slot="dialog-overlay"],
+[data-look="new"] [data-slot="sheet-overlay"] {
+  background: color-mix(in srgb, #0a1a2e 45%, transparent);
+  backdrop-filter: blur(2px);
+}
+[data-look="new"] [data-slot="dialog-content"] {
+  border-radius: 1.25rem;
+  border-color: var(--border);
+  box-shadow: 0 24px 60px -20px rgba(10, 26, 46, 0.35);
+}
+[data-look="new"] [data-slot="sheet-content"] {
+  border-color: var(--border);
+  box-shadow: 0 24px 60px -20px rgba(10, 26, 46, 0.35);
+}
+[data-look="new"] [data-slot="sheet-content"][data-side="bottom"] {
+  border-top-left-radius: 1.25rem;
+  border-top-right-radius: 1.25rem;
+}
+[data-look="new"] [data-slot="dialog-title"],
+[data-look="new"] [data-slot="sheet-title"] {
+  letter-spacing: -0.01em;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-look="new"] [data-slot="dialog-content"],
+  [data-look="new"] [data-slot="sheet-content"] {
+    animation-duration: 1ms;
+  }
+}
 [data-look="new"] [data-slot="table-head"] {
   height: 2.5rem;
   font-size: 0.75rem;
@@ -406,7 +435,7 @@ html.dark[data-look="new"] {
   border-color: var(--border);
 }
 [data-look="new"] [data-slot="table-row"]:hover {
-  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  background: color-mix(in oklab, var(--muted) 50%, transparent);
 }
 [data-look="new"] [data-slot="tabs-list"][data-variant="default"] {
   height: 2.5rem;
@@ -624,4 +653,109 @@ html.dark[data-look="new"] {
     animation: none;
     background-image: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Your assistant: the "thinking" mark and the shimmer that runs across its
+ * status text ("Looking at your calendar…"). Brand blue for Rounds, Lite
+ * purple for Lite-only (set with --ai-tint on the element).
+ */
+.ai-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 38%,
+    var(--ai-tint, var(--tone-rounds-solid, #0c66e4)) 46%,
+    color-mix(in srgb, var(--ai-tint, var(--tone-rounds-solid, #0c66e4)) 45%, white) 50%,
+    var(--ai-tint, var(--tone-rounds-solid, #0c66e4)) 54%,
+    var(--muted-foreground) 62%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ai-shimmer 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* On a solid button: white text with a brighter sweep. */
+.ai-shimmer-on-solid {
+  background-image: linear-gradient(
+    100deg,
+    rgb(255 255 255 / 0.7) 0%,
+    rgb(255 255 255 / 0.7) 38%,
+    #fff 50%,
+    rgb(255 255 255 / 0.7) 62%,
+    rgb(255 255 255 / 0.7) 100%
+  );
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ai-shimmer 1.6s linear infinite;
+}
+
+@keyframes ai-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -150% 0; }
+}
+
+/* Three dots that hop in a wave, each landing with a little squash. */
+.ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--ai-tint, var(--tone-rounds-solid, #0c66e4));
+  animation: ai-hop 1.15s cubic-bezier(0.45, 0, 0.35, 1) infinite;
+  transform-origin: 50% 100%;
+}
+.ai-dot:nth-child(2) { animation-delay: 0.14s; opacity: 0.72; }
+.ai-dot:nth-child(3) { animation-delay: 0.28s; opacity: 0.45; }
+
+@keyframes ai-hop {
+  0%, 55%, 100% { transform: translateY(0) scale(1, 1); }
+  18% { transform: translateY(-6px) scale(0.92, 1.08); }
+  38% { transform: translateY(0) scale(1.18, 0.82); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer, .ai-shimmer-on-solid { animation: none; background-position: 50% 0; }
+  .ai-dot { animation: none; }
+}
+
+
+/* Round names drawn on the map: plain coloured text with a halo, no bubble. */
+.leaflet-tooltip.ww-round-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 5px #fff;
+}
+.leaflet-tooltip.ww-round-label::before {
+  display: none;
+}
+
+
+/* The customer card floats above the pin: Leaflet's own white bubble is stripped so only our card shows. */
+.leaflet-popup.ww-place-popup .leaflet-popup-content-wrapper {
+  background: transparent;
+  border-radius: 1rem;
+  box-shadow: none;
+  padding: 0;
+}
+.leaflet-popup.ww-place-popup .leaflet-popup-content {
+  margin: 0;
+  line-height: inherit;
+}
+.leaflet-popup.ww-place-popup .leaflet-popup-content p {
+  margin: 0;
+}
+.leaflet-popup.ww-place-popup .leaflet-popup-tip {
+  background: var(--card);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
 }

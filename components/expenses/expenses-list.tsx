@@ -8,6 +8,8 @@ import type { ExpenseRow } from '@/lib/data/expenses';
 import { formatGbp, fromPence, toPence } from '@/lib/money/pence';
 import { formatMoney, formatShortDay } from '@/components/expenses/format';
 import { EmptyState, IconChip, LookCard, Tag } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { EXPENSE_CATEGORY_ICON } from '@/components/books/category-style';
 import { Button } from '@/components/ui/button';
 
@@ -65,11 +67,11 @@ export function ExpensesList({
         <EmptyState icon={Receipt} title={`Nothing spent in ${label}`} body="Scan a receipt or add an expense and it shows up here." />
       ) : (
         <LookCard>
-          <ul className="divide-y divide-border">
+          <ul className="-mx-4 divide-y divide-border sm:-mx-5">
             {expenses.map((expense) => {
               const CategoryIcon = EXPENSE_CATEGORY_ICON[expense.category ?? 'other'];
               return (
-                <li key={expense.id} className="relative flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                <li key={expense.id} className={cn('relative flex items-center gap-3 px-4 py-3 first:pt-0 last:pb-0 sm:px-5', rowHover)}>
                   <button
                     type="button"
                     aria-label={`Open ${expense.merchant || 'expense'}`}

@@ -191,7 +191,7 @@ describe('collectForCustomer', () => {
         amount: 1500,
         currency: 'GBP',
         description: 'Sparkle Windows',
-        retry_if_possible: false,
+        retry_if_possible: true,
         metadata: {
           workwise_tenant_id: TENANT,
           workwise_customer_id: CUSTOMER,

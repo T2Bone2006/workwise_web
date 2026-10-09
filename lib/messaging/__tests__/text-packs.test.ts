@@ -137,7 +137,7 @@ function paidSession(packKey: 'texts_250' | 'texts_1000', id = 'cs_test_1'): Str
     payment_status: 'paid',
     customer: 'cus_owner',
     payment_intent: 'pi_1',
-    amount_total: packKey === 'texts_250' ? 1000 : 3500,
+    amount_total: packKey === 'texts_250' ? 1499 : 4999,
     metadata: { kind: 'text_pack', tenant_id: TENANT, pack_key: packKey },
   } as unknown as Stripe.Checkout.Session;
 }
@@ -253,8 +253,8 @@ describe('text packs', () => {
     expect(rpcCalls[0]).toMatchObject({
       p_tenant_id: TENANT,
       p_pack_key: 'texts_250',
-      p_texts: 250,
-      p_amount_pence: 1000,
+      p_texts: 300,
+      p_amount_pence: 1499,
       p_checkout_session_id: 'cs_test_1',
       p_payment_intent_id: 'pi_1',
     });
@@ -262,7 +262,7 @@ describe('text packs', () => {
     expect(await creditTextPackFromSession(paidSession('texts_1000', 'cs_test_2'))).toBe(true);
     expect(rpcCalls[1]).toMatchObject({
       p_pack_key: 'texts_1000',
-      p_texts: 1000,
+      p_texts: 1200,
       p_checkout_session_id: 'cs_test_2',
     });
 
@@ -340,7 +340,7 @@ describe('text packs', () => {
     const again = await POST(webhookRequest());
     expect(again.status).toBe(200);
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]).toMatchObject({ p_checkout_session_id: 'cs_same', p_texts: 250 });
+    expect(rpcCalls[0]).toMatchObject({ p_checkout_session_id: 'cs_same', p_texts: 300 });
     expect(await creditTextPackFromSession(paidSession('texts_250', 'cs_same'))).toBe(false);
   });
 

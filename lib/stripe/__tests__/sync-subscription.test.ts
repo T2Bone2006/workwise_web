@@ -202,6 +202,30 @@ describe('syncSubscription', () => {
     expect(subs.find((row) => row.product === 'lite')).toMatchObject({ plan: 'both', status: 'active' });
   });
 
+  it('reads the plan line when an extra-worker line comes first', async () => {
+    const before = process.env.STRIPE_PRICE_STARTER;
+    process.env.STRIPE_PRICE_STARTER = 'price_starter';
+    try {
+      const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+      const sub = stripeSub('sub_pro', 'price_extra_starter');
+      (sub.items.data as unknown as Array<Record<string, unknown>>).push({
+        price: { id: 'price_starter' },
+        quantity: 1,
+        current_period_end: 1_800_000_000,
+      });
+      const result = await syncSubscription(sub);
+      expect(result).toEqual({ synced: true, tenantId: TENANT, products: ['starter'] });
+      expect(subs.find((row) => row.product === 'starter')).toMatchObject({
+        stripe_price_id: 'price_starter',
+        seats: 1,
+        status: 'active',
+      });
+    } finally {
+      if (before === undefined) delete process.env.STRIPE_PRICE_STARTER;
+      else process.env.STRIPE_PRICE_STARTER = before;
+    }
+  });
+
   it('ignores an unknown price', async () => {
     const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
     const result = await syncSubscription(stripeSub('sub_old', 'price_49'));
@@ -223,6 +247,79 @@ describe('syncSubscription', () => {
     await expect(syncSubscription(stripeSub('sub_clash', 'price_both_m'))).rejects.toThrow(
       /live product clash on sub_clash/
     );
+  });
+});
+
+describe('syncSubscription for Pro plans', () => {
+  const PRO_ENV = {
+    STRIPE_PRICE_STARTER: 'price_starter_m',
+    STRIPE_PRICE_STARTER_YEARLY: 'price_starter_y',
+    STRIPE_PRICE_GROWTH: 'price_growth_m',
+    STRIPE_PRICE_GROWTH_YEARLY: 'price_growth_y',
+    STRIPE_PRICE_EXTRA_WORKER_STARTER: 'price_extra_starter_m',
+  } as const;
+  const proSaved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(PRO_ENV)) {
+      proSaved[key] = process.env[key];
+      process.env[key] = value;
+    }
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(proSaved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('records the tier and the interval for a monthly Starter and a yearly Growth', async () => {
+    const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+    await syncSubscription(stripeSub('sub_m', 'price_starter_m'));
+    await syncSubscription(stripeSub('sub_y', 'price_growth_y'));
+    expect(subs.find((row) => row.product === 'starter')).toMatchObject({ plan: 'starter', billing_interval: 'month' });
+    expect(subs.find((row) => row.product === 'growth')).toMatchObject({ plan: 'growth', billing_interval: 'year' });
+  });
+
+  it('keeps plan, seats and the price id when the extra-worker line comes second', async () => {
+    const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+    const sub = stripeSub('sub_x', 'price_starter_m');
+    (sub.items.data as unknown as Array<Record<string, unknown>>).push({
+      price: { id: 'price_extra_starter_m' },
+      quantity: 5,
+      current_period_end: 1_800_000_000,
+    });
+    await syncSubscription(sub);
+    expect(subs.find((row) => row.product === 'starter')).toMatchObject({
+      plan: 'starter',
+      billing_interval: 'month',
+      stripe_price_id: 'price_starter_m',
+      seats: 1,
+      status: 'active',
+    });
+  });
+
+  it('cancels the old tier row and writes the new tier on an upgrade', async () => {
+    seed('starter', 'starter', 'sub_up');
+    const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+    await syncSubscription(stripeSub('sub_up', 'price_growth_m'));
+    expect(subs.find((row) => row.product === 'starter')?.status).toBe('canceled');
+    expect(subs.find((row) => row.product === 'growth')).toMatchObject({ plan: 'growth', billing_interval: 'month', status: 'active' });
+  });
+
+  it('skips a yearly price whose environment variable is not set (never mis-records it as monthly)', async () => {
+    delete process.env.STRIPE_PRICE_STARTER_YEARLY;
+    const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+    const result = await syncSubscription(stripeSub('sub_unknown', 'price_starter_y'));
+    expect(result).toEqual({ synced: false, reason: 'unknown_price' });
+    expect(subs).toHaveLength(0);
+  });
+
+  it('leaves Rounds and Lite rows with their own plan keys', async () => {
+    const { syncSubscription } = await import('@/lib/stripe/sync-subscription');
+    await syncSubscription(stripeSub('sub_r', 'price_rounds_y'));
+    expect(subs.find((row) => row.product === 'rounds')).toMatchObject({ plan: 'rounds', billing_interval: 'year' });
   });
 });
 

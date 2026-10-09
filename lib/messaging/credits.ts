@@ -1,18 +1,19 @@
 export const TEXT_ALLOWANCE_PER_MONTH = 100;
 
+// The keys are stable ids stored on past purchases and in the database check, not the pack size.
 export const TEXT_PACKS = [
   {
     key: 'texts_250' as const,
-    texts: 250,
-    pricePence: 1000,
-    label: '250 texts',
+    texts: 300,
+    pricePence: 1499,
+    label: '300 texts',
     priceEnv: 'STRIPE_PRICE_TEXTS_250' as const,
   },
   {
     key: 'texts_1000' as const,
-    texts: 1000,
-    pricePence: 3500,
-    label: '1,000 texts',
+    texts: 1200,
+    pricePence: 4999,
+    label: '1,200 texts',
     priceEnv: 'STRIPE_PRICE_TEXTS_1000' as const,
   },
 ] as const;

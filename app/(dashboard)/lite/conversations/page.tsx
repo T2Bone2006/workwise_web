@@ -73,8 +73,8 @@ export default async function LiteConversationsPage({
             title="No chats yet"
             body={
               settingUp
-                ? 'Chats show up here after you finish setting up and the assistant is on your website. Each one is summed up in a line.'
-                : 'Once the assistant is on your website, every chat shows up here, summed up in a line.'
+                ? 'Chats show up here after you finish setting up and Lily is on your website. Each one is summed up in a line.'
+                : 'Once Lily is on your website, every chat shows up here, summed up in a line.'
             }
             action={
               settingUp ? undefined : (

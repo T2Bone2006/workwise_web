@@ -15,6 +15,9 @@ CREATE TABLE public.tenants (
   stripe_connect_account_id text,
   stripe_connect_onboarded_at timestamp with time zone,
   signup_product text,
+  referral_code text CHECK (referral_code IS NULL OR referral_code ~ '^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$'::text),
+  closed_at timestamp with time zone,
+  purge_after timestamp with time zone,
   CONSTRAINT tenants_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.users (
@@ -225,6 +228,8 @@ CREATE TABLE public.import_history (
   completed_at timestamp with time zone,
   duration_seconds integer,
   created_at timestamp with time zone DEFAULT now(),
+  file_sha256 text,
+  kind text CHECK (kind IS NULL OR kind = 'rounds_customers'::text),
   CONSTRAINT import_history_pkey PRIMARY KEY (id),
   CONSTRAINT import_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT import_history_import_source_id_fkey FOREIGN KEY (import_source_id) REFERENCES public.import_sources(id),
@@ -270,7 +275,7 @@ CREATE TABLE public.notifications (
 CREATE TABLE public.ai_interactions (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   tenant_id uuid NOT NULL,
-  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text, 'date_parsing'::text, 'description_summary'::text, 'row_extraction'::text, 'customer_row_extraction'::text, 'message_classification'::text, 'receipt_extraction'::text, 'invoice_drafting'::text])),
+  interaction_type text NOT NULL CHECK (interaction_type = ANY (ARRAY['skill_detection'::text, 'quote_generation'::text, 'column_mapping'::text, 'worker_interview_parsing'::text, 'value_transformation'::text, 'date_parsing'::text, 'description_summary'::text, 'row_extraction'::text, 'customer_row_extraction'::text, 'message_classification'::text, 'receipt_extraction'::text, 'invoice_drafting'::text, 'widget_chat'::text, 'lite_interview'::text, 'lite_text_draft'::text, 'conversation_summary'::text, 'assistant_chat'::text])),
   input_prompt text NOT NULL,
   input_data jsonb NOT NULL,
   ai_response text NOT NULL,
@@ -302,54 +307,6 @@ CREATE TABLE public.ai_interactions (
   CONSTRAINT ai_interactions_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.jobs(id),
   CONSTRAINT ai_interactions_worker_id_fkey FOREIGN KEY (worker_id) REFERENCES public.workers(id),
   CONSTRAINT ai_interactions_import_source_id_fkey FOREIGN KEY (import_source_id) REFERENCES public.import_sources(id)
-);
-CREATE TABLE public.ai_training_datasets (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  name text NOT NULL,
-  description text,
-  dataset_type text NOT NULL CHECK (dataset_type = ANY (ARRAY['skill_detection'::text, 'quote_estimation'::text, 'pricing_optimization'::text, 'worker_matching'::text, 'full_export'::text])),
-  version text NOT NULL,
-  examples_count integer NOT NULL,
-  training_split numeric DEFAULT 0.80,
-  validation_split numeric DEFAULT 0.10,
-  test_split numeric DEFAULT 0.10,
-  quality_score numeric,
-  human_reviewed_count integer DEFAULT 0,
-  accuracy_threshold numeric,
-  file_path text,
-  file_size_bytes bigint,
-  file_format text DEFAULT 'jsonl'::text CHECK (file_format = ANY (ARRAY['jsonl'::text, 'csv'::text, 'parquet'::text])),
-  trained_model_id uuid,
-  training_started_at timestamp with time zone,
-  training_completed_at timestamp with time zone,
-  created_at timestamp with time zone DEFAULT now(),
-  created_by uuid,
-  notes text,
-  tags ARRAY,
-  CONSTRAINT ai_training_datasets_pkey PRIMARY KEY (id),
-  CONSTRAINT ai_training_datasets_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
-);
-CREATE TABLE public.ai_model_performance (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  model_type text NOT NULL CHECK (model_type = ANY (ARRAY['claude_api'::text, 'custom_skill_classifier'::text, 'custom_quote_estimator'::text, 'hybrid'::text])),
-  model_version text NOT NULL,
-  total_predictions integer DEFAULT 0,
-  correct_predictions integer DEFAULT 0,
-  accuracy numeric,
-  precision_score numeric,
-  recall_score numeric,
-  f1_score numeric,
-  total_cost_usd numeric,
-  avg_cost_per_prediction numeric,
-  avg_latency_ms integer,
-  avg_user_rating numeric,
-  edit_rate numeric,
-  acceptance_rate numeric,
-  period_start timestamp with time zone NOT NULL,
-  period_end timestamp with time zone NOT NULL,
-  created_at timestamp with time zone DEFAULT now(),
-  notes text,
-  CONSTRAINT ai_model_performance_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.tenant_network_connections (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -455,10 +412,15 @@ CREATE TABLE public.widget_clients (
   greeting text NOT NULL DEFAULT 'Hi! What type of job do you need help with today?'::text,
   primary_colour text NOT NULL DEFAULT '#0C66E4'::text,
   notification_email text NOT NULL,
-  allowed_domains ARRAY NOT NULL DEFAULT '{}'::text[],
+  allowed_domains ARRAY NOT NULL DEFAULT '{}'::text[] CHECK (cardinality(allowed_domains) <= 1) NOT VALI),
   active boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  sign_off_name text CHECK (sign_off_name IS NULL OR char_length(sign_off_name) >= 1 AND char_length(sign_off_name) <= 40),
+  owner_mobile_e164 text CHECK (owner_mobile_e164 IS NULL OR owner_mobile_e164 ~ '^\+447[0-9]{9}$'::text),
+  follow_up_enabled boolean NOT NULL DEFAULT true,
+  text_me_too boolean NOT NULL DEFAULT false,
+  website_url text,
   CONSTRAINT widget_clients_pkey PRIMARY KEY (id),
   CONSTRAINT widget_clients_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
@@ -467,31 +429,20 @@ CREATE TABLE public.widget_conversations (
   client_id uuid NOT NULL,
   tenant_id uuid,
   messages jsonb NOT NULL DEFAULT '[]'::jsonb,
-  status text NOT NULL DEFAULT 'active'::text,
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'ended'::text])) NOT VALI),
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  visitor_hash text,
+  origin_host text,
+  visitor_message_count integer NOT NULL DEFAULT 0 CHECK (visitor_message_count >= 0 AND visitor_message_count <= 30),
+  last_message_at timestamp with time zone,
+  ended_at timestamp with time zone,
+  summary text CHECK (summary IS NULL OR char_length(summary) <= 300),
+  tags ARRAY NOT NULL DEFAULT '{}'::text[],
+  last_quote jsonb,
   CONSTRAINT widget_conversations_pkey PRIMARY KEY (id),
   CONSTRAINT widget_conversations_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.widget_clients(id),
   CONSTRAINT widget_conversations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
-);
-CREATE TABLE public.widget_leads (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  client_id uuid NOT NULL,
-  conversation_id uuid,
-  tenant_id uuid,
-  name text NOT NULL,
-  phone text NOT NULL,
-  email text,
-  job_description text NOT NULL DEFAULT ''::text,
-  quote_given text NOT NULL DEFAULT ''::text,
-  status text NOT NULL DEFAULT 'new'::text,
-  notes text,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT widget_leads_pkey PRIMARY KEY (id),
-  CONSTRAINT widget_leads_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.widget_clients(id),
-  CONSTRAINT widget_leads_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.widget_conversations(id),
-  CONSTRAINT widget_leads_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.leads (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -502,7 +453,7 @@ CREATE TABLE public.leads (
   email text,
   job_description text NOT NULL DEFAULT ''::text,
   quote_given text NOT NULL DEFAULT ''::text,
-  status text NOT NULL DEFAULT 'new'::text,
+  status text NOT NULL DEFAULT 'new'::text CHECK (status = ANY (ARRAY['new'::text, 'contacted'::text, 'won'::text, 'lost'::text])) NOT VALI),
   notes text,
   widget_conversation_id uuid,
   source_data jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -510,22 +461,31 @@ CREATE TABLE public.leads (
   converted_job_id uuid,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  client_id uuid,
+  phone_e164 text CHECK (phone_e164 IS NULL OR phone_e164 ~ '^\+447[0-9]{9}$'::text),
+  postcode text,
+  preferred_days ARRAY NOT NULL DEFAULT '{}'::text[],
+  customer_note text,
+  job_summary text,
+  job_type_key text,
+  quote_kind text CHECK (quote_kind IS NULL OR (quote_kind = ANY (ARRAY['firm'::text, 'guide'::text, 'visit'::text]))),
+  quote_amount numeric,
+  quote_min numeric,
+  quote_max numeric,
+  booking_status text NOT NULL DEFAULT 'none'::text CHECK (booking_status = ANY (ARRAY['none'::text, 'requested'::text, 'accepted'::text, 'declined'::text])),
+  agreed_amount numeric,
+  decided_at timestamp with time zone,
+  decided_by text,
+  booked_for_date date,
+  booked_for_time time without time zone,
+  status_changed_at timestamp with time zone,
+  follow_up_problem text,
   CONSTRAINT leads_pkey PRIMARY KEY (id),
   CONSTRAINT leads_widget_conversation_id_fkey FOREIGN KEY (widget_conversation_id) REFERENCES public.widget_conversations(id),
   CONSTRAINT leads_converted_customer_id_fkey FOREIGN KEY (converted_customer_id) REFERENCES public.customers(id),
   CONSTRAINT leads_converted_job_id_fkey FOREIGN KEY (converted_job_id) REFERENCES public.jobs(id),
-  CONSTRAINT leads_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
-);
-CREATE TABLE public.automation_metrics (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL,
-  service_key text NOT NULL,
-  metric_type text NOT NULL,
-  value numeric NOT NULL,
-  metadata jsonb DEFAULT '{}'::jsonb,
-  occurred_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT automation_metrics_pkey PRIMARY KEY (id),
-  CONSTRAINT automation_metrics_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT leads_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT leads_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.widget_clients(id)
 );
 CREATE TABLE public.job_groups (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -545,7 +505,7 @@ CREATE TABLE public.subscriptions (
   status text NOT NULL CHECK (status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'unpaid'::text, 'incomplete'::text, 'incomplete_expired'::text, 'paused'::text, 'manual'::text])),
   source text NOT NULL DEFAULT 'stripe'::text CHECK (source = ANY (ARRAY['stripe'::text, 'manual'::text])),
   stripe_customer_id text,
-  stripe_subscription_id text UNIQUE,
+  stripe_subscription_id text,
   stripe_price_id text,
   trial_ends_at timestamp with time zone,
   current_period_end timestamp with time zone,
@@ -556,6 +516,8 @@ CREATE TABLE public.subscriptions (
   notes text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  plan text CHECK (plan IS NULL OR (plan = ANY (ARRAY['rounds'::text, 'lite'::text, 'both'::text]))),
+  billing_interval text CHECK (billing_interval IS NULL OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))),
   CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
   CONSTRAINT subscriptions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT subscriptions_granted_by_user_id_fkey FOREIGN KEY (granted_by_user_id) REFERENCES public.users(id)
@@ -564,7 +526,7 @@ CREATE TABLE public.signup_intents (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   auth_user_id uuid NOT NULL UNIQUE,
   email text NOT NULL,
-  product text NOT NULL CHECK (product = ANY (ARRAY['lite'::text, 'rounds'::text])),
+  product text NOT NULL CHECK (product = ANY (ARRAY['lite'::text, 'rounds'::text, 'both'::text])),
   business_name text NOT NULL,
   full_name text NOT NULL,
   phone text,
@@ -576,9 +538,15 @@ CREATE TABLE public.signup_intents (
   tenant_id uuid,
   created_at timestamp with time zone DEFAULT now(),
   provisioned_at timestamp with time zone,
+  billing_interval text NOT NULL DEFAULT 'month'::text CHECK (billing_interval = ANY (ARRAY['month'::text, 'year'::text])),
+  referral_code text,
+  referrer_tenant_id uuid,
+  offer text NOT NULL DEFAULT 'none'::text CHECK (offer = ANY (ARRAY['none'::text, 'founding'::text, 'free_month'::text, 'month_off_year'::text])),
+  last_checkout_at timestamp with time zone,
   CONSTRAINT signup_intents_pkey PRIMARY KEY (id),
   CONSTRAINT signup_intents_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
-  CONSTRAINT signup_intents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+  CONSTRAINT signup_intents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT signup_intents_referrer_tenant_id_fkey FOREIGN KEY (referrer_tenant_id) REFERENCES public.tenants(id)
 );
 CREATE TABLE public.stripe_events (
   id text NOT NULL,
@@ -631,11 +599,14 @@ CREATE TABLE public.service_agreements (
   notes text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  round_id uuid,
   CONSTRAINT service_agreements_pkey PRIMARY KEY (id),
   CONSTRAINT service_agreements_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
   CONSTRAINT service_agreements_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
   CONSTRAINT service_agreements_service_catalog_id_fkey FOREIGN KEY (service_catalog_id) REFERENCES public.service_catalog(id),
-  CONSTRAINT service_agreements_assigned_worker_id_fkey FOREIGN KEY (assigned_worker_id) REFERENCES public.workers(id)
+  CONSTRAINT service_agreements_assigned_worker_id_fkey FOREIGN KEY (assigned_worker_id) REFERENCES public.workers(id),
+  CONSTRAINT service_agreements_round_fkey FOREIGN KEY (round_id) REFERENCES public.rounds(id),
+  CONSTRAINT service_agreements_round_fkey FOREIGN KEY (tenant_id) REFERENCES public.rounds(tenant_id)
 );
 CREATE TABLE public.service_preset_groups (
   key text NOT NULL,
@@ -895,7 +866,7 @@ CREATE TABLE public.text_pack_purchases (
 CREATE TABLE public.visit_changes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL,
-  kind text NOT NULL CHECK (kind = ANY (ARRAY['skip'::text, 'reschedule'::text, 'move_remaining'::text, 'skip_remaining'::text])),
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['skip'::text, 'reschedule'::text, 'move_remaining'::text, 'skip_remaining'::text, 'swap_days'::text])),
   from_date date,
   to_date date,
   job_ids ARRAY NOT NULL CHECK (cardinality(job_ids) >= 1),
@@ -907,6 +878,7 @@ CREATE TABLE public.visit_changes (
   undone_at timestamp with time zone,
   undone_by_user_id uuid,
   undo_notified_at timestamp with time zone,
+  client_key text,
   CONSTRAINT visit_changes_pkey PRIMARY KEY (id),
   CONSTRAINT visit_changes_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );
@@ -1092,4 +1064,245 @@ CREATE TABLE public.gocardless_pay_requests (
   CONSTRAINT gocardless_pay_requests_invoice_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id),
   CONSTRAINT gocardless_pay_requests_dd_fkey FOREIGN KEY (direct_debit_id) REFERENCES public.customer_direct_debits(id),
   CONSTRAINT gocardless_pay_requests_payment_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id)
+);
+CREATE TABLE public.expenses (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'confirmed'::text CHECK (status = ANY (ARRAY['draft'::text, 'confirmed'::text])),
+  spent_on date,
+  merchant text CHECK (merchant IS NULL OR char_length(merchant) <= 120),
+  category text CHECK (category IS NULL OR (category = ANY (ARRAY['vehicle'::text, 'equipment'::text, 'supplies'::text, 'phone'::text, 'insurance'::text, 'advertising'::text, 'fees'::text, 'wages'::text, 'other'::text]))),
+  amount numeric CHECK (amount IS NULL OR amount > 0::numeric AND amount <= 100000::numeric),
+  vat_amount numeric,
+  note text CHECK (note IS NULL OR char_length(note) <= 500),
+  receipt_path text,
+  receipt_mime text,
+  source text NOT NULL DEFAULT 'manual'::text CHECK (source = ANY (ARRAY['receipt_scan'::text, 'manual'::text])),
+  ai_extracted jsonb,
+  ai_confidence numeric CHECK (ai_confidence IS NULL OR ai_confidence >= 0::numeric AND ai_confidence <= 1::numeric),
+  ai_model text,
+  client_mutation_id text,
+  created_by_user_id uuid,
+  confirmed_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT expenses_pkey PRIMARY KEY (id),
+  CONSTRAINT expenses_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT expenses_created_by_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.accountant_access (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  email text NOT NULL CHECK (email = lower(btrim(email)) AND char_length(email) >= 3 AND char_length(email) <= 254 AND POSITION(('@'::text) IN (email)) > 1),
+  name text CHECK (name IS NULL OR char_length(name) <= 100),
+  link_token_hash text NOT NULL,
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'removed'::text])),
+  invited_by_user_id uuid,
+  invited_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_viewed_at timestamp with time zone,
+  removed_at timestamp with time zone,
+  removed_by_user_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT accountant_access_pkey PRIMARY KEY (id),
+  CONSTRAINT accountant_access_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT accountant_access_invited_by_fkey FOREIGN KEY (invited_by_user_id) REFERENCES public.users(id),
+  CONSTRAINT accountant_access_removed_by_fkey FOREIGN KEY (removed_by_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.accountant_login_codes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  access_id uuid NOT NULL,
+  code_hash text NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0 AND attempts <= 5),
+  used_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT accountant_login_codes_pkey PRIMARY KEY (id),
+  CONSTRAINT accountant_login_codes_access_fkey FOREIGN KEY (access_id) REFERENCES public.accountant_access(id)
+);
+CREATE TABLE public.accountant_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  access_id uuid NOT NULL,
+  session_token_hash text NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  last_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  ended_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT accountant_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT accountant_sessions_access_fkey FOREIGN KEY (access_id) REFERENCES public.accountant_access(id)
+);
+CREATE TABLE public.setup_requests (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  requested_by_user_id uuid,
+  note text CHECK (note IS NULL OR char_length(note) <= 2000),
+  file_paths ARRAY NOT NULL DEFAULT '{}'::text[] CHECK (cardinality(file_paths) <= 5),
+  status text NOT NULL DEFAULT 'open'::text CHECK (status = ANY (ARRAY['open'::text, 'done'::text])),
+  emailed_at timestamp with time zone,
+  closed_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT setup_requests_pkey PRIMARY KEY (id),
+  CONSTRAINT setup_requests_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT setup_requests_user_fkey FOREIGN KEY (requested_by_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.widget_usage_daily (
+  client_id uuid NOT NULL,
+  day date NOT NULL,
+  conversations integer NOT NULL DEFAULT 0,
+  visitor_messages integer NOT NULL DEFAULT 0,
+  CONSTRAINT widget_usage_daily_pkey PRIMARY KEY (client_id, day),
+  CONSTRAINT widget_usage_daily_client_fkey FOREIGN KEY (client_id) REFERENCES public.widget_clients(id)
+);
+CREATE TABLE public.lead_action_tokens (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  lead_id uuid NOT NULL,
+  token_hash text NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'::text),
+  expires_at timestamp with time zone NOT NULL,
+  last_used_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT lead_action_tokens_pkey PRIMARY KEY (id),
+  CONSTRAINT lead_action_tokens_tenant_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT lead_action_tokens_lead_fkey FOREIGN KEY (lead_id) REFERENCES public.leads(id)
+);
+CREATE TABLE public.lite_interviews (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'in_progress'::text CHECK (status = ANY (ARRAY['in_progress'::text, 'finished'::text, 'abandoned'::text])),
+  stage text NOT NULL DEFAULT 'areas'::text CHECK (stage = ANY (ARRAY['areas'::text, 'work'::text, 'pricing'::text, 'rules'::text, 'examples'::text, 'website'::text, 'done'::text])),
+  messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+  draft_profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+  example_jobs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  turn_count integer NOT NULL DEFAULT 0 CHECK (turn_count >= 0 AND turn_count <= 120),
+  started_by_user_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  finished_at timestamp with time zone,
+  CONSTRAINT lite_interviews_pkey PRIMARY KEY (id),
+  CONSTRAINT lite_interviews_tenant_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT lite_interviews_user_fkey FOREIGN KEY (started_by_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.lite_price_profiles (
+  tenant_id uuid NOT NULL,
+  profile jsonb NOT NULL CHECK (jsonb_typeof(profile) = 'object'::text AND jsonb_typeof(profile -> 'job_types'::text) = 'array'::text AND jsonb_array_length(profile -> 'job_types'::text) >= 1 AND jsonb_array_length(profile -> 'job_types'::text) <= 30),
+  version integer NOT NULL DEFAULT 1 CHECK (version >= 1),
+  interview_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT lite_price_profiles_pkey PRIMARY KEY (tenant_id),
+  CONSTRAINT lite_price_profiles_tenant_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT lite_price_profiles_interview_fkey FOREIGN KEY (interview_id) REFERENCES public.lite_interviews(id)
+);
+CREATE TABLE public.lite_texts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  lead_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['follow_up'::text, 'booking_accepted'::text, 'booking_declined'::text, 'owner_alert'::text, 'reply_in'::text])),
+  direction text NOT NULL DEFAULT 'outbound'::text CHECK (direction = ANY (ARRAY['outbound'::text, 'inbound'::text])),
+  to_address text,
+  from_address text,
+  body text CHECK (body IS NULL OR char_length(body) <= 1600),
+  context jsonb NOT NULL DEFAULT '{}'::jsonb,
+  dedupe_key text,
+  status text NOT NULL CHECK (status = ANY (ARRAY['scheduled'::text, 'sending'::text, 'sent'::text, 'emailed'::text, 'failed'::text, 'skipped'::text, 'received'::text])),
+  skip_reason text CHECK (skip_reason IS NULL OR (skip_reason = ANY (ARRAY['no_texts_left'::text, 'opted_out'::text, 'follow_ups_off'::text, 'no_mobile'::text, 'lead_closed'::text, 'plan_ended'::text]))),
+  send_after timestamp with time zone,
+  claimed_at timestamp with time zone,
+  sent_at timestamp with time zone,
+  segments integer CHECK (segments IS NULL OR segments >= 1 AND segments <= 3),
+  billed_from text CHECK (billed_from IS NULL OR (billed_from = ANY (ARRAY['allowance'::text, 'pack'::text]))),
+  billed_month text,
+  drafted_by text CHECK (drafted_by IS NULL OR (drafted_by = ANY (ARRAY['ai'::text, 'template'::text]))),
+  provider text NOT NULL DEFAULT 'puresms'::text,
+  provider_message_id text,
+  error text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT lite_texts_pkey PRIMARY KEY (id),
+  CONSTRAINT lite_texts_tenant_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT lite_texts_lead_fkey FOREIGN KEY (lead_id) REFERENCES public.leads(id)
+);
+CREATE TABLE public.referrals (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  referrer_tenant_id uuid NOT NULL,
+  referred_tenant_id uuid NOT NULL UNIQUE,
+  signup_intent_id uuid,
+  code text NOT NULL,
+  referee_offer text NOT NULL CHECK (referee_offer = ANY (ARRAY['none'::text, 'founding'::text, 'free_month'::text, 'month_off_year'::text])),
+  status text NOT NULL DEFAULT 'waiting'::text CHECK (status = ANY (ARRAY['waiting'::text, 'rewarding'::text, 'rewarded'::text, 'void'::text])),
+  reward_pence integer CHECK (reward_pence IS NULL OR reward_pence > 0),
+  qualifying_invoice_id text,
+  stripe_balance_transaction_id text,
+  claimed_at timestamp with time zone,
+  rewarded_at timestamp with time zone,
+  void_reason text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referrals_pkey PRIMARY KEY (id),
+  CONSTRAINT referrals_referrer_tenant_id_fkey FOREIGN KEY (referrer_tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT referrals_referred_tenant_id_fkey FOREIGN KEY (referred_tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT referrals_signup_intent_id_fkey FOREIGN KEY (signup_intent_id) REFERENCES public.signup_intents(id)
+);
+CREATE TABLE public.assistant_conversations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  title text NOT NULL DEFAULT 'New chat'::text CHECK (char_length(title) <= 120),
+  system_prompt text NOT NULL,
+  products ARRAY NOT NULL DEFAULT '{}'::text[],
+  surface text NOT NULL DEFAULT 'web'::text CHECK (surface = ANY (ARRAY['web'::text, 'phone'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  deleted_at timestamp with time zone,
+  CONSTRAINT assistant_conversations_pkey PRIMARY KEY (id),
+  CONSTRAINT assistant_conversations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id),
+  CONSTRAINT assistant_conversations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.assistant_messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  conversation_id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  seq bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  role text NOT NULL CHECK (role = ANY (ARRAY['user'::text, 'assistant'::text])),
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['question'::text, 'answer'::text, 'tool_results'::text])),
+  content jsonb NOT NULL,
+  ui jsonb,
+  tokens_input integer,
+  tokens_output integer,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT assistant_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT assistant_messages_conversation_fkey FOREIGN KEY (conversation_id) REFERENCES public.assistant_conversations(id),
+  CONSTRAINT assistant_messages_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.assistant_actions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  conversation_id uuid NOT NULL,
+  tenant_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  tool_use_id text NOT NULL,
+  kind text NOT NULL,
+  params jsonb NOT NULL,
+  preview jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'running'::text, 'done'::text, 'cancelled'::text, 'failed'::text, 'undone'::text, 'expired'::text])),
+  result jsonb,
+  error text,
+  change_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  decided_at timestamp with time zone,
+  noted_at timestamp with time zone,
+  CONSTRAINT assistant_actions_pkey PRIMARY KEY (id),
+  CONSTRAINT assistant_actions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT assistant_actions_conversation_fkey FOREIGN KEY (conversation_id) REFERENCES public.assistant_conversations(id),
+  CONSTRAINT assistant_actions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
+);
+CREATE TABLE public.rounds (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  name text NOT NULL CHECK (char_length(btrim(name)) >= 1 AND char_length(btrim(name)) <= 60),
+  colour text NOT NULL DEFAULT '#7c3aed'::text CHECK (colour ~ '^#[0-9a-fA-F]{6}$'::text),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT rounds_pkey PRIMARY KEY (id),
+  CONSTRAINT rounds_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id)
 );

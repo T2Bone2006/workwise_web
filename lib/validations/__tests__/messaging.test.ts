@@ -48,6 +48,14 @@ describe('messagingSettingsSchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('ignores wording on the switches payload so a phone save cannot clear it', () => {
+    const parsed = messagingSettingsSchema.parse({
+      ...validSettings,
+      wording: { reminder: 'Hi {business}' },
+    });
+    expect(parsed).not.toHaveProperty('wording');
+  });
 });
 
 describe('actOnReplySchema', () => {

@@ -194,7 +194,7 @@ async function sendToGoCardless(
           amount: toPence(p.amount),
           currency: 'GBP',
           description: await businessName(admin, p.tenantId),
-          retry_if_possible: false,
+          retry_if_possible: true, // Success+: GoCardless retries a failed payment when it is most likely to succeed
           metadata: {
             workwise_tenant_id: p.tenantId,
             workwise_customer_id: p.customerId,

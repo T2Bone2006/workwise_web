@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CalendarDays, MessageSquare, Search, SearchX, X } from 'lucide-react';
 import { JobsDateRangeFilter } from '@/components/jobs/jobs-date-range-filter';
 import { Avatar, EmptyState, Tag, type Tone } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { Input } from '@/components/ui/input';
 import type { ThreadListItem } from '@/lib/data/messaging/threads';
 import { formatVisitDay } from '@/lib/payments/messages';
@@ -298,8 +299,8 @@ function ThreadRow({ item, active }: { item: ThreadListItem; active: boolean }) 
         onClick={sample ? (event) => event.preventDefault() : undefined}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex items-start gap-3 rounded-xl px-2.5 py-2.5 transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
-          active ? 'bg-(--tone-rounds-soft)' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]',
+          'flex items-start gap-3 rounded-xl px-2.5 py-2.5 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+          active ? 'bg-(--tone-rounds-soft)' : rowHover,
         )}
       >
         <Avatar

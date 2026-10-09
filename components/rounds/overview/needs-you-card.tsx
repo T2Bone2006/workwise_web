@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { CalendarX2, CheckCircle2, ChevronRight, MessageCircle, Receipt, Wallet, type LucideIcon } from 'lucide-react';
 import type { NeedsYou } from '@/lib/data/rounds/needs-you';
 import { formatGbp } from '@/lib/money/pence';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { formatDayMonth, formatShortDate, plural, SectionCard } from './shared';
 
 type Need = { key: string; icon: LucideIcon; colour: string; count: string; title: string; detail: string; href: string };
@@ -106,7 +108,10 @@ export function NeedsYouCard({
             <li key={need.key}>
               <Link
                 href={need.href}
-                className="group flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className={cn(
+                  'group flex items-center gap-3 rounded-xl px-2 py-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  rowHover,
+                )}
               >
                 <span
                   className="flex size-9 shrink-0 items-center justify-center rounded-xl"

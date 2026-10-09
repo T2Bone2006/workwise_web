@@ -38,7 +38,7 @@ export default async function LiteHomePage() {
         title="Leads"
         subtitle={
           website
-            ? `From the quote assistant on ${website.replace(/^https?:\/\//, '').replace(/\/$/, '')}`
+            ? `From Lily on ${website.replace(/^https?:\/\//, '').replace(/\/$/, '')}`
             : 'Set your website in Widget to switch it on'
         }
       />

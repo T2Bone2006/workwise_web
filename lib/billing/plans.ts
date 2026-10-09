@@ -76,10 +76,11 @@ export const PRICE_ENV: Record<PlanKey, Record<BillingInterval, string>> = {
   both: { month: 'STRIPE_PRICE_BOTH', year: 'STRIPE_PRICE_BOTH_YEARLY' },
 };
 
+// Monthly and yearly plan price ids of each Pro tier (the same names as pro-plan-prices.ts).
 const PRO_PRICE_ENV = {
-  starter: 'STRIPE_PRICE_STARTER',
-  growth: 'STRIPE_PRICE_GROWTH',
-  pro: 'STRIPE_PRICE_PRO',
+  starter: ['STRIPE_PRICE_STARTER', 'STRIPE_PRICE_STARTER_YEARLY'],
+  growth: ['STRIPE_PRICE_GROWTH', 'STRIPE_PRICE_GROWTH_YEARLY'],
+  pro: ['STRIPE_PRICE_PRO', 'STRIPE_PRICE_PRO_YEARLY'],
 } as const;
 
 let warnedSharedPriceId = false;
@@ -119,8 +120,10 @@ export function productsForPriceId(priceId: string | null | undefined): Product[
   const choice = choiceForPriceId(priceId);
   if (choice) return [...PLANS[choice.plan].products];
   for (const product of ['starter', 'growth', 'pro'] as const) {
-    const value = process.env[PRO_PRICE_ENV[product]];
-    if (value && value === priceId) return [product];
+    for (const envName of PRO_PRICE_ENV[product]) {
+      const value = process.env[envName];
+      if (value && value === priceId) return [product];
+    }
   }
   return [];
 }

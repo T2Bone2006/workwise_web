@@ -5,6 +5,7 @@ import type { ConversationListItem } from '@/lib/data/lite/conversations';
 import { litePaths } from '@/lib/navigation/lite-paths';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { Avatar, Tag, type Tone } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { cn } from '@/lib/utils';
 
 const TAG_LABEL: Record<string, string> = {
@@ -72,7 +73,7 @@ export function ConversationRow({ item, now }: { item: ConversationListItem; now
   const reopened = item.status === 'active' && item.summary != null;
 
   return (
-    <li className="list-none rounded-2xl border border-border bg-card shadow-(--look-card-shadow) transition-colors hover:border-(--tone-slate-solid)/40">
+    <li className={cn('list-none rounded-2xl border border-border bg-card shadow-(--look-card-shadow)', rowHover)}>
       <div className="flex min-w-0 flex-col gap-3 p-3.5 md:flex-row md:items-center md:justify-between">
         <Link href={litePaths.conversation(item.id)} className="flex min-w-0 flex-1 items-start gap-3">
           <Avatar name={item.lead?.firstName ?? '?'} tone={item.lead ? STATUS_TONE[item.lead.status] : 'slate'} />

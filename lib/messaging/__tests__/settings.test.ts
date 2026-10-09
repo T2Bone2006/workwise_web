@@ -31,6 +31,21 @@ describe('parseMessagingSettings', () => {
     ).toBe(24);
   });
 
+  it('keeps a valid wording sentence when other settings are merged over it', () => {
+    const reminder = 'Hi {business}, {address} on {date} for your {job}. Reply NO';
+    const saved = parseMessagingSettings({ wording: { reminder } });
+    expect(saved.wording.reminder).toBe(reminder);
+    const again = parseMessagingSettings({ ...saved, reminders_enabled: false });
+    expect(again.reminders_enabled).toBe(false);
+    expect(again.wording.reminder).toBe(reminder);
+  });
+
+  it('drops wording that is missing a required piece', () => {
+    expect(
+      parseMessagingSettings({ wording: { reminder: 'Hello there' } }).wording.reminder,
+    ).toBeNull();
+  });
+
   it('keeps contact_phone only when it normalises to a UK number', () => {
     expect(parseMessagingSettings({ contact_phone: '07700 900123' }).contact_phone).toBe(
       '+447700900123',

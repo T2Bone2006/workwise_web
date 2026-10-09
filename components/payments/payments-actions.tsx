@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { Link2, Plus, Search } from 'lucide-react';
 import { Avatar } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { copyPayLink } from '@/components/payments/copy-pay-link-button';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
 import { Button } from '@/components/ui/button';
@@ -104,7 +106,10 @@ export function PaymentsActions({
                     <button
                       type="button"
                       onClick={() => choose(customer.id)}
-                      className="flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className={cn(
+                        'flex w-full items-center gap-3 rounded-lg px-1 py-2 text-left focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                        rowHover,
+                      )}
                     >
                       <Avatar name={customer.name} size="sm" tone={owes ? 'rose' : 'slate'} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{customer.name}</span>

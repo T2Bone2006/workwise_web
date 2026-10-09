@@ -10,6 +10,14 @@
     "test": "vitest run",
     "stripe:probe": "tsx --env-file=.env.local scripts/stripe-connect-probe.ts",
     "stripe:portal-config": "node --env-file=.env.local scripts/stripe-portal-config.mjs",
+    "stripe:pro-test-subscription": "node --env-file=.env.local scripts/stripe-pro-test-subscription.mjs",
+    "stripe:pro-restart-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-restart-check.ts",
+    "stripe:pro-yearly-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-yearly-check.ts",
+    "stripe:p8-account": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-p8-walkthrough-account.ts",
+    "stripe:pro-manage-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-manage-check.ts",
+    "stripe:extra-worker-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-extra-worker-check.ts",
+    "stripe:pro-prices": "node --env-file=.env.local scripts/stripe-pro-prices.mjs",
+    "stripe:extra-worker-prices": "node --env-file=.env.local scripts/stripe-extra-worker-prices.mjs",
     "lite:tick": "node --env-file=.env.local scripts/lite-tick.mjs"
   },
   "dependencies": {

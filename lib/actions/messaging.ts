@@ -5,15 +5,20 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { actOnReplyCore, markThreadRead } from '@/lib/messaging/replies';
+import { getMessagingSettings } from '@/lib/data/messaging/settings';
+import { messageWordingPreview } from '@/lib/messaging/templates';
 import {
+  saveMessageWordingCore,
   saveMessagingSettingsCore,
   updateCustomerMessagingCore,
 } from '@/lib/messaging/settings-core';
 import {
   actOnReplySchema,
   customerMessagingSchema,
+  messageWordingSchema,
   messagingSettingsSchema,
 } from '@/lib/validations/messaging';
 
@@ -120,6 +125,34 @@ export async function updateMessagingSettings(
 
   revalidatePath('/settings');
   revalidatePath('/messages');
+  return { success: true };
+}
+
+export async function saveMessageWording(
+  input: z.input<typeof messageWordingSchema>,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const ctx = await requireRounds();
+  if (!ctx.success) return ctx;
+
+  const parsed = messageWordingSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const loaded = await getMessagingSettings(ctx.supabase, ctx.tenantId);
+  const preview = messageWordingPreview(parsed.data.key, parsed.data.body, {
+    businessName: loaded.businessName,
+    contactPhone: loaded.contact_phone ?? normalizeUkPhoneE164(loaded.companyPhone),
+  });
+  if (preview.error) return { success: false, error: preview.error };
+
+  const result = await saveMessageWordingCore(
+    ctx.supabase,
+    ctx.tenantId,
+    parsed.data.key,
+    parsed.data.body,
+  );
+  if (!result.success) return result;
+
+  revalidatePath('/settings');
   return { success: true };
 }
 

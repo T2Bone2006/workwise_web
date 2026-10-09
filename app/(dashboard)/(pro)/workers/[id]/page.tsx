@@ -25,6 +25,9 @@ import Link from 'next/link';
 import { WorkerAutoAssignToggle } from '@/components/workers/worker-auto-assign-toggle';
 import { WorkerPasswordResetButton } from '@/components/workers/worker-password-reset-button';
 import { WorkerDeactivateButton } from '@/components/workers/worker-delete-button';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { WorkerDetailNew } from '@/components/workers/worker-detail-new';
 
 interface WorkerDetailPageProps {
   params: Promise<{ id: string }>;
@@ -166,6 +169,51 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
     completed: { color: 'bg-green-100 text-green-800', label: 'Completed' },
     cancelled: { color: 'bg-red-100 text-red-800', label: 'Cancelled' },
   };
+
+  if ((await getTenantLook(await getTenantProducts())) === 'new') {
+    const count = (...statuses: string[]) => jobStats?.filter((j) => statuses.includes(j.status as string)).length ?? 0;
+    return (
+      <WorkerDetailNew
+        worker={{
+          id: worker.id,
+          fullName: worker.full_name,
+          phone: worker.phone,
+          email: worker.email,
+          userId: worker.user_id,
+          homePostcode: worker.home_postcode,
+          workerType: worker.worker_type as string | null,
+          status: worker.status as string | null,
+          skills: Array.isArray(worker.skills) ? (worker.skills as string[]) : [],
+          createdAt: worker.created_at,
+          excludedFromAutoAssign: Boolean(workerTenant?.exclude_from_auto_assign),
+          counts: {
+            total: totalJobs,
+            completed: completedJobs,
+            onJob: count('in_progress', 'paused'),
+            comingUp: count('assigned', 'pending_send'),
+            notCompleted: count('incomplete'),
+            cancelled: cancelledJobs,
+          },
+          recent: (recentJobs ?? []).map((job) => {
+            const customer = Array.isArray(job.customer) ? job.customer[0] : job.customer;
+            return {
+              id: job.id as string,
+              reference: (job.reference_number as string | null) ?? null,
+              address: (job.address as string | null) ?? null,
+              postcode: (job.postcode as string | null) ?? null,
+              status: job.status as string,
+              scheduledDate: (job.scheduled_date as string | null) ?? null,
+              completedAt: (job.completed_at as string | null) ?? null,
+              customerName:
+                customer != null && typeof customer === 'object' && 'name' in customer
+                  ? ((customer as { name: string }).name ?? null)
+                  : null,
+            };
+          }),
+        }}
+      />
+    );
+  }
 
   const workerStatus =
     statusConfig[worker.status as string] ?? statusConfig.off_duty;

@@ -44,8 +44,10 @@ export function SetBreadcrumbName({ id, name }: { id: string; name: string }) {
 
 const SECTION: Record<string, string> = {
   dashboard: 'Dashboard',
+  assistant: 'Lily',
   customers: 'Customers',
   calendar: 'Calendar',
+  map: 'Map',
   services: 'Services',
   payments: 'Payments',
   messages: 'Messages',
@@ -98,6 +100,7 @@ export function crumbsForPath(pathname: string): Crumb[] {
   if (root === 'workers') {
     if (!a) return [{ label: section }];
     if (a === 'new') return [home, { label: 'Add worker' }];
+    if (a === 'add-several') return [home, { label: 'Add several workers' }];
     const worker: Crumb = { label: 'Worker', href: `/workers/${a}` };
     if (b === 'edit') return [home, worker, { label: 'Edit' }];
     return [home, { label: 'Worker' }];

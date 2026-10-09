@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Avatar, IconChip, Tag, toneClasses, type Tone } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { cn } from '@/lib/utils';
 
 /** What a money row means: the colour of its icon, its amount and its status tag. */
@@ -38,8 +39,8 @@ export function MoneyRow(props: {
   return (
     <li
       className={cn(
-        'relative list-none rounded-2xl border border-border bg-card shadow-(--look-card-shadow) transition-colors',
-        props.onClick && 'hover:border-(--tone-slate-solid)/40',
+        'relative list-none rounded-2xl border border-border bg-card shadow-(--look-card-shadow)',
+        props.onClick && rowHover,
       )}
     >
       <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2.5 p-3 sm:flex-nowrap sm:gap-4 sm:p-3.5">

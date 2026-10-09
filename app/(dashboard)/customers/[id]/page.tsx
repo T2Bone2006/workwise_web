@@ -8,6 +8,8 @@ import {
 } from '@/lib/data/customers';
 import { getRecentJobsForCustomer } from '@/lib/data/jobs';
 import { getRoundsCustomerById } from '@/lib/data/rounds/customers';
+import { getRoundMembership } from '@/lib/data/rounds/round-membership';
+import type { RoundRow } from '@/lib/rounds/rounds';
 import {
   getAgreementsForCustomer,
   type AgreementListRow,
@@ -112,6 +114,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       ledgerResult,
       directDebit,
       messaging,
+      membership,
     ] = await Promise.all([
       getRoundsCustomerById(tenantId, customerId),
       getAgreementsForCustomer(tenantId, customerId),
@@ -139,6 +142,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
         if (flags.error) console.error('[customer messages]', flags.error);
         return { messagingSettings, recentMessages, flags: flags.data };
       }),
+      createClient().then((supabase) => getRoundMembership(supabase, tenantId)),
     ]);
 
     if (customerError || !customer) {
@@ -177,6 +181,14 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     const primary = live[0] ?? agreements[0] ?? null;
     const place = [primary?.address, primary?.postcode].filter(Boolean).join(', ') || customer.address;
 
+    const customerRounds = membership?.roundsByCustomer.get(customerId) ?? [];
+    const roundsById = new Map((membership?.rounds ?? []).map((r) => [r.id, r]));
+    const roundByAgreement: Record<string, RoundRow> = {};
+    for (const [agreementId, roundId] of membership?.roundIdByAgreement ?? []) {
+      const round = roundsById.get(roundId);
+      if (round) roundByAgreement[agreementId] = round;
+    }
+
     const optedOut =
       typeof messaging.flags?.messaging_opt_out_at === 'string' && messaging.flags.messaging_opt_out_at.trim() !== '';
     const tags: CustomerHeaderTag[] = [];
@@ -207,6 +219,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           email={customer.email}
           accessNotes={customer.access_notes}
           tags={tags}
+          rounds={customerRounds}
           places={places}
           editPanel={
             <CustomerEditFields
@@ -250,6 +263,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
             <AgreementsCard
               customerId={customerId}
               agreements={agreements}
+              roundByAgreement={roundByAgreement}
               fetchError={agreementsError?.message ?? null}
             />
             <div id="visits" className="scroll-mt-4">

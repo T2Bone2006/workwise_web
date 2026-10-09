@@ -281,7 +281,7 @@ export function SetupFlow(props: Props) {
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
       <PageGradientHeader
-        title="Set up your website assistant"
+        title="Set up Lily on your website"
         subtitle="About 10–15 minutes. Stop any time — it saves as you go."
       />
       <div className="flex w-full min-w-0 flex-col gap-4 lg:flex-row lg:items-start">

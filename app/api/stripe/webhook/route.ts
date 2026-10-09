@@ -4,7 +4,7 @@ import { getStripe } from '@/lib/stripe/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { creditTextPackFromSession } from '@/lib/messaging/text-packs';
 import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
-import { syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
+import { ensureWidgetClient, syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
 import { onInvoicePaid, onSubscriptionEnded } from '@/lib/billing/referrals';
 import { onFirstInvoicePaid } from '@/lib/billing/second-month';
 
@@ -76,6 +76,11 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const session = event.data.object;
       if (session.mode === 'subscription' && session.metadata?.kind === 'restart') {
         await syncRestartSession(session);
+      } else if (session.mode === 'subscription' && session.metadata?.kind === 'worker_lite') {
+        // A worker-made business buying Lite from nothing: same tenant check as a restart, then Lite's settings row.
+        await syncRestartSession(session);
+        const tenantId = session.metadata?.tenant_id;
+        if (tenantId) await ensureWidgetClient(tenantId);
       } else if (session.mode === 'subscription') {
         await provisionFromCheckoutSession(session);
         // Stripe can send invoice.paid for the first invoice before this event, when the

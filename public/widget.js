@@ -683,7 +683,7 @@
     info.appendChild(el("div", "ww-online-dot"));
     var titles = el("div");
     titles.appendChild(el("div", "ww-business-name", state.businessName));
-    var powered = el("div", "ww-powered-by", "Powered by ");
+    var powered = el("div", "ww-powered-by", "Lily, AI assistant · Powered by ");
     var link = el("a", "ww-powered-link", "WorkWise");
     link.setAttribute("href", "https://joinworkwise.com");
     link.setAttribute("target", "_blank");

@@ -30,8 +30,8 @@ export function SetupBanner({ stage }: { stage?: Stage }) {
       }
     >
       {next
-        ? `You're part-way through a short interview. Next it asks about ${next}. Until you finish, the assistant doesn't know your prices or the work you take, so it can't go on your website.`
-        : "There's a short interview still open. Until you finish it, the assistant doesn't know your prices or the work you take, so it can't go on your website."}
+        ? `You're part-way through a short interview. Next it asks about ${next}. Until you finish, Lily doesn't know your prices or the work you take, so she can't go on your website.`
+        : "There's a short interview still open. Until you finish it, Lily doesn't know your prices or the work you take, so she can't go on your website."}
     </Notice>
   );
 }

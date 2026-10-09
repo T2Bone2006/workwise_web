@@ -62,8 +62,12 @@ function formatPurgeDate(iso: string): string {
   }).format(date);
 }
 
+/** Managed by us (can't be closed here): any manual grant, or a Pro-tier row that isn't Stripe-billed. A Stripe-billed Pro business is not blocked. */
 function isSelfServeBlocked(rows: SubRow[]): boolean {
-  return rows.some((row) => row.source === 'manual' || (row.product != null && PRO_TIERS.has(row.product)));
+  return rows.some(
+    (row) =>
+      row.source === 'manual' || (row.product != null && PRO_TIERS.has(row.product) && row.source !== 'stripe'),
+  );
 }
 
 async function cancelLiveSubscriptions(tenantId: string, customerId: string): Promise<void> {

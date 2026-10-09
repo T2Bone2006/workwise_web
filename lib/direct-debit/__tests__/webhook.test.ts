@@ -39,6 +39,10 @@ const afterCollectionFailed = vi.fn(async () => {});
 vi.mock('@/lib/direct-debit/after-collection', () => ({
   afterCollectionFailed: (...a: unknown[]) => afterCollectionFailed(...(a as [])),
 }));
+const afterRefundCreated = vi.fn(async () => {});
+vi.mock('@/lib/direct-debit/after-refund', () => ({
+  afterRefundCreated: (...a: unknown[]) => afterRefundCreated(...(a as [])),
+}));
 vi.mock('@/lib/push/owner-push', () => ({
   sendOrHoldOwnerPush: async (_a: unknown, _t: string, p: { kind: string; title: string; body: string; data: unknown }) => {
     pushes.push(p);
@@ -230,6 +234,7 @@ beforeEach(() => {
   refreshVerification.mockReset();
   pushes.length = 0;
   afterCollectionFailed.mockClear();
+  afterRefundCreated.mockClear();
   failInsert.payments = null;
   connection.value = { status: 'connected', verification_status: 'successful' };
   unlockable.value = true;
@@ -639,6 +644,67 @@ describe('payments', () => {
     expect(pushes.map((p) => p.title)).toEqual(['Direct Debit received']);
   });
 
+  describe('Success+ (GoCardless retries a failed payment)', () => {
+    const retryDetails = (will: boolean) => ({ cause: 'insufficient_funds', description: 'No funds', will_attempt_retry: will });
+
+    it('a failure GoCardless will retry keeps the collection Collecting: no failed push or message', async () => {
+      db.direct_debit_collections = [collection({ status: 'processing', gocardless_payment_id: 'PM1' })];
+      gcPayment('failed');
+      await run(fakeAdmin(), { ...payEvent('failed'), details: retryDetails(true) });
+      expect(db.direct_debit_collections[0]).toMatchObject({ status: 'processing', gocardless_status: 'retrying', failure_code: null });
+      expect(afterCollectionFailed).not.toHaveBeenCalled();
+    });
+
+    it('resubmission_requested puts the collection back to Collecting', async () => {
+      db.direct_debit_collections = [collection({ status: 'processing', gocardless_status: 'retrying' })];
+      gcPayment('pending_submission', { charge_date: '2026-10-12' });
+      await run(fakeAdmin(), payEvent('resubmission_requested'));
+      expect(db.direct_debit_collections[0]).toMatchObject({
+        status: 'processing',
+        gocardless_status: 'pending_submission',
+        charge_date: '2026-10-12',
+      });
+    });
+
+    it('resubmission_requested reopens a collection we had failed because the retry flag was missing', async () => {
+      db.direct_debit_collections = [collection({ status: 'failed', failure_code: 'insufficient_funds', finished_at: NOW.toISOString() })];
+      gcPayment('pending_submission');
+      await run(fakeAdmin(), payEvent('resubmission_requested'));
+      expect(db.direct_debit_collections[0]).toMatchObject({ status: 'processing', failure_code: null, finished_at: null });
+    });
+
+    it('never reopens a failed collection the trader already sorted', async () => {
+      db.direct_debit_collections = [collection({ status: 'failed', resolution: 'left' })];
+      gcPayment('pending_submission');
+      await run(fakeAdmin(), payEvent('resubmission_requested'));
+      expect(db.direct_debit_collections[0]).toMatchObject({ status: 'failed', resolution: 'left' });
+    });
+
+    it('a late failure being retried voids the payment, then the retry paying reinstates the same one', async () => {
+      db.direct_debit_collections = [collection({ status: 'succeeded', payment_id: 'pay-1', gocardless_payment_id: 'PM1' })];
+      db.payments = [{ id: 'pay-1', tenant_id: TENANT, status: 'active', gocardless_payment_id: 'PM1', amount: 15, refunded_amount: 0 }];
+      const admin = fakeAdmin();
+      gcPayment('failed');
+      await run(admin, { ...payEvent('late_failure_settled'), details: retryDetails(true) });
+      expect(db.payments[0].status).toBe('void');
+      expect(db.direct_debit_collections[0].status).toBe('processing');
+
+      gcPayment('confirmed');
+      await run(admin, payEvent('confirmed'));
+      expect(db.payments).toHaveLength(1);
+      expect(db.payments[0]).toMatchObject({ status: 'active', voided_at: null, void_reason: null });
+      expect(db.direct_debit_collections[0]).toMatchObject({ status: 'succeeded', payment_id: 'pay-1' });
+    });
+
+    it('the last failure (no more retries) fails the collection as before', async () => {
+      db.direct_debit_collections = [collection({ status: 'processing', gocardless_status: 'retrying' })];
+      gcPayment('failed');
+      await run(fakeAdmin(), { ...payEvent('failed'), details: retryDetails(false) });
+      expect(db.direct_debit_collections[0]).toMatchObject({ status: 'failed', failure_code: 'insufficient_funds' });
+      expect(afterCollectionFailed).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('a chargeback never overwrites one already recorded as lost', async () => {
     db.direct_debit_collections = [collection({ status: 'succeeded', payment_id: 'pay-1', gocardless_status: 'charged_back' })];
     db.payments = [
@@ -763,6 +829,24 @@ describe('refunds', () => {
     expect(db.payments[0].refunded_amount).toBe(5);
     await run(admin, refundEvent('failed'));
     expect(db.payments[0].refunded_amount).toBe(0);
+  });
+
+  it('a refund made in WorkWise tells the customer once; one made in the GoCardless dashboard does not', async () => {
+    const admin = fakeAdmin();
+    payment(500);
+    gc['/refunds/RF1'] = { refunds: { id: 'RF1', amount: 500, links: { payment: 'PM1' }, metadata: { workwise_payment_id: 'pay-1' } } };
+    await run(admin, refundEvent('created'));
+    expect(afterRefundCreated).toHaveBeenCalledWith(expect.anything(), {
+      tenantId: TENANT,
+      paymentId: 'pay-1',
+      refundId: 'RF1',
+      amount: 5,
+    });
+
+    afterRefundCreated.mockClear();
+    gc['/refunds/RF1'] = { refunds: { id: 'RF1', amount: 500, links: { payment: 'PM1' } } };
+    await run(admin, refundEvent('created'));
+    expect(afterRefundCreated).not.toHaveBeenCalled();
   });
 
   it('never refunds more than the payment', async () => {

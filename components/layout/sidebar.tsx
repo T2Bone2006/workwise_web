@@ -39,6 +39,10 @@ export interface SidebarProps {
   addLiteYearly?: boolean;
   /** Self-serve admins: green referral row at the bottom of the new-look sidebar. */
   showReferral?: boolean;
+  /** Which referral wording the row uses: Pro never promises the friend anything. */
+  referralKind?: 'rounds_lite' | 'pro';
+  /** A self-employed worker who has not added Lite: the worker-price Add Lite card instead of the Rounds one. */
+  workerLite?: boolean;
 }
 
 function ClassicSidebar({

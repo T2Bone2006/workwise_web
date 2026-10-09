@@ -16,6 +16,7 @@ import { toInvoiceViewModel } from '@/lib/invoices/view-model';
 import { directDebitCollectOn } from '@/lib/direct-debit/dates';
 import { workingDirectDebit } from '@/lib/direct-debit/state';
 import { getTenantMessagingContext } from '@/lib/messaging/brand';
+import type { MessageWording } from '@/lib/messaging/wording';
 import { asCustomerFlag, resolveCustomerFlag } from '@/lib/messaging/customer-flag';
 import type { Channel } from '@/lib/messaging/channel';
 import { isUkMobileE164 } from '@/lib/messaging/phone';
@@ -401,6 +402,7 @@ type AssembledVisitDone = {
   replyTo: string | null;
   invoiceUrl: string | null;
   contactPhone: string | null;
+  wording: MessageWording | null;
 };
 
 async function assembleVisitDone(
@@ -545,6 +547,7 @@ async function assembleVisitDone(
       replyTo: company.email ?? (await replyToForTenant(supabase, p.tenantId)),
       invoiceUrl,
       contactPhone: messaging?.contactPhone ?? null,
+      wording: messaging?.settings?.wording ?? null,
     },
   };
 }
@@ -748,6 +751,7 @@ export async function sendVisitDoneNotice(
           today: todayInLondon(),
           invoiceUrl: facts.invoiceUrl,
           contactPhone: facts.contactPhone,
+          wording: facts.wording,
         });
         if (!sms) {
           throw new Error('composeVisitDoneSms returned null');

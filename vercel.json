@@ -5,6 +5,8 @@
     { "path": "/api/cron/visit-reminders", "schedule": "0 17 * * *" },
     { "path": "/api/cron/direct-debits", "schedule": "0 17 * * *" },
     { "path": "/api/cron/send-held-messages", "schedule": "0 7 * * *" },
-    { "path": "/api/cron/purge-closed-accounts", "schedule": "15 4 * * *" }
+    { "path": "/api/cron/purge-closed-accounts", "schedule": "15 4 * * *" },
+    { "path": "/api/cron/worker-discounts", "schedule": "30 4 * * *" },
+    { "path": "/api/cron/extra-workers", "schedule": "45 4 * * *" }
   ]
 }

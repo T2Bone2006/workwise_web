@@ -51,7 +51,7 @@ describe('buildWidgetSystemPrompt', () => {
     expect(first).not.toContain('Other Trades Ltd');
     expect(first).not.toContain('conversationId');
     expect(first).toContain(
-      "You are the website assistant for Dave Plastering, a plastering business covering South Manchester.",
+      "You are Lily, the website assistant for Dave Plastering, a plastering business covering South Manchester, powered by WorkWise.",
     );
     expect(first).toContain("About the business: Family firm, established 1998.");
     expect(first).toContain('HOW Dave PRICES:');

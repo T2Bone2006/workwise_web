@@ -12,6 +12,13 @@ const ENV: Record<string, string> = {
   STRIPE_PRICE_LITE_YEARLY: 'price_lite_y',
   STRIPE_PRICE_BOTH: 'price_both_m',
   STRIPE_PRICE_BOTH_YEARLY: 'price_both_y',
+  STRIPE_PRICE_STARTER: 'price_starter_m',
+  STRIPE_PRICE_STARTER_YEARLY: 'price_starter_y',
+  STRIPE_PRICE_GROWTH: 'price_growth_m',
+  STRIPE_PRICE_GROWTH_YEARLY: 'price_growth_y',
+  STRIPE_PRICE_PRO: 'price_pro_m',
+  STRIPE_PRICE_PRO_YEARLY: 'price_pro_y',
+  STRIPE_PRICE_EXTRA_WORKER_STARTER: 'price_extra_starter_m',
 };
 
 type Row = Record<string, unknown>;
@@ -27,6 +34,8 @@ const db = {
   subscriptions: [] as Row[],
 };
 let failFinish = false;
+let paidInvoices: Stripe.Invoice[] = [];
+let listError = false;
 let missFinish = false;
 
 type StoredTxn = { id: string; metadata?: { referral_id?: string } };
@@ -37,6 +46,7 @@ let txnCount = 0;
 const { stripe, getStripe } = vi.hoisted(() => {
   const stripe = {
     customers: { createBalanceTransaction: vi.fn(), listBalanceTransactions: vi.fn() },
+    invoices: { list: vi.fn() },
   };
   return { stripe, getStripe: vi.fn(() => stripe) };
 });
@@ -265,6 +275,13 @@ beforeEach(() => {
       return txn;
     }
   );
+  paidInvoices = [];
+  listError = false;
+  stripe.invoices.list.mockReset();
+  stripe.invoices.list.mockImplementation(async () => {
+    if (listError) throw Object.assign(new Error('down'), { name: 'StripeConnectionError' });
+    return { data: paidInvoices, has_more: false };
+  });
   stripe.customers.listBalanceTransactions.mockReset();
   stripe.customers.listBalanceTransactions.mockImplementation(
     async (customerId: string, params?: { limit?: number; starting_after?: string }) => {
@@ -460,5 +477,191 @@ describe('listMyReferrals', () => {
     expect(rows[0]?.businessName).toBe('B');
     expect(rows[0]?.rewardPence).toBe(3500);
     expect(rows).toHaveLength(2);
+  });
+});
+
+
+// ---- Pro (Phase 8 step 20) ----
+
+type ProRow = { product: string; source?: string; status?: string; billing_interval?: string };
+
+function seedPro(referrerRows: ProRow[], referredRows: ProRow[] = []) {
+  seed(null);
+  db.subscriptions = [
+    ...referrerRows.map((r) => ({ tenant_id: REFERRER, source: 'stripe', status: 'active', plan: null, ...r })),
+    ...referredRows.map((r) => ({ tenant_id: REFERRED, source: 'stripe', status: 'active', plan: null, ...r })),
+  ];
+}
+
+function proInvoice(opts: {
+  id: string;
+  price: string;
+  subtotal: number;
+  reason?: string;
+  discount?: number;
+  status?: Stripe.Invoice.Status;
+  extras?: number;
+}): Stripe.Invoice {
+  const lines = [
+    {
+      amount: opts.subtotal - (opts.extras ?? 0),
+      subscription: 'sub_1',
+      parent: { type: 'subscription_item_details' },
+      pricing: { type: 'price_details', price_details: { price: opts.price } },
+    },
+  ];
+  if (opts.extras) {
+    lines.push({
+      amount: opts.extras,
+      subscription: 'sub_1',
+      parent: { type: 'subscription_item_details' },
+      pricing: { type: 'price_details', price_details: { price: 'price_extra_starter_m' } },
+    });
+  }
+  return {
+    id: opts.id,
+    status: opts.status ?? 'paid',
+    customer: 'cus_referred',
+    billing_reason: opts.reason ?? 'subscription_cycle',
+    subtotal: opts.subtotal,
+    total_discount_amounts: opts.discount ? [{ amount: opts.discount }] : null,
+    lines: { data: lines },
+  } as unknown as Stripe.Invoice;
+}
+
+/** Pays the invoice: it is now in Stripe's paid list, then the webhook handler runs. */
+async function pay(inv: Stripe.Invoice) {
+  paidInvoices = [...paidInvoices, inv];
+  return onInvoicePaid(inv);
+}
+
+describe('onInvoicePaid: a Pro referred business', () => {
+  const growthBill = (id: string, reason = 'subscription_cycle', extra: Partial<Parameters<typeof proInvoice>[0]> = {}) =>
+    proInvoice({ id, price: 'price_growth_m', subtotal: 44900, reason, ...extra });
+
+  it('waits for the third full monthly bill, then credits once', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    expect(await pay(growthBill('in_1', 'subscription_create'))).toEqual({ result: 'not_yet' });
+    expect(await pay(growthBill('in_2'))).toEqual({ result: 'not_yet' });
+    expect(stripe.customers.createBalanceTransaction).not.toHaveBeenCalled();
+    const third = await pay(growthBill('in_3'));
+    expect(third).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+    expect(stripe.customers.createBalanceTransaction).toHaveBeenCalledTimes(1);
+    expect(referral().status).toBe('rewarded');
+    expect(referral().qualifying_invoice_id).toBe('in_3');
+  });
+
+  it('a replayed third-bill event is already handled and credits nothing more', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    await pay(growthBill('in_1', 'subscription_create'));
+    await pay(growthBill('in_2'));
+    const third = growthBill('in_3');
+    await pay(third);
+    expect(await onInvoicePaid(third)).toEqual({ result: 'already_handled' });
+    expect(stripe.customers.createBalanceTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not count a mid-cycle invoice (an extra worker added)', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    await pay(growthBill('in_1', 'subscription_create'));
+    await pay(growthBill('in_up', 'subscription_update'));
+    expect(await pay(growthBill('in_2'))).toEqual({ result: 'not_yet' });
+    expect(referral().status).toBe('waiting');
+  });
+
+  it('does not count a bill paid below the plan price (a discount)', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    await pay(growthBill('in_1', 'subscription_create', { discount: 1000 }));
+    await pay(growthBill('in_2'));
+    expect(await pay(growthBill('in_3'))).toEqual({ result: 'not_yet' });
+  });
+
+  it('counts extras as no part of the plan price: a plan-price bill with extras still counts', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    await pay(growthBill('in_1', 'subscription_create'));
+    await pay(growthBill('in_2'));
+    const third = proInvoice({ id: 'in_3', price: 'price_growth_m', subtotal: 44900 + 1800, extras: 1800, reason: 'subscription_cycle' });
+    expect((await pay(third)).result).toBe('rewarded');
+  });
+
+  it('a yearly business qualifies on its first yearly payment', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    const result = await pay(proInvoice({ id: 'in_y', price: 'price_starter_y', subtotal: 149000, reason: 'subscription_create' }));
+    expect(result).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+  });
+
+  it('a yearly invoice below the yearly price does not qualify', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    const result = await pay(proInvoice({ id: 'in_y', price: 'price_starter_y', subtotal: 149000, discount: 5000, reason: 'subscription_create' }));
+    expect(result).toEqual({ result: 'not_yet' });
+  });
+
+  it('gives a Pro referrer the cheaper of the two plans', async () => {
+    seedPro([{ product: 'starter', billing_interval: 'month' }]);
+    const growth = await pay(proInvoice({ id: 'in_y', price: 'price_growth_y', subtotal: 449000, reason: 'subscription_create' }));
+    expect(growth).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 14900 });
+    expect(stripe.customers.createBalanceTransaction).toHaveBeenCalledWith(
+      'cus_referrer',
+      expect.objectContaining({ amount: -14900 }),
+      { idempotencyKey: `referral-reward-${REFERRAL}` },
+    );
+  });
+
+  it('a Pro referrer of a Rounds business gets £35, not £149', async () => {
+    seedPro([{ product: 'starter', billing_interval: 'month' }]);
+    const result = await onInvoicePaid(invoice({ subtotal: 3500, price: 'price_rounds_m' }));
+    expect(result).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+  });
+
+  it('a manual Pro business is never a referrer: the referral is voided', async () => {
+    seedPro([{ product: 'pro', source: 'manual', status: 'manual' }]);
+    const result = await onInvoicePaid(invoice({ subtotal: 3500, price: 'price_rounds_m' }));
+    expect(result).toEqual({ result: 'void', reason: 'referrer_no_live_plan' });
+    expect(referral().status).toBe('void');
+    expect(stripe.customers.createBalanceTransaction).not.toHaveBeenCalled();
+  });
+
+  it('a Pro row that is not Stripe-billed also voids it', async () => {
+    seedPro([{ product: 'starter' }, { product: 'pro', source: 'other' }]);
+    const result = await onInvoicePaid(invoice({ subtotal: 3500, price: 'price_rounds_m' }));
+    expect(result.result).toBe('void');
+  });
+
+  it('an ended Pro referrer voids it', async () => {
+    seedPro([{ product: 'starter', status: 'canceled' }]);
+    const result = await onInvoicePaid(invoice({ subtotal: 3500, price: 'price_rounds_m' }));
+    expect(result).toEqual({ result: 'void', reason: 'referrer_no_live_plan' });
+  });
+
+  it('falls back to the referred business\'s own rows when the invoice shows no known price', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow], [{ product: 'starter', billing_interval: 'year' }]);
+    const result = await pay(proInvoice({ id: 'in_x', price: 'price_unknown', subtotal: 149000, reason: 'subscription_create' }));
+    // the invoice shows no known price, so the plan (Starter, yearly) comes from the business's own rows
+    expect(result).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+  });
+
+  it('a Stripe error on the credit returns the row to waiting and rethrows', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    stripe.customers.createBalanceTransaction.mockRejectedValueOnce(Object.assign(new Error('down'), { name: 'StripeAPIError' }));
+    const inv = proInvoice({ id: 'in_y', price: 'price_starter_y', subtotal: 149000, reason: 'subscription_create' });
+    paidInvoices = [inv];
+    await expect(onInvoicePaid(inv)).rejects.toThrow('down');
+    expect(referral().status).toBe('waiting');
+  });
+
+  it('a failure listing invoices rethrows and rewards nothing', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    listError = true;
+    await expect(
+      onInvoicePaid(proInvoice({ id: 'in_1', price: 'price_growth_m', subtotal: 44900, reason: 'subscription_create' })),
+    ).rejects.toThrow('down');
+    expect(referral().status).toBe('waiting');
+    expect(stripe.customers.createBalanceTransaction).not.toHaveBeenCalled();
+  });
+
+  it('never rewards from an unpaid invoice', async () => {
+    seedPro([{ product: 'rounds', plan: 'rounds' } as ProRow]);
+    const result = await onInvoicePaid(proInvoice({ id: 'in_o', price: 'price_growth_m', subtotal: 44900, status: 'open' }));
+    expect(result).toEqual({ result: 'no_referral' });
   });
 });

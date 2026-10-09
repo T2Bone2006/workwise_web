@@ -1,5 +1,12 @@
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import type { ChannelOrder } from './channel';
+import {
+  checkWordingShape,
+  emptyMessageWording,
+  STANDARD_WORDING,
+  WORDING_KEYS,
+  type MessageWording,
+} from './wording';
 
 export type MessagingSettings = {
   reminders_enabled: boolean;
@@ -11,6 +18,8 @@ export type MessagingSettings = {
   chase_first_days: number;
   chase_second_days: number;
   contact_phone: string | null;
+  /** Null on a key means the standard sentence. */
+  wording: MessageWording;
 };
 
 export const DEFAULT_MESSAGING_SETTINGS: MessagingSettings = {
@@ -23,6 +32,7 @@ export const DEFAULT_MESSAGING_SETTINGS: MessagingSettings = {
   chase_first_days: 7,
   chase_second_days: 21,
   contact_phone: null,
+  wording: emptyMessageWording(),
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -116,7 +126,22 @@ export function parseMessagingSettings(
     chase_first_days,
     chase_second_days,
     contact_phone: parseContactPhone(source.contact_phone),
+    wording: parseWording(source.wording),
   };
+}
+
+function parseWording(raw: unknown): MessageWording {
+  const wording = emptyMessageWording();
+  if (!isPlainObject(raw)) return wording;
+  for (const key of WORDING_KEYS) {
+    const value = raw[key];
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === STANDARD_WORDING[key]) continue;
+    if (checkWordingShape(key, trimmed)) continue;
+    wording[key] = trimmed;
+  }
+  return wording;
 }
 
 /** Write settings.messaging without touching any other key. */

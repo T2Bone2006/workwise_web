@@ -56,7 +56,7 @@ export function PayByBankButton(props: {
         Pay {formatGbp(props.amount, { always2dp: true })} by bank
       </button>
       <p className="text-center text-sm text-muted-foreground">
-        Approve it in your banking app. No card needed.
+        Approve it in your banking app — no card needed.
       </p>
     </form>
   );

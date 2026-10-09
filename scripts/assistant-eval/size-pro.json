@@ -1,0 +1,20 @@
+{
+ "bare": 10,
+ "systemPrompt": 923,
+ "allTools": 3657,
+ "together": 4580,
+ "perTool": {
+  "how_to": 432,
+  "find_jobs": 929,
+  "get_job": 580,
+  "jobs_needing_attention": 412,
+  "list_workers": 388,
+  "worker_workload": 461,
+  "find_job_customers": 421,
+  "job_numbers": 454,
+  "assign_jobs": 812,
+  "reschedule_jobs": 675,
+  "set_job_priority": 596,
+  "email_job_outcome": 643
+ }
+}

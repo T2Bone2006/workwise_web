@@ -116,8 +116,8 @@ export function ExampleJobsStep({
   return (
     <section className="glass-card min-w-0 space-y-4 rounded-xl p-4">
       <p className="text-sm">
-        Here are a few jobs a customer might ask about. Price each one the way you would and say why — this is how your
-        assistant learns your style.
+        Here are a few jobs a customer might ask about. Price each one the way you would and say why — this is how Lily
+        learns your style.
       </p>
       {loading ? <p className="text-sm text-muted-foreground">Thinking of a few jobs…</p> : null}
       <ul className="space-y-3">

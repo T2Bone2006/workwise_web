@@ -1,9 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const lookupState = vi.hoisted(() => ({
+  tenant: { id: 'ten-1', name: 'Acme', closed_at: null } as { id: string; name: string; closed_at: string | null } | null,
+  subs: [] as { source: string; product: string; status: string }[],
+}));
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: () => ({
+    from(table: string) {
+      const api = {
+        select: () => api,
+        eq: () => api,
+        is: () => api,
+        maybeSingle: async () => ({ data: table === 'tenants' ? lookupState.tenant : null, error: null }),
+        then(ok: (v: { data: unknown; error: unknown }) => unknown, bad?: (e: unknown) => unknown) {
+          return Promise.resolve({ data: table === 'subscriptions' ? lookupState.subs : [], error: null }).then(ok, bad);
+        },
+      };
+      return api;
+    },
+  }),
+}));
 import {
   chooseSignupOffer,
   couponIdFor,
   fallbackAfterFoundingRefused,
   FOUNDING_PLACES,
+  lookupReferrer,
   normaliseReferralCode,
   offerView,
   type FoundingStatus,
@@ -129,5 +151,45 @@ describe('couponIdFor', () => {
     ).toThrow('Missing STRIPE_COUPON_FOUNDING');
     if (previous === undefined) delete process.env.STRIPE_COUPON_FOUNDING;
     else process.env.STRIPE_COUPON_FOUNDING = previous;
+  });
+});
+
+
+describe('lookupReferrer', () => {
+  beforeEach(() => {
+    lookupState.tenant = { id: 'ten-1', name: 'Acme', closed_at: null };
+    lookupState.subs = [];
+  });
+  const code = 'ABCD2345';
+  const stripe = (product: string, status = 'active') => ({ source: 'stripe', product, status });
+
+  it('accepts a Rounds or Lite business, as before', async () => {
+    lookupState.subs = [stripe('rounds')];
+    expect(await lookupReferrer(code)).toEqual({ tenantId: 'ten-1', businessName: 'Acme', code });
+    lookupState.subs = [stripe('lite', 'trialing')];
+    expect(await lookupReferrer(code)).not.toBeNull();
+  });
+
+  it.each(['starter', 'growth', 'pro'])('accepts a Stripe-billed %s business', async (tier) => {
+    lookupState.subs = [stripe(tier)];
+    expect(await lookupReferrer(code)).toEqual({ tenantId: 'ten-1', businessName: 'Acme', code });
+  });
+
+  it('never accepts a manual business, a Pro row that is not Stripe-billed, or an ended plan', async () => {
+    lookupState.subs = [{ source: 'manual', product: 'pro', status: 'manual' }];
+    expect(await lookupReferrer(code)).toBeNull();
+    lookupState.subs = [stripe('starter'), { source: 'other', product: 'pro', status: 'active' }];
+    expect(await lookupReferrer(code)).toBeNull();
+    lookupState.subs = [stripe('starter', 'canceled')];
+    expect(await lookupReferrer(code)).toBeNull();
+    lookupState.subs = [{ source: 'manual', product: 'rounds', status: 'manual' }];
+    expect(await lookupReferrer(code)).toBeNull();
+  });
+
+  it('is null for a bad code, no business, or a closed business', async () => {
+    lookupState.subs = [stripe('starter')];
+    expect(await lookupReferrer('nope')).toBeNull();
+    lookupState.tenant = null;
+    expect(await lookupReferrer(code)).toBeNull();
   });
 });

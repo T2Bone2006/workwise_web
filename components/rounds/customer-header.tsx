@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { KeyRound, MapPin, Pencil, X } from 'lucide-react';
 import { Avatar, CopyChip, Tag, type Tone } from '@/components/look';
+import { RoundChip } from '@/components/rounds/round-chip';
 import { Button } from '@/components/ui/button';
+import type { RoundRow } from '@/lib/rounds/rounds';
 import { CustomerPlacesMapCard } from '@/components/rounds/customer-places-map';
 import type { CustomerPlace } from '@/components/maps/customer-places-map';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
@@ -24,6 +26,7 @@ export function CustomerHeader({
   email,
   accessNotes,
   tags,
+  rounds = [],
   places,
   actions,
   editPanel,
@@ -35,6 +38,8 @@ export function CustomerHeader({
   email: string | null;
   accessNotes: string | null;
   tags: CustomerHeaderTag[];
+  /** The named rounds their places are in. */
+  rounds?: RoundRow[];
   places: CustomerPlace[];
   /** The deactivate button, passed in so it keeps its own confirmation. */
   actions: React.ReactNode;
@@ -58,6 +63,9 @@ export function CustomerHeader({
                 <Tag key={tag.label} tone={tag.tone}>
                   {tag.label}
                 </Tag>
+              ))}
+              {rounds.map((round) => (
+                <RoundChip key={round.id} round={round} />
               ))}
             </div>
             {place ? (

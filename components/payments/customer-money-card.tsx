@@ -8,6 +8,7 @@ import { CustomerDirectDebitSection } from '@/components/payments/customer-direc
 import { CopyPayLinkButton } from '@/components/payments/copy-pay-link-button';
 import { EmailPayLinkButton } from '@/components/payments/email-pay-link-button';
 import { PreviewList } from '@/components/payments/preview-list';
+import { RefundPaymentButton } from '@/components/payments/refund-payment-button';
 import { RefundInStripeButton } from '@/components/payments/refund-in-stripe-button';
 import { RemoveChargeButton } from '@/components/payments/remove-charge-button';
 import { SendInvoiceDialog } from '@/components/payments/send-invoice-dialog';
@@ -199,6 +200,14 @@ export function CustomerMoneyCard({
             />
           ) : payment.source === 'stripe' ? (
             <RefundInStripeButton />
+          ) : payment.source === 'gocardless' &&
+            payment.disputeStatus !== 'lost' &&
+            payment.amount - payment.refundedAmount > 0.001 ? (
+            <RefundPaymentButton
+              paymentId={payment.id}
+              left={Math.round((payment.amount - payment.refundedAmount) * 100) / 100}
+              customerName={ledger.customer.name}
+            />
           ) : null}
         </span>
       </div>

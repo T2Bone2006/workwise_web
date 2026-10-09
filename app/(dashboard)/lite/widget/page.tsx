@@ -33,7 +33,7 @@ export default async function LiteWidgetPage() {
       <div className="flex min-w-0 flex-col gap-4">
         <PageGradientHeader
           title="Widget"
-          subtitle="Is your assistant working, and how do you set it up the way you want?"
+          subtitle="Is Lily working, and how do you set her up the way you want?"
         />
         <p className="text-sm text-muted-foreground">{auth.error}</p>
       </div>

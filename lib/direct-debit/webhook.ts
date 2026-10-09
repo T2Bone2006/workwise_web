@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { afterCollectionFailed } from '@/lib/direct-debit/after-collection';
+import { afterRefundCreated } from '@/lib/direct-debit/after-refund';
 import {
   onPayRequestFulfilled,
   onPayRequestPayment,
@@ -25,7 +26,14 @@ export type GcEvent = {
   resource_type: string;
   action: string;
   links: Record<string, string | undefined>;
-  details?: { origin?: string; cause?: string; description?: string; reason_code?: string };
+  details?: {
+    origin?: string;
+    cause?: string;
+    description?: string;
+    reason_code?: string;
+    /** Success+: true when GoCardless will resubmit this failed payment itself. */
+    will_attempt_retry?: boolean;
+  };
   metadata?: Record<string, string>;
 };
 
@@ -604,8 +612,19 @@ async function confirmCollection(ctx: Ctx, collection: Row, payment: GcPayment):
     .single();
   if (inserted.error) {
     if (!isUniqueViolation(inserted.error)) throw dbFail('Recording payment', inserted.error);
-    paymentId = str((await paymentRow(ctx, gcPaymentId))?.id);
+    const existing = await paymentRow(ctx, gcPaymentId);
+    paymentId = str(existing?.id);
     if (!paymentId) throw new Error('Recording payment failed (duplicate, but not found)');
+    if (existing?.status === 'void' && existing.dispute_status !== 'lost') {
+      // A late failure voided it and Success+ then collected it: the money is real again.
+      const result = await admin
+        .from('payments')
+        .update({ status: 'active', voided_at: null, void_reason: null })
+        .eq('id', paymentId)
+        .eq('status', 'void')
+        .select('id');
+      touched(result, 'Reinstating payment');
+    }
   } else {
     paymentId = str((inserted.data as Row | null)?.id);
     if (!paymentId) throw new Error('Recording payment failed (no id)');
@@ -671,29 +690,66 @@ async function failureDetails(ctx: Ctx, gcPaymentId: string): Promise<GcEvent['d
   return undefined;
 }
 
+async function voidCollectionPayment(ctx: Ctx, collection: Row, reason: string): Promise<void> {
+  const result = await ctx.admin
+    .from('payments')
+    .update({ status: 'void', voided_at: ctx.now.toISOString(), void_reason: reason })
+    .eq('id', collection.payment_id as string)
+    .eq('status', 'active')
+    .select('id');
+  touched(result, 'Voiding payment');
+}
+
+/**
+ * Success+ is resubmitting this payment: the collection goes (back) to `processing`, so
+ * it counts as money on its way and "Collect again" stays hidden. Only a collection the
+ * trader hasn't already sorted (a failed one with a resolution) is reopened.
+ */
+async function markRetrying(ctx: Ctx, collection: Row, payment: GcPayment | null): Promise<void> {
+  const status = String(collection.status);
+  if (status === 'failed' && collection.resolution != null) return;
+  if (status === 'succeeded' && collection.payment_id) {
+    await voidCollectionPayment(ctx, collection, 'Direct Debit failed; GoCardless is retrying it');
+  }
+  const result = await ctx.admin
+    .from('direct_debit_collections')
+    .update({
+      status: 'processing',
+      gocardless_status: payment?.status && payment.status !== 'failed' ? payment.status : 'retrying',
+      charge_date: str(payment?.charge_date) ?? str(collection.charge_date),
+      failure_code: null,
+      failure_message: null,
+      finished_at: null,
+      resolution: null,
+      resolved_at: null,
+      resolved_by_user_id: null,
+    })
+    .eq('id', collection.id as string)
+    .in('status', ['creating', 'processing', 'succeeded', 'failed'])
+    .select('id');
+  touched(result, 'Marking collection as retrying');
+}
+
 async function failCollection(ctx: Ctx, collection: Row, gcPaymentId: string): Promise<void> {
   const { admin, now } = ctx;
   const collectionId = collection.id as string;
   const status = String(collection.status);
   if (status === 'failed') return;
 
-  if (status === 'succeeded' && collection.payment_id) {
-    const result = await admin
-      .from('payments')
-      .update({
-        status: 'void',
-        voided_at: now.toISOString(),
-        void_reason: 'Direct Debit failed after collection',
-      })
-      .eq('id', collection.payment_id as string)
-      .eq('status', 'active')
-      .select('id');
-    touched(result, 'Voiding payment');
-  } else if (status !== 'creating' && status !== 'processing') {
+  if (status !== 'succeeded' && status !== 'creating' && status !== 'processing') return;
+  const details = await failureDetails(ctx, gcPaymentId);
+
+  // Success+: GoCardless will resubmit it. Not failed yet — no "failed" push or customer message,
+  // and nothing to collect again (that could charge them twice).
+  if (details?.will_attempt_retry === true) {
+    await markRetrying(ctx, collection, null);
     return;
   }
 
-  const details = await failureDetails(ctx, gcPaymentId);
+  if (status === 'succeeded' && collection.payment_id) {
+    await voidCollectionPayment(ctx, collection, 'Direct Debit failed after collection');
+  }
+
   const result = await admin
     .from('direct_debit_collections')
     .update({
@@ -758,6 +814,12 @@ async function handlePayment(ctx: Ctx): Promise<void> {
   }
 
   const collectionId = collection.id as string;
+  // Success+ asked for a retry. Also reopens a collection we had already marked failed
+  // because the failure event arrived without its retry flag.
+  if (event.action === 'resubmission_requested') {
+    await markRetrying(ctx, collection, payment);
+    return;
+  }
   switch (status) {
     case 'pending_submission':
     case 'submitted': {
@@ -870,13 +932,25 @@ async function handleRefund(ctx: Ctx): Promise<void> {
   if (!['created', 'paid', 'failed'].includes(event.action)) return;
   const refundId = str(event.links.refund);
   if (!refundId) return;
-  const refundJson = await ctx.client.get<{ refunds?: { links?: { payment?: string } } }>(
-    `/refunds/${encodeURIComponent(refundId)}`,
-  );
+  const refundJson = await ctx.client.get<{
+    refunds?: { amount?: number; links?: { payment?: string }; metadata?: Record<string, string> };
+  }>(`/refunds/${encodeURIComponent(refundId)}`);
   const gcPaymentId = str(refundJson.refunds?.links?.payment);
   if (!gcPaymentId) return;
   const row = await paymentRow(ctx, gcPaymentId);
   if (!row) return;
+
+  // Only a refund made in WorkWise tells the customer (a trader refunding in the GoCardless
+  // dashboard may have told them already). The message is deduped on the refund id.
+  const refundAmount = fromPence(Number(refundJson.refunds?.amount ?? 0));
+  if ((event.action === 'created' || event.action === 'paid') && refundJson.refunds?.metadata?.workwise_payment_id === row.id && refundAmount > 0) {
+    await afterRefundCreated(ctx.admin, {
+      tenantId: ctx.tenantId,
+      paymentId: String(row.id),
+      refundId,
+      amount: refundAmount,
+    });
+  }
 
   const json = await ctx.client.get<{ payments?: GcPayment }>(`/payments/${encodeURIComponent(gcPaymentId)}`);
   if (!json.payments) return;

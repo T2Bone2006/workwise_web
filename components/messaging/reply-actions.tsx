@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { CalendarClock, CheckCircle2, SkipForward, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { IconChip, toneClasses, type Tone } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -259,8 +260,8 @@ const Choice = forwardRef<
       disabled={props.disabled}
       onClick={props.onClick}
       className={cn(
-        'group flex w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-3 text-left text-sm shadow-(--look-card-shadow) transition-colors',
-        'hover:bg-muted/50',
+        'group flex w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-3 text-left text-sm shadow-(--look-card-shadow)',
+        rowHover,
         'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
         'disabled:cursor-not-allowed disabled:opacity-50',
         toneClasses(tone).border,

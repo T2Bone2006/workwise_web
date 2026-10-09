@@ -42,7 +42,7 @@ export function PlanBillingLoadError() {
   );
 }
 
-function usePlanActions(): { pending: boolean; run: PlanActionRun } {
+export function usePlanActions(): { pending: boolean; run: PlanActionRun } {
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
   const run = useCallback((task: () => Promise<void>) => {
@@ -91,6 +91,8 @@ function StripePlan({ summary, referral }: { summary: StripePlanSummary; referra
           periodEnd={summary.currentPeriodEnd}
           pending={pending}
           offerActive={summary.discount !== null}
+          offerLabel={summary.discount?.label ?? null}
+          offerEndsAt={summary.discount?.endsAt ?? null}
           run={run}
         />
       )}

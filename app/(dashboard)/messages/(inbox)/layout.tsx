@@ -1,4 +1,6 @@
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
+import { InboxSkeleton } from '@/components/layout/page-skeletons';
 import { MessagesWorkspace } from '@/components/messaging/messages-workspace';
 import { getTextUsage, type TextUsage } from '@/lib/data/messaging/texts';
 import { getThreads } from '@/lib/data/messaging/threads';
@@ -10,7 +12,15 @@ import { createClient } from '@/lib/supabase/server';
  * The inbox: the conversation list stays put on the left while a conversation opens on the right
  * (on a phone, the list and the conversation take turns). Texts-bought sits outside this group.
  */
-export default async function MessagesInboxLayout({ children }: { children: React.ReactNode }) {
+export default function MessagesInboxLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<InboxSkeleton />}>
+      <MessagesInboxContent>{children}</MessagesInboxContent>
+    </Suspense>
+  );
+}
+
+async function MessagesInboxContent({ children }: { children: React.ReactNode }) {
   const [tenantId, products] = await Promise.all([
     getTenantIdForCurrentUser(),
     getTenantProducts(),

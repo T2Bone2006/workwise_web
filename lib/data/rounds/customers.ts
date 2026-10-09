@@ -6,6 +6,8 @@ import { splitHouse } from '@/lib/rounds/house';
 import { frequencyLabel } from '@/lib/rounds/parse-frequency';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import { getOwedCustomers } from '@/lib/data/payments/owed';
+import { getRoundMembership } from '@/lib/data/rounds/round-membership';
+import type { RoundRow } from '@/lib/rounds/rounds';
 import { sendsInvoice } from '@/lib/payments/terms';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 
@@ -33,6 +35,8 @@ export type RoundsCustomerListRow = {
   postcodes: string[];
   /** What they still owe. 0 means paid up. */
   owed_amount: number;
+  /** The named rounds their active places are in. */
+  rounds: RoundRow[];
 };
 
 export type RoundsCustomerDetail = CustomerDetailRow & {
@@ -220,9 +224,10 @@ export async function getRoundsCustomers(
       .map((row) => (row as { id?: unknown }).id)
       .filter((id): id is string => typeof id === 'string');
 
-    const [settings, owed] = await Promise.all([
+    const [settings, owed, membership] = await Promise.all([
       getRoundsSettings(supabase, tenantId),
       owedPromise,
+      getRoundMembership(supabase, tenantId),
     ]);
     const owedById = new Map(owed.rows.map((row) => [row.customerId, row.owedAmount]));
     const today = todayInLondon();
@@ -282,6 +287,7 @@ export async function getRoundsCustomers(
         frequencies: bits.frequencies,
         postcodes: bits.postcodes,
         owed_amount: owedById.get(id) ?? 0,
+        rounds: membership?.roundsByCustomer.get(id) ?? [],
       });
     }
 

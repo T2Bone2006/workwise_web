@@ -6,7 +6,9 @@ import { contactChoiceToColumn } from '@/lib/messaging/channel';
 import {
   parseMessagingSettings,
   withMessagingSettings,
+  type MessagingSettings,
 } from '@/lib/messaging/settings';
+import { STANDARD_WORDING, type WordingKey } from '@/lib/messaging/wording';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import type {
   customerMessagingSchema,
@@ -62,6 +64,42 @@ export async function saveMessagingSettingsCore(
     .eq('id', tenantId);
   if (error) {
     console.error('[saveMessagingSettingsCore]', error);
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+/** One sentence. Null body, or the standard sentence, clears it back to the built-in wording. */
+export async function saveMessageWordingCore(
+  supabase: SupabaseClient,
+  tenantId: string,
+  key: WordingKey,
+  body: string | null,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const { data: tenant, error: loadError } = await supabase
+    .from('tenants')
+    .select('settings')
+    .eq('id', tenantId)
+    .maybeSingle();
+  if (loadError) {
+    console.error('[saveMessageWordingCore] load', loadError);
+    return { success: false, error: loadError.message };
+  }
+
+  const current = isPlainObject(tenant?.settings) ? tenant.settings : {};
+  const messaging: MessagingSettings = parseMessagingSettings(current.messaging, current.rounds);
+  const trimmed = body?.trim() ?? '';
+  messaging.wording = {
+    ...messaging.wording,
+    [key]: trimmed === '' || trimmed === STANDARD_WORDING[key] ? null : trimmed,
+  };
+
+  const { error } = await supabase
+    .from('tenants')
+    .update({ settings: withMessagingSettings(current, messaging) })
+    .eq('id', tenantId);
+  if (error) {
+    console.error('[saveMessageWordingCore]', error);
     return { success: false, error: error.message };
   }
   return { success: true };

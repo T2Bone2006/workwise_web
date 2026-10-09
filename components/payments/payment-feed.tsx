@@ -2,6 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { IconChip, Tag } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { formatDayLong, methodIcon, methodTone } from '@/components/payments/method-style';
 import type { PaymentHistoryRow } from '@/lib/data/payments/history';
 import { formatGbp } from '@/lib/money/pence';
@@ -42,7 +44,7 @@ export function PaymentFeed({ rows, today }: { rows: PaymentHistoryRow[]; today:
           </div>
           <ul className="-mx-4 divide-y divide-border sm:-mx-5">
             {group.rows.map((row) => (
-              <li key={row.id} className="relative flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/50 has-[:focus-visible]:bg-muted/50 sm:px-5">
+              <li key={row.id} className={cn('relative flex items-center gap-3 px-4 py-2.5 sm:px-5', rowHover)}>
                 <button
                   type="button"
                   aria-label={`Open ${row.customerName}`}

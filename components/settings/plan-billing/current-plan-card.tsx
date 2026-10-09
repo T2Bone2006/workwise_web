@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Route, Sparkles, Loader2 } from 'lucide-react';
+import { CreditCard, Route, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tag } from '@/components/look';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cancelPendingChangeAction, openCardUpdate } from '@/lib/actions/billing';
 import { formatPence, PLANS, priceLabel, type PlanChoice } from '@/lib/billing/plans';
 import type { PlanSummary } from '@/lib/billing/manage';
+import { cn } from '@/lib/utils';
+import { SectionHeading, accentCardClass } from './section-accent';
 
 export type StripePlanSummary = Extract<PlanSummary, { kind: 'stripe' }>;
 
@@ -123,10 +125,10 @@ export function CurrentPlanCard({
 
   return (
     <section aria-labelledby="your-plan-heading">
-      <h2 id="your-plan-heading" className="text-sm font-semibold">
+      <SectionHeading id="your-plan-heading" icon={CreditCard} tone="blue">
         Your plan
-      </h2>
-      <Card className="glass-card mt-3 gap-0 border-border/80 py-0">
+      </SectionHeading>
+      <Card className={cn('glass-card mt-3 gap-0 border-border/80 py-0', accentCardClass('blue'))}>
         <CardContent className="p-4 sm:p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">

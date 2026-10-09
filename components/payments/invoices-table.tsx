@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileText, SearchX } from 'lucide-react';
 import { Avatar, EmptyState, LookCard, Tag, type Tone } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
+import { cn } from '@/lib/utils';
 import { FilterChips, type FilterChip } from '@/components/payments/filter-chips';
 import {
   PaymentsListFilters,
@@ -149,12 +151,12 @@ export function InvoicesTable({ rows }: { rows: InvoiceRecord[] }) {
         <EmptyState icon={SearchX} title="Nothing matches" body="Try a different name or clear the filters." />
       ) : (
         <LookCard>
-          <ul className="divide-y divide-border">
+          <ul className="-mx-4 divide-y divide-border sm:-mx-5">
             {filtered.map((invoice) => {
               const status = invoiceStatus(invoice);
               const tone = INVOICE_STATUS_TONE[status];
               return (
-                <li key={invoice.id} className="relative flex flex-wrap items-center gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0 sm:flex-nowrap sm:gap-4">
+                <li key={invoice.id} className={cn('relative flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 first:pt-0 last:pb-0 sm:flex-nowrap sm:gap-4 sm:px-5', rowHover)}>
                   <button
                     type="button"
                     aria-label={`Open invoice ${invoice.number}`}

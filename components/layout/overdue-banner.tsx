@@ -29,9 +29,9 @@ export function OverdueBanner() {
   };
 
   return (
-    <div className="border-b border-(--tone-amber-line) bg-(--tone-amber-soft) px-4 py-3 sm:px-8">
+    <div className="border-b border-[var(--tone-amber-line,#FDE68A)] bg-[var(--tone-amber-soft,#FFFBEB)] px-4 py-3 sm:px-8">
       <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="flex items-start gap-2 text-sm font-medium text-(--tone-amber-text)">
+        <p className="flex items-start gap-2 text-sm font-medium text-[var(--tone-amber-text,#92400E)]">
           <CreditCard className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>Your last payment didn&apos;t go through. Update your card to keep WorkWise running.</span>
         </p>

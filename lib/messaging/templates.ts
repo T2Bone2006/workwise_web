@@ -1,4 +1,10 @@
 import { countSegments, toGsm7 } from '@/lib/messaging/gsm';
+import {
+  renderWording,
+  STANDARD_WORDING,
+  checkWordingShape,
+  type WordingKey,
+} from '@/lib/messaging/wording';
 import { formatGbp } from '@/lib/money/pence';
 import { formatUkPhoneDisplay } from '@/lib/utils/phone';
 
@@ -175,6 +181,31 @@ function withRequiredCall(pieces: SmsPiece[], brand: SmsBrand): SmsPiece[] {
   return [...pieces, { text: call }];
 }
 
+function phoneToken(brand: SmsBrand): string {
+  if (!brand.contactPhone) return '';
+  return formatUkPhoneDisplay(brand.contactPhone) ?? '';
+}
+
+function customOrNull(
+  template: string | null | undefined,
+  businessName: string,
+  valuesFor: (business: string) => Record<string, string>,
+  appendStop: boolean,
+): string | null {
+  const trimmed = template?.trim();
+  if (!trimmed) return null;
+  const rendered = renderWording({
+    template: trimmed,
+    businessName,
+    shortenName: shortBusinessName,
+    shrinkName: shrinkBusinessName,
+    valuesFor,
+    appendStop,
+    maxSegments: 2,
+  });
+  return rendered.fitted ? rendered.text : null;
+}
+
 export function reminderSms(p: {
   brand: SmsBrand;
   address: string;
@@ -182,7 +213,23 @@ export function reminderSms(p: {
   services: string[];
   time: string | null;
   firstText: boolean;
+  /** Saved sentence. Null or omitted uses the standard wording. */
+  wording?: string | null;
 }): string {
+  const custom = customOrNull(
+    p.wording,
+    p.brand.businessName,
+    (biz) => ({
+      business: biz,
+      address: shortAddress(p.address),
+      date: p.day,
+      time: timeLabel(p.time) ?? '',
+      job: serviceLabel(p.services),
+      phone: phoneToken(p.brand),
+    }),
+    p.firstText,
+  );
+  if (custom) return custom;
   return fitBranded(p.brand.businessName, (biz) => {
     const pieces: SmsPiece[] = [
       { text: `${biz}: we're due at ${shortAddress(p.address)} on ${p.day}` },
@@ -214,7 +261,16 @@ export function visitDoneSms(p: {
     | { kind: 'paid_now'; amount: number; method: 'cash' | 'cheque'; creditLeft: number }
     | { kind: 'paid_by_credit'; creditLeft: number }
     | { kind: 'direct_debit'; amount: number; collectOn: string };
+  /** Saved sentence for this outcome. Null or omitted uses the standard wording. */
+  wording?: string | null;
 }): string {
+  const custom = customOrNull(
+    p.wording,
+    p.brand.businessName,
+    (biz) => visitDoneTokenValues(p, biz),
+    false,
+  );
+  if (custom) return custom;
   const serviceText = `${serviceLabel(p.services)} at ${shortAddress(p.address)}`;
   const tail: SmsPiece[] = [];
 
@@ -280,6 +336,70 @@ export function visitDoneSms(p: {
     (piece) => (piece.text === serviceText ? 'visit' : null),
     2,
   );
+}
+
+function visitDoneDate(dayLabel: string | null): string {
+  return dayLabel ? `on ${dayLabel}` : 'today';
+}
+
+function visitDoneTokenValues(
+  p: {
+    brand: SmsBrand;
+    services: string[];
+    address: string;
+    dayLabel: string | null;
+    outcome:
+      | { kind: 'to_pay'; amount: number; payUrl: string }
+      | { kind: 'invoice'; number: string; amount: number; invoiceUrl: string }
+      | { kind: 'paid_now'; amount: number; method: 'cash' | 'cheque'; creditLeft: number }
+      | { kind: 'paid_by_credit'; creditLeft: number }
+      | { kind: 'direct_debit'; amount: number; collectOn: string };
+  },
+  biz: string,
+): Record<string, string> {
+  const base = {
+    business: biz,
+    job: serviceLabel(p.services),
+    address: shortAddress(p.address),
+    date: visitDoneDate(p.dayLabel),
+    phone: phoneToken(p.brand),
+  };
+  switch (p.outcome.kind) {
+    case 'to_pay':
+      return {
+        ...base,
+        amount: formatGbp(p.outcome.amount),
+        pay_link: p.outcome.payUrl,
+      };
+    case 'invoice':
+      return {
+        ...base,
+        invoice: p.outcome.number,
+        amount: formatGbp(p.outcome.amount),
+        invoice_link: p.outcome.invoiceUrl,
+      };
+    case 'paid_now':
+      return {
+        ...base,
+        amount: formatGbp(p.outcome.amount),
+        method: p.outcome.method,
+        credit:
+          p.outcome.creditLeft > 0
+            ? `You've ${formatGbp(p.outcome.creditLeft)} credit for next time. `
+            : '',
+      };
+    case 'paid_by_credit':
+      return {
+        ...base,
+        credit: p.outcome.creditLeft > 0 ? ` (${formatGbp(p.outcome.creditLeft)} left)` : '',
+      };
+    case 'direct_debit':
+      return {
+        ...base,
+        amount: formatGbp(p.outcome.amount, { always2dp: true }),
+        collect_on: p.outcome.collectOn,
+      };
+  }
 }
 
 /** forVisits false (only other amounts owed, no visits) never says "for your recent visits". */
@@ -350,6 +470,24 @@ export function directDebitFailedSms(p: { brand: SmsBrand; amount: number; url: 
   );
 }
 
+/** A refund the trader made in WorkWise is on its way (≤ 2 segments). */
+export function refundSms(p: { brand: SmsBrand; amount: number }): string {
+  return fitBranded(
+    p.brand.businessName,
+    (biz) =>
+      withRequiredCall(
+        [
+          {
+            text: `${biz}: we've refunded ${formatGbp(p.amount, { always2dp: true })} to your bank account. It can take a few days to arrive.`,
+          },
+        ],
+        p.brand,
+      ),
+    undefined,
+    2,
+  );
+}
+
 export function paymentReceivedSms(p: {
   brand: SmsBrand;
   amount: number;
@@ -389,7 +527,7 @@ export function dayMovedSms(p: {
     withCall(
       [
         {
-          text: `${biz}: sorry, we can't make it on ${p.fromDay}. We'll come on ${p.toDay} instead.`,
+          text: `${biz}: really sorry, we can't make ${p.fromDay}. We'd like to come on ${p.toDay} instead. If that doesn't work, get in touch.`,
         },
       ],
       p.brand,
@@ -403,16 +541,24 @@ export function daySkippedSms(p: {
   day: string;
   nextDay: string | null;
 }): string {
-  return fitBranded(p.brand.businessName, (biz) => {
-    const pieces: SmsPiece[] = [
-      {
-        text: `${biz}: sorry, we can't make it on ${p.day}. See you next time`,
-      },
-    ];
-    if (p.nextDay) pieces.push({ text: `on ${p.nextDay}`, drop: 2 });
-    pieces.push({ text: '.', glue: 'none' });
-    return withCall(pieces, p.brand, 1);
-  });
+  return fitBranded(
+    p.brand.businessName,
+    (biz) => {
+      const pieces: SmsPiece[] = [
+        { text: `${biz}: really sorry, we can't make ${p.day}.` },
+      ];
+      if (p.nextDay) {
+        pieces.push({
+          text: `We'd like to come next on ${p.nextDay}. If that doesn't work, get in touch.`,
+          drop: 2,
+        });
+      } else {
+        pieces.push({ text: 'If you need another day, get in touch.' });
+      }
+      return withCall(pieces, p.brand, 1);
+    },
+    (piece) => (piece.drop === 2 ? 'If you need another day, get in touch.' : null),
+  );
 }
 
 export function afterAllSms(p: { brand: SmsBrand; day: string }): string {
@@ -420,7 +566,7 @@ export function afterAllSms(p: { brand: SmsBrand; day: string }): string {
     withCall(
       [
         {
-          text: `${biz}: good news, we can make it on ${p.day} after all. See you then!`,
+          text: `${biz}: good news, we'd like to come on ${p.day} after all. If that doesn't work, get in touch.`,
         },
       ],
       p.brand,
@@ -436,20 +582,25 @@ export function replySkipAckSms(p: {
 }): string {
   return fitBranded(p.brand.businessName, (biz) => {
     const pieces: SmsPiece[] = [
-      { text: `${biz}: no problem, we'll skip ${p.day}.` },
+      { text: `${biz}: thanks for letting us know. We'll leave ${p.day}.` },
     ];
     if (p.nextDay) {
-      pieces.push({ text: `See you on ${p.nextDay}.`, drop: 2 });
+      pieces.push({
+        text: `We'd like to come next on ${p.nextDay}. If that doesn't work, get in touch.`,
+        drop: 2,
+      });
+    } else {
+      pieces.push({ text: 'If you need another day, get in touch.' });
     }
     return withCall(pieces, p.brand, 1);
-  });
+  }, (piece) => (piece.drop === 2 ? 'If you need another day, get in touch.' : null));
 }
 
 export function replyMoveAckSms(p: { brand: SmsBrand; toDay: string }): string {
   return fitBranded(p.brand.businessName, (biz) =>
     withCall(
       [
-        { text: `${biz}: no problem, we'll come on ${p.toDay} instead.` },
+        { text: `${biz}: thanks for letting us know. We'd like to come on ${p.toDay}. If that doesn't work, get in touch.` },
       ],
       p.brand,
       1,
@@ -459,3 +610,129 @@ export function replyMoveAckSms(p: { brand: SmsBrand; toDay: string }): string {
 
 export const UNKNOWN_NUMBER_SMS =
   "This number only sends visit messages for local tradespeople and isn't read. Please contact your tradesperson directly.";
+
+const SAMPLE_PAY_URL = `https://app.joinworkwise.com/pay/${'a'.repeat(32)}`;
+const SAMPLE_INVOICE_URL = `https://app.joinworkwise.com/pay/i/${'a'.repeat(32)}`;
+
+export type WordingPreview = {
+  text: string;
+  length: number;
+  segments: number;
+  /** Why Save stays off. Null when the sentence can be saved. */
+  error: string | null;
+};
+
+/** Live example under the wording box. The standard sentence uses the real sender. */
+export function messageWordingPreview(
+  key: WordingKey,
+  template: string,
+  brand: SmsBrand,
+): WordingPreview {
+  const shapeError = checkWordingShape(key, template);
+  const custom = template.trim() === STANDARD_WORDING[key] ? null : template;
+  const rendered =
+    custom == null
+      ? { text: standardPreview(key, brand), fitted: true }
+      : renderWording({
+          template: custom,
+          businessName: brand.businessName,
+          shortenName: shortBusinessName,
+          shrinkName: shrinkBusinessName,
+          valuesFor: (biz) => previewValues(key, brand, biz),
+          appendStop: key === 'reminder',
+          maxSegments: 2,
+        });
+  const counted = countSegments(rendered.text);
+  let error = shapeError;
+  if (!error && !rendered.fitted) {
+    error = 'Too long. A message can be 2 texts at most. Shorten it.';
+  }
+  if (!error && rendered.text.trim() === '') error = 'Write the message.';
+  return {
+    text: rendered.text,
+    length: counted.length,
+    segments: counted.segments,
+    error,
+  };
+}
+
+function standardPreview(key: WordingKey, brand: SmsBrand): string {
+  if (key === 'reminder') {
+    return reminderSms({
+      brand,
+      address: '12 Elm Rd',
+      day: 'Thu 2 Oct',
+      services: ['Window clean'],
+      time: '09:30',
+      firstText: true,
+    });
+  }
+  return visitDoneSms({
+    brand,
+    services: ['Window clean'],
+    address: '12 Elm Rd',
+    dayLabel: null,
+    outcome: previewOutcome(key),
+  });
+}
+
+function previewValues(key: WordingKey, brand: SmsBrand, biz: string): Record<string, string> {
+  if (key === 'reminder') {
+    return {
+      business: biz,
+      address: shortAddress('12 Elm Rd'),
+      date: 'Thu 2 Oct',
+      time: timeLabel('09:30') ?? '',
+      job: serviceLabel(['Window clean']),
+      phone: phoneToken(brand),
+    };
+  }
+  return visitDoneTokenValues(
+    {
+      brand,
+      services: ['Window clean'],
+      address: '12 Elm Rd',
+      dayLabel: null,
+      outcome: previewOutcome(key),
+    },
+    biz,
+  );
+}
+
+function previewOutcome(key: WordingKey): {
+  kind: 'to_pay';
+  amount: number;
+  payUrl: string;
+} | {
+  kind: 'invoice';
+  number: string;
+  amount: number;
+  invoiceUrl: string;
+} | {
+  kind: 'paid_now';
+  amount: number;
+  method: 'cash';
+  creditLeft: number;
+} | {
+  kind: 'paid_by_credit';
+  creditLeft: number;
+} | {
+  kind: 'direct_debit';
+  amount: number;
+  collectOn: string;
+} {
+  switch (key) {
+    case 'visit_done_to_pay':
+      return { kind: 'to_pay', amount: 15, payUrl: SAMPLE_PAY_URL };
+    case 'visit_done_paid_now':
+      return { kind: 'paid_now', amount: 15, method: 'cash', creditLeft: 3 };
+    case 'visit_done_paid_credit':
+      return { kind: 'paid_by_credit', creditLeft: 3 };
+    case 'visit_done_invoice':
+      return { kind: 'invoice', number: 'INV-0042', amount: 15, invoiceUrl: SAMPLE_INVOICE_URL };
+    case 'visit_done_direct_debit':
+      return { kind: 'direct_debit', amount: 15, collectOn: 'Tue 7 Oct' };
+    case 'reminder':
+      return { kind: 'to_pay', amount: 15, payUrl: SAMPLE_PAY_URL };
+  }
+}

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { Clock, MapPin } from 'lucide-react';
 import { Tag, toneClasses } from '@/components/look';
+import { rowHover } from '@/components/look/row-hover';
 import { cn } from '@/lib/utils';
 import { JOB_STATUS_DISPLAY, type JobStatusUi } from '@/lib/job-status-display';
 import { SKIP_REASON_LABELS, type SkipReason } from '@/lib/rounds/skip-reasons';
@@ -128,7 +129,7 @@ export function VisitStopCard({
     <li
       className={cn(
         'group relative list-none overflow-hidden rounded-2xl border border-border bg-card shadow-(--look-card-shadow)',
-        'transition-shadow duration-200 sm:hover:shadow-md',
+        rowHover,
         dimmed && 'opacity-60',
         className
       )}

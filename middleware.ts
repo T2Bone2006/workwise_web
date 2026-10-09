@@ -1,6 +1,9 @@
 import { updateSession } from '@/lib/supabase/middleware';
+import { mergeCookies } from '@/lib/supabase/cookie-merge';
 import {
-  WORKER_WEB_LOGIN_ERROR_PARAM,
+  WORKER_HOME,
+  employeeRouteDecision,
+  isWorkerAreaPath,
 } from '@/lib/auth/worker-web-access';
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -41,22 +44,8 @@ const UNPROTECTED_PATHS = [
   '/lead',
 ] as const;
 
-/** Paths workers may visit on the web (invite / password setup). */
-const WORKER_ALLOWED_PATHS = [
-  '/accept-invite',
-  '/reset-password',
-  '/login',
-  '/download',
-] as const;
-
 function isUnprotectedPath(pathname: string): boolean {
   return UNPROTECTED_PATHS.some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`)
-  );
-}
-
-function isWorkerAllowedPath(pathname: string): boolean {
-  return WORKER_ALLOWED_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`)
   );
 }
@@ -77,7 +66,8 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');
-  const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard');
+  const isDashboard =
+    pathname === '/dashboard' || pathname.startsWith('/dashboard') || isWorkerAreaPath(pathname);
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
   const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
   const isPortalLogin = pathname === '/portal/login';
@@ -108,7 +98,9 @@ export async function middleware(request: NextRequest) {
       const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
         cookies: {
           getAll() {
-            return response.cookies.getAll();
+            // The browser's cookies, with any just refreshed on the response taking over. Reading the
+            // response alone left this client signed out, so the role lookup below never found anyone.
+            return mergeCookies(request.cookies.getAll(), response.cookies.getAll());
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
@@ -127,24 +119,15 @@ export async function middleware(request: NextRequest) {
       const isCustomerPortal = profile?.role === 'customer_portal';
       const isWorker = profile?.role === 'worker';
 
-      // Workers are mobile-only: clear the web session and send them to login
-      // unless they are finishing invite / password reset.
+      // Employees (workers with no business of their own) may use the worker area and
+      // the invite / reset pages only. Anything else, including /login while signed in,
+      // goes to /worker. They are not signed out for wandering.
       if (isWorker) {
-        if (!isWorkerAllowedPath(pathname)) {
-          await supabase.auth.signOut();
-          const loginUrl = new URL('/login', request.url);
-          loginUrl.searchParams.set('error', WORKER_WEB_LOGIN_ERROR_PARAM);
-          const redirectResponse = NextResponse.redirect(loginUrl);
+        if (employeeRouteDecision(pathname) === 'home') {
+          const redirectResponse = NextResponse.redirect(new URL(WORKER_HOME, request.url));
           copyCookiesToResponse(response, redirectResponse);
           return redirectResponse;
         }
-
-        // Allow invite / reset / login pages, but never leave a worker web session on /login.
-        if (isLoginPage) {
-          await supabase.auth.signOut();
-          return response;
-        }
-
         return response;
       }
 

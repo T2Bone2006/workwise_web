@@ -31,7 +31,7 @@ import { PLAN_LOOK, PlanPicker, type FoundingView } from '@/components/auth/plan
 import { SignupSummary } from '@/components/auth/signup-summary';
 import { cn } from '@/lib/utils';
 import { startSignup } from '@/lib/actions/signup';
-import { signupSchema, type SignupInput } from '@/lib/validations/signup';
+import { signupFormSchema, type SignupFormInput } from '@/lib/validations/signup';
 import { formatPence, PLANS, type BillingInterval, type PlanChoice, type PlanKey } from '@/lib/billing/plans';
 import type { SignupOfferView } from '@/lib/billing/offers';
 
@@ -98,7 +98,7 @@ function TextField({
   disabled,
   ...input
 }: {
-  control: Control<SignupInput>;
+  control: Control<SignupFormInput>;
   name: 'fullName' | 'businessName' | 'email' | 'phone' | 'postcode' | 'trade';
   label: string;
   disabled: boolean;
@@ -141,10 +141,11 @@ export function SignupForm({
   const [choice, setChoice] = useState<PlanChoice>(initialChoice);
   const [step, setStep] = useState<Step>(canceled ? 'details' : 'plan');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const stepChanged = useRef(false);
 
-  const form = useForm<SignupInput>({
-    resolver: zodResolver(signupSchema),
+  const form = useForm<SignupFormInput>({
+    resolver: zodResolver(signupFormSchema),
     defaultValues: {
       plan: initialChoice.plan,
       interval: initialChoice.interval,
@@ -152,6 +153,7 @@ export function SignupForm({
       fullName: '',
       email: '',
       password: '',
+      confirmPassword: '',
       phone: '',
       postcode: '',
       trade: '',
@@ -240,7 +242,7 @@ export function SignupForm({
           onSubmit={(e) => {
             // Validate against current values (sync). formState.isValid stays
             // false until the first validation, which would block a valid first click.
-            const parsed = signupSchema.safeParse({ ...form.getValues(), ...choice });
+            const parsed = signupFormSchema.safeParse({ ...form.getValues(), ...choice });
             if (!parsed.success) {
               e.preventDefault();
               void form.trigger();
@@ -323,6 +325,41 @@ export function SignupForm({
                     At least 8 characters
                   </FormDescription>
                 )}
+                <FormMessage role="alert" />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="confirmPassword"
+            render={({ field }) => (
+              <FormItem className="gap-2">
+                <FormLabel className={authLabelClassName}>Confirm password</FormLabel>
+                <div className="relative">
+                  <FormControl>
+                    <Input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      disabled={isPending}
+                      className={cn(authInputClassName, 'pr-12')}
+                      {...field}
+                    />
+                  </FormControl>
+                  <button
+                    type="button"
+                    className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-[#6E6A63] hover:bg-black/5 hover:text-[#0A1A2E] dark:text-[#93A3BA] dark:hover:bg-white/10 dark:hover:text-[#EAF1FB]"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="size-[18px]" aria-hidden />
+                    ) : (
+                      <Eye className="size-[18px]" aria-hidden />
+                    )}
+                  </button>
+                </div>
                 <FormMessage role="alert" />
               </FormItem>
             )}

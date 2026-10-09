@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -46,6 +47,8 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { WORKER_TYPE_FORM_OPTIONS } from '@/lib/types/worker';
+import { ExtraWorkerConfirmDialog } from '@/components/workers/extra-worker-confirm-dialog';
+import type { ExtraWorkerNotice } from '@/lib/billing/pro-allowance';
 
 const STATUS_OPTIONS = [
   { value: 'available', label: 'Available', color: 'bg-emerald-500' },
@@ -76,6 +79,9 @@ export function InviteWorkerDialog({
   const [open, setOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillSearch, setSkillSearch] = useState('');
+  const [extraNotice, setExtraNotice] = useState<ExtraWorkerNotice | null>(null);
+  const [pendingForm, setPendingForm] = useState<FormData | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [postcodeValidation, setPostcodeValidation] = useState<{
     status: 'idle' | 'loading' | 'valid' | 'invalid';
     message?: string;
@@ -152,6 +158,11 @@ export function InviteWorkerDialog({
     fd.set('status', values.status);
     fd.set('skills', JSON.stringify(values.skills ?? []));
 
+    await send(fd);
+  }
+
+  /** Sends the invite. If it would go past the plan's included workers, asks for agreement first. */
+  async function send(fd: FormData) {
     const result = await inviteWorker(fd);
 
     if (result.success) {
@@ -161,14 +172,33 @@ export function InviteWorkerDialog({
       });
       form.reset(defaultInviteValues);
       setPostcodeValidation({ status: 'idle' });
+      setExtraNotice(null);
+      setPendingForm(null);
       setOpen(false);
       router.refresh();
+    } else if (result.needsExtraWorkerConfirm) {
+      setPendingForm(fd);
+      setExtraNotice(result.needsExtraWorkerConfirm);
     } else {
+      setExtraNotice(null);
+      setPendingForm(null);
       toast.error(result.error ?? 'Failed to send invite');
     }
   }
 
+  async function confirmExtraWorker() {
+    if (!pendingForm) return;
+    setConfirming(true);
+    try {
+      pendingForm.set('confirm_extra_worker', 'true');
+      await send(pendingForm);
+    } finally {
+      setConfirming(false);
+    }
+  }
+
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(o) => {
@@ -197,8 +227,8 @@ export function InviteWorkerDialog({
                   Invite worker
                 </DialogTitle>
                 <DialogDescription>
-                  Their profile is saved on your team. An invite email is sent so they can sign in to
-                  the mobile app.
+                  Their profile is saved on your team. An invite email is sent so they can set up their
+                  account, then use the mobile app and the website.
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -255,6 +285,9 @@ export function InviteWorkerDialog({
                           disabled={form.formState.isSubmitting}
                         />
                       </FormControl>
+                      <FormDescription>
+                        Each person needs their own email address that isn&apos;t already used on WorkWise.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -323,6 +356,11 @@ export function InviteWorkerDialog({
                           ))}
                         </SelectContent>
                       </Select>
+                      <FormDescription>
+                        {field.value === 'employee'
+                          ? 'Works only for you. They sign in to see their jobs; no business account.'
+                          : 'Self-employed. They set up their own account with their business name and see only the jobs you give them.'}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -458,5 +496,15 @@ export function InviteWorkerDialog({
         </Form>
       </DialogContent>
     </Dialog>
+    <ExtraWorkerConfirmDialog
+      notice={extraNotice}
+      pending={confirming}
+      onConfirm={confirmExtraWorker}
+      onCancel={() => {
+        setExtraNotice(null);
+        setPendingForm(null);
+      }}
+    />
+    </>
   );
 }
