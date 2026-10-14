@@ -1,5 +1,6 @@
 'use client';
 
+import { ExceptionAssignee } from '@/components/team/assignee-chip';
 import { useState, type JSX } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { ChevronDown, GripVertical } from 'lucide-react';
@@ -11,8 +12,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import type { LanePerson } from '@/lib/rounds/lanes';
 
 const BAR: Record<BoardStop['state'], string> = {
   planned: 'bg-(--tone-sky-solid)',
@@ -29,7 +33,8 @@ const PAID_WORD: Record<NonNullable<BoardStop['paid']>, string> = {
 };
 
 /** What a stop looks like. Used by the card in its column and by the copy that floats under the mouse. */
-export function StopCardFace(props: { stop: BoardStop }): JSX.Element {
+/** `expectedId`: who would normally have this house; the person is only shown when it is someone else. Left out (the floating copy) shows nothing. */
+export function StopCardFace(props: { stop: BoardStop; expectedId?: string | null }): JSX.Element {
   const { stop } = props;
   return (
     <>
@@ -54,6 +59,7 @@ export function StopCardFace(props: { stop: BoardStop }): JSX.Element {
       <span className="block truncate text-xs text-muted-foreground">{stop.services}</span>
       <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         <span className="font-semibold text-foreground">{formatGbp(stop.amount)}</span>
+        <ExceptionAssignee workerId={stop.visits[0]?.assigned_worker_id} expectedId={props.expectedId} />
         {stop.paid ? (
           <span
             className={cn(
@@ -171,6 +177,12 @@ export function BoardStopCard(props: {
   onOpen: (stop: BoardStop) => void;
   onMove: (stop: BoardStop) => void;
   onMoveJob: (stop: BoardStop, jobId: string) => void;
+  /** With a team: who this house can be given to, who is off today, and the way to do it. */
+  people?: ReadonlyArray<LanePerson>;
+  off?: ReadonlySet<string>;
+  onGive?: (stop: BoardStop, person: LanePerson) => void;
+  /** Who would normally have this house (its group's person, its round's usual person, or the owner). */
+  expectedId?: string | null;
   onTell: (changeId: string) => void;
 }): JSX.Element {
   const { stop } = props;
@@ -183,6 +195,8 @@ export function BoardStopCard(props: {
     disabled: !stop.movable || props.locked,
   });
   const combined = stop.jobCount > 1;
+  const holder = stop.visits[0]?.assigned_worker_id ?? props.people?.find((p) => p.isOwner)?.workerId ?? null;
+  const giveOptions = (props.people ?? []).filter((p) => p.workerId !== holder);
 
   return (
     <div
@@ -217,7 +231,7 @@ export function BoardStopCard(props: {
               stop.movable && !props.locked ? 'cursor-grab' : props.locked ? 'cursor-wait' : '',
             )}
           >
-            <StopCardFace stop={stop} />
+            <StopCardFace stop={stop} expectedId={props.expectedId} />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-52">
@@ -231,6 +245,18 @@ export function BoardStopCard(props: {
             <DropdownMenuItem onSelect={() => props.onTell(stop.untoldChangeId as string)}>
               Tell customers about this move
             </DropdownMenuItem>
+          ) : null}
+          {stop.movable && props.onGive && giveOptions.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Give to</DropdownMenuLabel>
+              {giveOptions.map((p) => (
+                <DropdownMenuItem key={p.workerId} onSelect={() => props.onGive?.(stop, p)}>
+                  {p.isOwner ? 'You' : p.name}
+                  {props.off?.has(p.workerId) ? <span className="ml-auto text-xs text-(--tone-amber-text)">Off</span> : null}
+                </DropdownMenuItem>
+              ))}
+            </>
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>

@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { MapPin, User } from 'lucide-react';
 import { Tag } from '@/components/look';
 import { toLookTone } from '@/components/worker/tone';
+import { formatGbp } from '@/lib/money/pence';
 import { cn } from '@/lib/utils';
 import { isUrgent, workerTag } from '@/lib/worker/status';
 import type { WorkerJob } from '@/lib/worker/types';
@@ -72,12 +73,14 @@ export function JobRow({
           </p>
         ) : null}
         {reason ? <p className="mt-1 text-sm text-(--tone-amber-text)">Not completed: {reason}</p> : null}
+        {job.rounds ? <p className="mt-1 text-sm font-semibold tabular-nums sm:hidden">{job.price != null ? formatGbp(job.price) : '—'}</p> : null}
         <div className="mt-2 flex flex-wrap gap-1.5 sm:hidden">
           {urgent ? <Tag tone="rose">Urgent</Tag> : null}
           {tag ? <Tag tone={toLookTone(tag.tone)}>{tag.label}</Tag> : null}
         </div>
       </div>
       <div className="hidden flex-col items-end gap-1.5 sm:flex">
+        {job.rounds ? <span className="text-sm font-semibold tabular-nums">{job.price != null ? formatGbp(job.price) : '—'}</span> : null}
         {urgent ? <Tag tone="rose">Urgent</Tag> : null}
         {tag ? <Tag tone={toLookTone(tag.tone)}>{tag.label}</Tag> : null}
       </div>

@@ -13,6 +13,7 @@ import { referralKind } from '@/lib/data/referral-nudge';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { isPaymentOverdue } from '@/lib/billing/pro-restart-core';
 import { getTenantLook } from '@/lib/data/tenant-look';
+import { getWorkerRoundsExtras } from '@/lib/data/worker/rounds-extras';
 import { isAdmin } from '@/lib/utils/admin';
 import { getViewAsState, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
 
@@ -61,12 +62,12 @@ export default async function DashboardLayout({
   // only. They are never given their employer's features, which would show the office links,
   // and the worker area is always the new look whatever the employer's look is.
   if (profile?.role === 'worker') {
-    const link = await getWorkerLink();
+    const [link, roundsExtras] = await Promise.all([getWorkerLink(), getWorkerRoundsExtras()]);
     return (
       <DashboardShell
         tenantName={link?.employerName ?? 'WorkWise'}
         userEmail={user.email ?? undefined}
-        features={employeeFeatures(link?.employerName ?? null)}
+        features={employeeFeatures(link?.employerName ?? null, roundsExtras.employerIsRounds)}
         look="new"
       >
         {children}

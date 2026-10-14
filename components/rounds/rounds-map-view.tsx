@@ -11,6 +11,8 @@ import { RoundEditor } from '@/components/rounds/round-editor';
 import { useMediaQuery, useStoredFlag } from '@/components/rounds/use-stored-flag';
 import { Button } from '@/components/ui/button';
 import { deleteRound, saveRound } from '@/lib/actions/rounds/rounds';
+import { setUsualLeadAction } from '@/lib/actions/team-assign';
+import { floatingMessage } from '@/components/look';
 import { formatGbp } from '@/lib/money/pence';
 import {
   PIN_COLOURS,
@@ -129,11 +131,15 @@ type DraftForm = { name: string; colour: string; error: string | null };
 export function RoundsMapView({
   places,
   rounds,
+  usualLeads,
+  leadOptions,
   unmappedCustomers,
   notes,
 }: {
   places: MapPlace[];
   rounds: RoundRow[];
+  usualLeads: Record<string, string | null>;
+  leadOptions: Array<{ workerId: string; name: string; isOwner: boolean }>;
   unmappedCustomers: number;
   notes: string[];
 }) {
@@ -302,6 +308,38 @@ export function RoundsMapView({
     });
   };
 
+  const usualLeadProps =
+    draft?.editingId && leadOptions.length > 0
+      ? {
+          value: (() => {
+            const current = usualLeads[draft.editingId] ?? null;
+            return current ?? 'me';
+          })(),
+          options: leadOptions.map((o) => ({ value: o.isOwner ? 'me' : o.workerId, label: o.isOwner ? 'You' : o.name })),
+          onChange: (value: string) => {
+            const roundId = draft.editingId!;
+            const who = leadOptions.find((o) => (o.isOwner ? 'me' : o.workerId) === value);
+            const roundName = rounds.find((r) => r.id === roundId)?.name ?? 'the round';
+            startSaving(async () => {
+              const result = await setUsualLeadAction({ roundId, workerId: value === 'me' ? null : value });
+              if (!result.success) {
+                setForm((f) => ({ ...f, error: result.error }));
+                return;
+              }
+              floatingMessage({
+                title: `${who?.isOwner ? 'You' : (who?.name ?? 'They')} now usually ${who?.isOwner ? 'do' : 'does'} ${roundName}`,
+                body:
+                  result.repointed > 0
+                    ? `${result.repointed} upcoming ${result.repointed === 1 ? 'visit has' : 'visits have'} moved ${who?.isOwner ? 'to you' : 'to them'}`
+                    : undefined,
+                tone: 'success',
+              });
+              router.refresh();
+            });
+          },
+        }
+      : undefined;
+
   const remove = () => {
     if (!draft?.editingId) return;
     const id = draft.editingId;
@@ -453,6 +491,7 @@ export function RoundsMapView({
               onSave={save}
               onCancel={cancelDraft}
               onDelete={remove}
+              usualLead={usualLeadProps}
             />
           ) : null}
 

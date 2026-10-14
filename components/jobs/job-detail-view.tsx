@@ -19,9 +19,8 @@ import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import type { CustomerRow } from '@/lib/data/customers';
-import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
+import { visibleJobReportRows } from '@/lib/jobs/job-report-display';
 import { cn } from '@/lib/utils';
-import { useLook } from '@/components/look/use-look';
 
 const JobLocationMap = dynamic(
   () => import('@/components/maps/job-location-map').then((mod) => mod.JobLocationMap),
@@ -53,6 +52,8 @@ interface JobDetailViewProps {
   mapData?: JobDetailMapData | null;
   /** Set when the job report card should render, or when status is completed (completion section). */
   industryData?: unknown;
+  /** This business's `settings.job_report_fields`. */
+  reportFields?: unknown;
   completionNotes?: string;
   /** Before/after image attachments from `job_attachments` for this job. */
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
@@ -72,6 +73,7 @@ export function JobDetailView({
   tenantSkills,
   mapData,
   industryData,
+  reportFields,
   completionNotes,
   attachmentPhotos,
   isNetworkOriginView = false,
@@ -79,12 +81,11 @@ export function JobDetailView({
   isNetworkDispatched = false,
   outcomeNotice = null,
 }: JobDetailViewProps) {
-  const look = useLook();
   const isCompleted = job.status === 'completed';
   const hasPhotoGroups =
     attachmentPhotos.before.length > 0 || attachmentPhotos.after.length > 0;
   const showJobReportCard =
-    industryData !== undefined && !isCompleted && !isIndustryDataEmpty(industryData);
+    !isCompleted && visibleJobReportRows(industryData, reportFields).length > 0;
 
   return (
     <div className="min-w-0 space-y-6">
@@ -118,12 +119,13 @@ export function JobDetailView({
             jobId={job.id}
             completedAt={job.completed_at}
             industryData={industryData}
+            reportFields={reportFields}
             completionNotes={completionNotes}
             jobPhotos={attachmentPhotos}
           />
         )}
         {showJobReportCard && (
-          <JobDetailJobReportCard industryData={industryData} />
+          <JobDetailJobReportCard industryData={industryData} reportFields={reportFields} />
         )}
         {!isCompleted &&
           completionNotes !== undefined &&
@@ -216,8 +218,7 @@ export function JobDetailView({
             />
           )}
         </div>
-        {/* A not-completed job has no buttons here, so in the new look the card would be an empty box. */}
-        {!isNetworkDispatched && !(look === 'new' && job.status === 'incomplete') && (
+        {!isNetworkDispatched && (
           <JobDetailActionsCard
             jobId={job.id}
             status={job.status}

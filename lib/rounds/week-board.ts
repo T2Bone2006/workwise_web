@@ -3,6 +3,7 @@ import { groupHouseStops, houseKey } from '@/lib/rounds/house-stops';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-statuses';
 import type { VisitRow } from '@/lib/data/rounds/visits';
 import type { UntoldMove } from '@/lib/rounds/visit-changes';
+import { roundOfVisits, roundSortKey, type RoundTag } from '@/lib/rounds/round-groups';
 
 // Pure helpers for the Week board on the dashboard (no React, no Supabase). They give the
 // same answers as the phone's `workwise-mobile/src/lib/rounds/weekBoard.ts`, so both
@@ -53,6 +54,8 @@ export type BoardStop = {
   jobCount: number;
   /** Each job on its own, so one can be moved without the others. */
   jobs: BoardJob[];
+  /** The round this house is in, if any. Houses of one round next to each other are drawn as a group. */
+  round: RoundTag | null;
 };
 
 export type BoardDay = {
@@ -172,7 +175,11 @@ function compareVisits(a: VisitRow, b: VisitRow): number {
   const at = a.scheduled_time ?? '';
   const bt = b.scheduled_time ?? '';
   if (at !== bt) return at < bt ? -1 : 1;
-  return 0; // equal: keep the order the query gave
+  // Nothing else decides: keep a round's houses together (stable sort, so otherwise the query's order holds).
+  const ar = roundSortKey(a);
+  const br = roundSortKey(b);
+  if (ar !== br) return ar < br ? -1 : 1;
+  return 0;
 }
 
 function paidOf(visits: VisitRow[]): BoardStop['paid'] {
@@ -214,7 +221,7 @@ function boardJob(visit: VisitRow, untold?: Map<string, string>): BoardJob {
   };
 }
 
-function boardStop(visits: VisitRow[], untold?: Map<string, string>): BoardStop {
+export function boardStop(visits: VisitRow[], untold?: Map<string, string>): BoardStop {
   const first = visits[0]!;
   const named = visits.find((visit) => visit.customer_name?.trim());
   let amount = 0;
@@ -246,6 +253,39 @@ function boardStop(visits: VisitRow[], untold?: Map<string, string>): BoardStop 
     house: houseKey(first),
     jobCount: visits.length,
     jobs: visits.map((visit) => boardJob(visit, untold)),
+    round: roundOfVisits(visits),
+  };
+}
+
+/**
+ * A whole round on one day as a single stop, so the move dialog can move it. Only the visits that can still move are
+ * counted; `house` is unique so it never "joins" a house on the day it lands on.
+ */
+export function roundAsStop(stops: ReadonlyArray<BoardStop>, round: RoundTag): BoardStop | null {
+  const movable = stops.filter((s) => s.movable);
+  if (movable.length === 0) return null;
+  const visits = movable.flatMap((s) => s.visits);
+  const jobs = movable.flatMap((s) => s.jobs);
+  return {
+    ...movable[0]!,
+    id: `round:${round.id}`,
+    visits,
+    jobIds: visits.map((v) => v.id),
+    name: `${round.name} (${movable.length} ${movable.length === 1 ? 'house' : 'houses'})`,
+    street: '',
+    postcode: '',
+    services: '',
+    amount: movable.reduce((sum, s) => sum + s.amount, 0),
+    time: null,
+    paid: null,
+    state: 'planned',
+    movable: true,
+    reply: null,
+    untoldChangeId: null,
+    house: `round:${round.id}`,
+    jobCount: jobs.length,
+    jobs,
+    round,
   };
 }
 
@@ -439,6 +479,8 @@ export function untoldByJob(
           ? entry.fromDate === move.fromDate
             ? move.toDate
             : move.fromDate
+          : move.kind === 'push_back'
+          ? (entry.toDate ?? null)
           : move.toDate;
       if (expected && visit.scheduled_date === expected && expected >= today) {
         tagged.set(visit.id, move.changeId);

@@ -553,6 +553,48 @@ export function InOutSkeleton() {
   );
 }
 
+const TEAM_TABS = ['w-16', 'w-24', 'w-32'];
+
+export function TeamPageSkeleton() {
+  return (
+    <LoadingScreen label="Loading your team">
+      <HeaderSkeleton title="w-24" subtitle="w-96" actions={<Skeleton className="h-9 w-56" />} />
+      <TabsSkeleton widths={TEAM_TABS} />
+      <StatRow count={3} />
+      <TableCardSkeleton filters={0} columns={4} rows={5} />
+    </LoadingScreen>
+  );
+}
+
+export function TeamPaySkeleton() {
+  return (
+    <LoadingScreen label="Loading pay">
+      <HeaderSkeleton title="w-24" subtitle="w-96" />
+      <TabsSkeleton widths={TEAM_TABS} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Skeleton className="h-4 w-64 max-w-full" />
+        <Skeleton className="h-9 w-80 max-w-full rounded-xl" />
+      </div>
+      <StatRow count={3} />
+      <TableCardSkeleton filters={0} columns={5} rows={5} />
+    </LoadingScreen>
+  );
+}
+
+export function TeamCashSkeleton() {
+  return (
+    <LoadingScreen label="Loading cash to hand in">
+      <HeaderSkeleton title="w-24" subtitle="w-96" />
+      <TabsSkeleton widths={TEAM_TABS} />
+      <StatRow count={2} className="lg:grid-cols-2" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel className="h-64" />
+        <Panel className="h-64" />
+      </div>
+    </LoadingScreen>
+  );
+}
+
 export function WeekCalendarSkeleton() {
   return (
     <LoadingScreen label="Loading calendar">
@@ -1140,6 +1182,7 @@ export function skeletonForPath(pathname: string): ReactNode {
   if (path === '/dashboard' || path === '/rounds') return <JobsDaySkeleton />;
   if (path === '/portal') return <PortalHomeSkeleton />;
   if (path === '/jobs') return <JobsListSkeleton />;
+  if (path === '/jobs/calendar') return <WeekCalendarSkeleton />;
   if (path === '/jobs/new') return <FormPageSkeleton title="w-28" subtitle="w-56" />;
   if (path === '/jobs/review') return <ReviewSkeleton />;
   if (/^\/jobs\/[^/]+$/.test(path)) return <JobDetailSkeleton />;
@@ -1164,6 +1207,9 @@ export function skeletonForPath(pathname: string): ReactNode {
   if (path === '/payments/direct-debits') return <DirectDebitsSkeleton />;
   if (/^\/payments\/invoices\/[^/]+$/.test(path)) return <InvoicePageSkeleton />;
   if (path === '/expenses') return <ExpensesPageSkeleton />;
+  if (path === '/team') return <TeamPageSkeleton />;
+  if (path === '/team/pay') return <TeamPaySkeleton />;
+  if (path === '/team/cash') return <TeamCashSkeleton />;
   if (path === '/calendar') return <WeekCalendarSkeleton />;
   if (path === '/messages' || path === '/messages/by-customer') return <InboxSkeleton />;
   if (path === '/messages/texts-bought') return <TextsBoughtSkeleton />;

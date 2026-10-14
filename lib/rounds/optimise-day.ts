@@ -68,6 +68,8 @@ export async function optimiseDayCore(
     startPostcode?: string | null;
     /** This run only. Defaults to home (the saved route start). */
     finishPostcode?: string | null;
+    /** Only this person's stops (a lane on the calendar). Left out = the whole day. */
+    workerId?: string;
   },
 ): Promise<
   | {
@@ -98,12 +100,14 @@ export async function optimiseDayCore(
   if (!resolvedFinish.ok) return { success: false, error: resolvedFinish.error };
   const start = resolvedStart.point;
   const finish = resolvedFinish.point;
-  const { data, error } = await supabase
+  let query = supabase
     .from('jobs')
     .select('id, address, postcode, lat, lng, route_position, scheduled_time, created_at')
     .eq('tenant_id', params.tenantId)
     .eq('scheduled_date', params.date)
     .in('status', [...RESCHEDULE_STATUSES]);
+  if (params.workerId) query = query.eq('assigned_worker_id', params.workerId);
+  const { data, error } = await query;
 
   if (error) {
     return { success: false, error: error.message ?? 'Failed to load stops.' };

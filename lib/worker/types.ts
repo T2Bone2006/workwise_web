@@ -42,6 +42,10 @@ export type WorkerJob = {
   completedAt: string | null;
   /** Why a job was not completed, from the history row's metadata.blocked_by. */
   notBecause: string | null;
+  /** Rounds only (absent for a Pro employee, so their screens are unchanged): this is a Rounds visit, not a job to accept. */
+  rounds?: true;
+  /** Rounds only: the visit's price from quoted_amount; null shows "—". */
+  price?: number | null;
 };
 
 export type WorkerJobDetail = WorkerJob & {
@@ -50,6 +54,8 @@ export type WorkerJobDetail = WorkerJob & {
   /** Job sheet rows the employer chose to show this worker. */
   sheet: Array<{ label: string; value: string }>;
   customerPhone: string | null;
+  /** Rounds only: how to get in, from the customer's notes. */
+  accessNotes?: string | null;
   /** True when this worker declined the job (the sheet is trimmed). */
   declinedByMe: boolean;
   history: Array<{ at: string; label: string }>;

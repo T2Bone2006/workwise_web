@@ -12,6 +12,8 @@ import {
   inAndOutCsv,
   invoicesCsv,
   paymentsCsv,
+  heldCashCsv,
+  type HeldCashCsvRow,
   readmeText,
   schedulesCsv,
   summaryCsv,
@@ -28,6 +30,7 @@ import {
 } from '@/lib/downloads/csv-files';
 import { strToU8 } from 'fflate';
 import { assembleInvoices, INVOICE_COLUMNS, type InvoiceRecord } from '@/lib/data/payments/invoices';
+import { isMissingHeldColumn, readMoneyInPayments } from '@/lib/books/money-in';
 import { readAllPages } from '@/lib/data/read-all-pages';
 import { RECEIPT_BUCKET } from '@/lib/expenses/read-receipt';
 import { renderInvoicePdf } from '@/lib/invoices/render';
@@ -97,28 +100,56 @@ export async function businessName(admin: SupabaseClient, tenantId: string): Pro
 
 async function loadPayments(admin: SupabaseClient, tenantId: string, range: Range, audience: Audience): Promise<PaymentCsvRow[]> {
   // The accountant's copy never even reads the payment note.
-  const columns = `id, amount, refunded_amount, received_at, method, source, customers(name)${audience === 'trader' ? ', note' : ''}`;
-  const rows = await readAllPages(
-    (from, to) => {
-      let q = admin.from('payments').select(columns).eq('tenant_id', tenantId).eq('status', 'active');
-      if (range) {
-        q = q.gte('received_at', londonDayBoundsUtc(range.from).startIso).lt('received_at', londonDayBoundsUtc(range.to).endIso);
-      }
-      return q.order('received_at', { ascending: true }).order('id', { ascending: true }).range(from, to);
-    },
-    'Could not load payments',
-  );
+  const columns = `id, amount, refunded_amount, method, source, customers(name)${audience === 'trader' ? ', note' : ''}`;
+  // Money the owner has received: cash a team member is still holding is in held-cash.csv instead, until it is handed over.
+  const rows = await readMoneyInPayments(admin, {
+    tenantId,
+    columns,
+    ...(range
+      ? { fromIso: londonDayBoundsUtc(range.from).startIso, toIso: londonDayBoundsUtc(range.to).endIso }
+      : {}),
+  });
   return rows.map((r) => {
     const embed = r.customers;
     const customer = (Array.isArray(embed) ? embed[0] : embed) as { name?: unknown } | null | undefined;
+    const collector = str(r.collected_by_name);
     return {
-      receivedOn: londonDateOf(String(r.received_at)),
+      receivedOn: londonDateOf(r.book_at),
       customerName: str(customer?.name) ?? '',
       amount: num(r.amount),
       refunded: num(r.refunded_amount),
       method: String(r.method ?? 'other'),
       source: String(r.source ?? ''),
       note: audience === 'trader' ? str(r.note) : null,
+      collectedBy: collector ?? (r.collected_by_worker_id ? 'A team member' : null),
+    };
+  });
+}
+
+/** Cash and cheques the team is holding right now. Empty before the Phase 9 migration (nothing can be held yet). */
+async function loadHeldCash(admin: SupabaseClient, tenantId: string): Promise<HeldCashCsvRow[]> {
+  const { data, error } = await admin
+    .from('payments')
+    .select('amount, method, received_at, collected_by_name, collected_by_worker_id, customers(name)')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .is('handed_over_at', null)
+    .or('collected_by_worker_id.not.is.null,collected_by_name.not.is.null')
+    .order('received_at', { ascending: true })
+    .limit(5000);
+  if (error) {
+    if (!isMissingHeldColumn(error)) console.error('[downloads] held cash:', error.message);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => {
+    const embed = r.customers;
+    const customer = (Array.isArray(embed) ? embed[0] : embed) as { name?: unknown } | null | undefined;
+    return {
+      takenOn: londonDateOf(String(r.received_at)),
+      customerName: str(customer?.name) ?? '',
+      amount: num(r.amount),
+      method: String(r.method ?? 'cash'),
+      heldBy: str(r.collected_by_name) ?? 'A team member',
     };
   });
 }
@@ -299,15 +330,17 @@ type Money = {
   invoices: InvoiceRecord[];
   charges: ChargeCsvRow[];
   summary: BooksSummary | null;
+  held: HeldCashCsvRow[];
 };
 
 async function loadMoney(admin: SupabaseClient, tenantId: string, range: Range, audience: Audience): Promise<Money> {
-  const [payments, expenses, invoices, charges, vat] = await Promise.all([
+  const [payments, expenses, invoices, charges, vat, held] = await Promise.all([
     loadPayments(admin, tenantId, range, audience),
     loadExpenses(admin, tenantId, range, audience),
     loadInvoices(admin, tenantId, range),
     loadCharges(admin, tenantId, range),
     loadVat(admin, tenantId),
+    loadHeldCash(admin, tenantId),
   ]);
   const summary = range
     ? summarise({
@@ -318,7 +351,7 @@ async function loadMoney(admin: SupabaseClient, tenantId: string, range: Range, 
         withMonths: true,
       })
     : null;
-  return { payments, expenses, invoices, charges, summary };
+  return { payments, expenses, invoices, charges, summary, held };
 }
 
 function moneyCsvs(m: Money, audience: Audience): CsvFile[] {
@@ -334,6 +367,8 @@ function moneyCsvs(m: Money, audience: Audience): CsvFile[] {
     invoicesCsv(invoiceRows(m.invoices)),
     chargesCsv(m.charges),
   );
+  // Only when the team is holding some: the accountant is told what is not yet money in.
+  if (m.held.length > 0) files.push(heldCashCsv(m.held));
   return files;
 }
 
@@ -341,7 +376,8 @@ const CONTENTS: Record<string, string> = {
   'summary.csv': 'summary.csv: money in, money out and what is left for the period (with VAT if registered).',
   'expenses-by-hmrc-heading.csv': 'expenses-by-hmrc-heading.csv: expenses grouped under the HMRC self-employment headings.',
   'in-and-out.csv': 'in-and-out.csv: money in, money out and what is left, month by month.',
-  'payments.csv': 'payments.csv: every payment received, with refunds and what counted.',
+  'payments.csv': 'payments.csv: every payment received, with refunds and what counted. Cash a team member collected is dated the day it was handed over.',
+  'held-cash.csv': 'held-cash.csv: cash and cheques your team has collected and not yet handed over; not counted as money in.',
   'expenses.csv': 'expenses.csv: every saved expense, with its HMRC heading, VAT and receipt file.',
   'invoices.csv': 'invoices.csv: every invoice, with VAT, what has been paid and the balance.',
   'other-amounts-owed.csv': 'other-amounts-owed.csv: other amounts owed (such as a balance brought forward).',

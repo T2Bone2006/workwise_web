@@ -23,10 +23,11 @@ export const UNFINISHED_STATUSES: readonly WorkerJobStatus[] = [
  * One colour per meaning, the same as the phone: blue = under way, amber = held up or
  * not finished, green = done, rose = declined, sky = waiting for you.
  */
-export function workerTag(job: Pick<WorkerJob, 'status'>): WorkerTag | null {
+export function workerTag(job: Pick<WorkerJob, 'status'> & { rounds?: true }): WorkerTag | null {
   switch (job.status) {
     case 'assigned':
-      return { label: 'Waiting for you', tone: 'sky' };
+      // A Rounds visit needs no accepting: it is just planned.
+      return job.rounds ? { label: 'Planned', tone: 'slate' } : { label: 'Waiting for you', tone: 'sky' };
     case 'accepted':
       return { label: 'Accepted', tone: 'amber' };
     case 'en_route':

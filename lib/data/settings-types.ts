@@ -134,6 +134,24 @@ export const JOBS_LIST_COLUMNS: Array<{ key: JobsListColumnKey; label: string }>
 
 const JOBS_LIST_COLUMN_KEYS = new Set(JOBS_LIST_COLUMNS.map((c) => c.key));
 
+/**
+ * A jobs-list column: one of the standard fields, a named field group
+ * (`fg:<group id>`, see lib/jobs/field-groups.ts) or a raw spreadsheet column
+ * nobody has grouped (`sf:<header>`).
+ */
+export type JobsListColumnId = JobsListColumnKey | `fg:${string}` | `sf:${string}`;
+
+const MAX_COLUMN_ID_LENGTH = 140;
+
+export function isJobsListColumnId(value: string): value is JobsListColumnId {
+  if (isJobsListColumnKey(value)) return true;
+  return (
+    value.length <= MAX_COLUMN_ID_LENGTH &&
+    (value.startsWith('fg:') || value.startsWith('sf:')) &&
+    value.length > 3
+  );
+}
+
 export function isJobsListColumnKey(value: string): value is JobsListColumnKey {
   return JOBS_LIST_COLUMN_KEYS.has(value as JobsListColumnKey);
 }
@@ -157,8 +175,12 @@ export interface TenantSettings {
   notifications?: NotificationsSettings;
   user_phone?: Record<string, string>;
   jobs_list?: {
-    columns?: JobsListColumnKey[];
+    columns?: JobsListColumnId[];
   };
+  /** Pro: named fields bundling differently-named spreadsheet headers. Always read through parseFieldGroups. */
+  field_groups?: unknown;
+  /** Pro finish-job questions. Always read through parseJobReportFields. */
+  job_report_fields?: unknown;
   features?: {
     pro?: boolean;
     widget?: boolean;
@@ -168,8 +190,8 @@ export interface TenantSettings {
   };
   rounds?: Partial<RoundsSettings>;
   /**
-   * Pro businesses only: 'new' switches the dashboard to the new look. Absent or
-   * anything else keeps the classic look. Rounds and Lite always get the new look.
+   * No longer read: every business (Pro included) gets the new look since 2026-10-10. Left in the type
+   * so old rows still parse.
    */
   look?: 'new' | 'classic';
   /** Phase 3 messaging. Always read through parseMessagingSettings. */

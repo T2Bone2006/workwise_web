@@ -147,6 +147,10 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => harness.sessionClient,
 }));
 
+vi.mock('@/lib/auth/require-owner', () => ({
+  getOwnerTenantId: async () => harness.state.tenantId,
+}));
+
 vi.mock('@/lib/data/tenant', () => ({
   getTenantIdForCurrentUser: async () => harness.state.tenantId,
   getTenantNameForCurrentUser: async () => 'Test',

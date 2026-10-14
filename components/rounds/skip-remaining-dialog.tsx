@@ -37,8 +37,10 @@ export function SkipRemainingDialog(props: {
   date: string;
   remainingCount: number;
   brand: SmsBrand;
+  /** Only this person's leftovers (a lane on the calendar). Left out = everyone's, as before. */
+  scope?: { workerId: string; name: string };
 }): JSX.Element {
-  const { open, onOpenChange, date, remainingCount, brand } = props;
+  const { open, onOpenChange, date, remainingCount, brand, scope } = props;
   const router = useRouter();
   const [notify, setNotify] = useState(true);
   const [pending, setPending] = useState(false);
@@ -46,7 +48,7 @@ export function SkipRemainingDialog(props: {
 
   const confirm = async () => {
     setPending(true);
-    const result = await skipRemaining({ date: date as Ymd, notifyCustomers: notify });
+    const result = await skipRemaining({ date: date as Ymd, notifyCustomers: notify, ...(scope ? { workerId: scope.workerId } : {}) });
     setPending(false);
     if (!result.success) {
       toast.error(result.error);
@@ -68,7 +70,7 @@ export function SkipRemainingDialog(props: {
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Skip the rest of {day}?</DialogTitle>
+          <DialogTitle>{scope ? `Skip the rest of ${scope.name}'s ${day}?` : `Skip the rest of ${day}?`}</DialogTitle>
           <DialogDescription>
             {remainingCount} stop{remainingCount === 1 ? '' : 's'} not done yet will be skipped.
             Their next visits stay where they are.

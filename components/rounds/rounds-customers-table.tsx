@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Avatar, EmptyState, Tag } from '@/components/look';
 import { RoundChip } from '@/components/rounds/round-chip';
+import { AddedByTag } from '@/components/team/added-by-tag';
 import {
   Dialog,
   DialogContent,
@@ -284,6 +285,7 @@ export function RoundsCustomersTable({
   );
   const [isPending, setIsPending] = useState(false);
   const [moneyFilter, setMoneyFilter] = useState<'overdue' | 'paid' | null>(null);
+  const [addedOnly, setAddedOnly] = useState(false);
 
   const pushFilters = useCallback(
     (
@@ -374,7 +376,8 @@ export function RoundsCustomersTable({
     if (moneyFilter === 'overdue') return customer.owed_amount > 0;
     if (moneyFilter === 'paid') return customer.owed_amount <= 0;
     return true;
-  });
+  }).filter((customer) => !addedOnly || customer.added_by_unchecked !== null);
+  const addedCount = customers.filter((customer) => customer.added_by_unchecked !== null).length;
   const visible = narrowed;
   const overdueCustomers = customers.filter((customer) => customer.owed_amount > 0);
   const paidCustomers = customers.filter((customer) => customer.owed_amount <= 0);
@@ -387,7 +390,7 @@ export function RoundsCustomersTable({
   const showWhereRows = filterRows.length > 0;
   // "Clear filters" sits on the first filter line once there is one, otherwise up with the search.
   const clearButton =
-    search.trim() || status !== 'active' || filterRows.length > 0 || moneyFilter != null ? (
+    search.trim() || status !== 'active' || filterRows.length > 0 || moneyFilter != null || addedOnly ? (
       <Button
         variant="ghost"
         size="sm"
@@ -397,6 +400,7 @@ export function RoundsCustomersTable({
           setStatus('active');
           setFilterRows([]);
           setMoneyFilter(null);
+          setAddedOnly(false);
           router.push('/customers');
         }}
       >
@@ -408,7 +412,8 @@ export function RoundsCustomersTable({
     (search.trim().length > 0 ||
       status !== 'active' ||
       appliedFilters.length > 0 ||
-      moneyFilter != null);
+      moneyFilter != null ||
+      addedOnly);
 
   const updateFilterRow = (id: string, patch: Partial<Pick<FilterRow, 'field' | 'value'>>) => {
     const next = filterRows.map((row) => (row.id === id ? { ...row, ...patch } : row));
@@ -476,6 +481,22 @@ export function RoundsCustomersTable({
               ))}
             </div>
           </div>
+          {addedCount > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Your team</span>
+              <button
+                type="button"
+                aria-pressed={addedOnly}
+                onClick={() => setAddedOnly((on) => !on)}
+                className={cn(
+                  'flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  addedOnly ? 'border-transparent bg-(--tone-amber-soft) text-(--tone-amber-text)' : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Added by team <span className="tabular-nums">({addedCount})</span>
+              </button>
+            </div>
+          ) : null}
           {filterRows.length === 0 ? (
             <Button
               type="button"
@@ -645,6 +666,7 @@ export function RoundsCustomersTable({
                     >
                       {customer.name}
                     </Link>
+                    {customer.added_by_unchecked ? <AddedByTag name={customer.added_by_unchecked} className="relative z-10 mt-0.5" /> : null}
                     <p className="truncate text-xs text-muted-foreground">
                       {[customer.postcode?.toUpperCase(), phoneLabel(customer) !== '—' ? phoneLabel(customer) : null]
                         .filter(Boolean)

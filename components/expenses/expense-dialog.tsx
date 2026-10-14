@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -147,6 +148,15 @@ function ExpenseForm({
 
   const form = (
     <form onSubmit={submit} className="space-y-3">
+      {expense?.isTeamPay ? (
+        <p className="rounded-lg bg-muted px-3 py-2 text-sm">
+          This is a payment to your team. Change it on the{' '}
+          <Link href="/team/pay" className="font-medium text-primary hover:underline">
+            Pay page
+          </Link>
+          .
+        </p>
+      ) : null}
       {notice ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{NOTICES[notice]}</p> : null}
       {state.mode === 'check' && expense?.aiConfidence != null && !notice ? (
         <p className="text-sm text-muted-foreground">Read by AI — please check.</p>

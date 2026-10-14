@@ -117,8 +117,8 @@ export function CustomerActivity({
             ? 'Payment refunded'
             : 'Payment',
       detail: `${formatGbp(payment.amount)} · ${paymentMethodLabel(payment.method)}${
-        refunded ? ` · refunded ${formatGbp(payment.refundedAmount)}` : ''
-      }`,
+        payment.heldBy ? ` · with ${payment.heldBy}` : ''
+      }${refunded ? ` · refunded ${formatGbp(payment.refundedAmount)}` : ''}`,
       icon: 'payment',
       tone: cancelled ? 'muted' : disputed ? 'danger' : refunded ? 'warn' : 'ok',
     });

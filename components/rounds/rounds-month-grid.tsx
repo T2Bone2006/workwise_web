@@ -243,6 +243,32 @@ export function RoundsMonthGrid({
                     <p className="text-[11px] font-semibold tabular-nums leading-tight text-foreground sm:text-xs">
                       {formatPounds(bucket!.plannedAmount)}
                     </p>
+                    {bucket!.rounds && bucket!.rounds.length > 0 ? (
+                      <>
+                        <ul className="hidden space-y-0.5 sm:block" aria-label="Rounds that day">
+                          {bucket!.rounds.slice(0, 2).map((r) => (
+                            <li
+                              key={r.id}
+                              className="flex items-center gap-1 rounded-md px-1 py-px text-[10px] font-medium leading-tight text-foreground"
+                              style={{ backgroundColor: `color-mix(in srgb, ${r.colour} 14%, transparent)` }}
+                              title={`${r.name}: ${r.count} ${r.count === 1 ? 'visit' : 'visits'}`}
+                            >
+                              <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: r.colour }} aria-hidden />
+                              <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                              <span className="tabular-nums text-muted-foreground">{r.count}</span>
+                            </li>
+                          ))}
+                          {bucket!.rounds.length > 2 ? (
+                            <li className="px-1 text-[10px] text-muted-foreground">+{bucket!.rounds.length - 2} more</li>
+                          ) : null}
+                        </ul>
+                        <div className="flex gap-0.5 sm:hidden" aria-hidden>
+                          {bucket!.rounds.slice(0, 4).map((r) => (
+                            <span key={r.id} className="size-1.5 rounded-full" style={{ backgroundColor: r.colour }} />
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
                     {actionable > 0 ? (
                       <div
                         className="h-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/15"

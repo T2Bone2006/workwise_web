@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import {
   assignWorkerToJobIds,
   type BulkAssignJobsResult,
@@ -70,7 +70,7 @@ export async function createJobGroup(
       return { success: false, error: 'Give the group a name.' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -139,7 +139,7 @@ export async function ungroupJobs(jobIds: string[]): Promise<UngroupJobsResult> 
       return { success: false, error: 'No jobs selected.' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -192,7 +192,7 @@ export async function ungroupJobs(jobIds: string[]): Promise<UngroupJobsResult> 
 /** Dissolve a whole group: every member is ungrouped and the group row removed. */
 export async function deleteJobGroup(groupId: string): Promise<UngroupJobsResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -249,7 +249,7 @@ export async function assignJobGroup(
   workerId: string
 ): Promise<BulkAssignJobsResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }

@@ -11,15 +11,24 @@ function fakeDb(opts: { payments?: Row[]; expenses?: Row[]; settings?: Row | nul
     const filters: Array<[string, unknown]> = [];
     let range: [number, number] | undefined;
     const b: Record<string, unknown> = {};
-    for (const m of ['select', 'order']) b[m] = () => b;
-    for (const m of ['eq', 'gte', 'lt', 'lte']) {
+    // The "cash a person collected and handed over" query: this stand-in has none, so it answers with nothing.
+    let handedOverQuery = false;
+    for (const m of ['select', 'order', 'limit']) b[m] = () => b;
+    for (const m of ['eq', 'gte', 'gt', 'lt', 'lte']) {
       b[m] = (k: string, v: unknown) => {
         filters.push([k, v]);
         return b;
       };
     }
+    b.is = () => b;
+    b.not = () => b;
+    b.or = () => {
+      handedOverQuery = true;
+      return b;
+    };
     b.range = (a: number, z: number) => {
       range = [a, z];
+      if (table === 'payments' && handedOverQuery) return Promise.resolve({ data: [], error: null });
       log.push({ table, filters, range });
       if (opts.failOn === table) return Promise.resolve({ data: null, error: { message: 'boom' } });
       const all = (table === 'payments' ? opts.payments : opts.expenses) ?? [];

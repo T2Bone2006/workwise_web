@@ -102,6 +102,28 @@ describe('activeProvider / sendText transport', () => {
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>)['X-Api-Key']).toBe('test-key');
+    expect(JSON.parse(String(init.body))).toMatchObject({ sender: '+447700900100' });
+  });
+
+  it('sends a named sender and refuses a phone number in its place', async () => {
+    process.env.MESSAGING_TRANSPORT = 'puresms';
+    process.env.PURESMS_API_KEY = 'test-key';
+    process.env.PURESMS_SENDER = '+447700900100';
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ id: '1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await sendText({ ...SEND_INPUT, sender: 'WorkWise' });
+    const [, named] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(named.body)).sender).toBe('WorkWise');
+
+    fetchSpy.mockClear();
+    const refused = await sendText({ ...SEND_INPUT, sender: '+447700900100' });
+    expect(refused).toMatchObject({ ok: false, retryable: false });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('treats HTTP 400 as not retryable', async () => {

@@ -88,6 +88,7 @@ export function ExpensesList({
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
                       <span>{formatShortDay(expense.spentOn)}</span>
                       {expense.category ? <Tag tone="violet">{EXPENSE_CATEGORY_LABELS[expense.category]}</Tag> : null}
+                      {expense.isTeamPay ? <Tag tone="slate">Team pay</Tag> : null}
                     </span>
                   </span>
                   {expense.hasReceipt ? (

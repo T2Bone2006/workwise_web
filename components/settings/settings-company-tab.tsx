@@ -19,18 +19,13 @@ import {
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { updateCompanySettings } from '@/lib/actions/settings';
 import { INDUSTRIES, type SettingsPageData } from '@/lib/data/settings-types';
-import type { TenantSkillRow } from '@/lib/actions/skills';
 import { CompanyLogoUpload } from './company-logo-upload';
-import { SettingsSkillsSection } from './settings-skills-section';
 import { cn } from '@/lib/utils';
 import { Tag } from '@/components/look';
 import { useLook } from '@/components/look/use-look';
 
 interface SettingsCompanyTabProps {
   data: SettingsPageData;
-  initialTenantSkills: TenantSkillRow[];
-  /** Pro uses skills to match workers to jobs. Lite and Rounds do not. */
-  showSkills: boolean;
   companyLogoUrl?: string | null;
   showLogo?: boolean;
   onSaved: () => void;
@@ -39,8 +34,6 @@ interface SettingsCompanyTabProps {
 
 export function SettingsCompanyTab({
   data,
-  initialTenantSkills,
-  showSkills,
   companyLogoUrl = null,
   showLogo = false,
   onSaved,
@@ -110,46 +103,12 @@ export function SettingsCompanyTab({
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Read-only account overview (classic look only; the new look shows a quiet card at the end) */}
-      {fresh ? null : (
-      <Card className="rounded-xl border border-border/50 bg-muted/30">
-        <CardHeader>
-          <CardTitle className="text-base">Account overview</CardTitle>
-          <CardDescription>Read-only information about your account.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <div>
-            <span className="text-muted-foreground">Tenant ID</span>
-            <p className="font-mono text-foreground break-all">{tenant.id}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Subscription status</span>
-            <p className="text-foreground capitalize">{tenant.subscription_status ?? '—'}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Account created</span>
-            <p className="text-foreground">
-              {tenant.created_at
-                ? new Date(tenant.created_at).toLocaleDateString('en-GB', {
-                    timeZone: 'Europe/London',
-                  })
-                : '—'}
-            </p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Total jobs</span>
-            <p className="text-foreground">{data.totalJobsCount}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Total workers</span>
-            <p className="text-foreground">{data.totalWorkersCount}</p>
-          </div>
-        </CardContent>
-      </Card>
-      )}
+  const createdOn = tenant.created_at
+    ? new Date(tenant.created_at).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })
+    : '—';
 
+  return (
+    <div className="space-y-4">
     <form onSubmit={handleSubmit}>
       <Card
         className={cn(
@@ -167,34 +126,34 @@ export function SettingsCompanyTab({
           {showLogo ? (
             <CompanyLogoUpload tenantId={tenant.id} logoUrl={companyLogoUrl ?? null} />
           ) : null}
-          <div className="space-y-2">
-            <Label htmlFor="company-name">Company name</Label>
-            <Input
-              id="company-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Acme Ltd"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="industry">Industry</Label>
-            <SearchableSelect
-              id="industry"
-              value={industry || undefined}
-              onValueChange={setIndustry}
-              placeholder="Select industry"
-              searchPlaceholder="Search industries"
-              emptyText="No industry matches."
-              options={[
-                ...(industry && !(INDUSTRIES as readonly string[]).includes(industry)
-                  ? [{ value: industry, label: industry }]
-                  : []),
-                ...INDUSTRIES.map((name) => ({ value: name, label: name })),
-              ]}
-            />
-          </div>
           <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="company-name">Company name</Label>
+              <Input
+                id="company-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Acme Ltd"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="industry">Industry</Label>
+              <SearchableSelect
+                id="industry"
+                value={industry || undefined}
+                onValueChange={setIndustry}
+                placeholder="Select industry"
+                searchPlaceholder="Search industries"
+                emptyText="No industry matches."
+                options={[
+                  ...(industry && !(INDUSTRIES as readonly string[]).includes(industry)
+                    ? [{ value: industry, label: industry }]
+                    : []),
+                  ...INDUSTRIES.map((name) => ({ value: name, label: name })),
+                ]}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="company-phone">Phone</Label>
               <Input
@@ -215,18 +174,18 @@ export function SettingsCompanyTab({
                 placeholder="hello@company.com"
               />
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="company-line">{unhookChromeAddressFill('Address')}</Label>
-            <AddressAutocompleteInput
-              id="company-line"
-              value={address}
-              onValueChange={setAddress}
-              onAddressSelect={({ address: line, postcode }) => {
-                setAddress([line, postcode].filter(Boolean).join(', '));
-              }}
-              placeholder="Start typing a postcode or address…"
-            />
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="company-line">{unhookChromeAddressFill('Address')}</Label>
+              <AddressAutocompleteInput
+                id="company-line"
+                value={address}
+                onValueChange={setAddress}
+                onAddressSelect={({ address: line, postcode }) => {
+                  setAddress([line, postcode].filter(Boolean).join(', '));
+                }}
+                placeholder="Start typing a postcode or address…"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -241,25 +200,31 @@ export function SettingsCompanyTab({
               {tenant.subscription_status ? tenant.subscription_status.replace(/_/g, ' ') : 'No plan'}
             </Tag>
           </span>
-          <span className="text-muted-foreground">
-            Created{' '}
-            {tenant.created_at
-              ? new Date(tenant.created_at).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })
-              : '—'}
-          </span>
+          <span className="text-muted-foreground">Created {createdOn}</span>
           <span className="min-w-0 text-xs text-muted-foreground">
             ID <span className="font-mono break-all">{tenant.id}</span>
           </span>
         </section>
-      ) : null}
-
-      {showSkills ? (
-        <SettingsSkillsSection
-          tenantId={tenant.id}
-          initialSkills={initialTenantSkills}
-          onSaved={onSaved}
-        />
-      ) : null}
+      ) : (
+        <section className="flex flex-wrap items-center gap-x-6 gap-y-1.5 px-1 text-xs text-muted-foreground">
+          <span>
+            Account{' '}
+            <span className="font-medium capitalize text-foreground">
+              {tenant.subscription_status ? tenant.subscription_status.replace(/_/g, ' ') : 'no plan'}
+            </span>
+          </span>
+          <span>Created {createdOn}</span>
+          <span>
+            {data.totalJobsCount.toLocaleString('en-GB')} job{data.totalJobsCount === 1 ? '' : 's'}
+          </span>
+          <span>
+            {data.totalWorkersCount.toLocaleString('en-GB')} worker{data.totalWorkersCount === 1 ? '' : 's'}
+          </span>
+          <span className="min-w-0">
+            ID <span className="font-mono break-all">{tenant.id}</span>
+          </span>
+        </section>
+      )}
     </div>
   );
 }

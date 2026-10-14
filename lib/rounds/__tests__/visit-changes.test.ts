@@ -1015,6 +1015,42 @@ describe('move a stop and swap days', () => {
     expect(jobOf(db, 'g').scheduled_date).toBe(TUE);
   });
 
+  it('moves a whole round (many houses, no order) as one change, leaves the rest of the day, and Undo puts it back', async () => {
+    const db = emptyDb({
+      jobs: [
+        job({ id: 'a1', scheduled_date: TUE, route_position: 1 }),
+        job({ id: 'a2', scheduled_date: TUE, route_position: 2 }),
+        job({ id: 'a3', scheduled_date: TUE, route_position: 3 }),
+        job({ id: 'a4', scheduled_date: TUE, route_position: 4 }),
+        job({ id: 'solo', scheduled_date: TUE, route_position: 5 }),
+        job({ id: 'x', scheduled_date: THU, route_position: 1 }),
+      ],
+    });
+    const supabase = createFakeSupabase(db);
+
+    const result = await moveStopToDayWithLog(supabase, {
+      tenantId: TENANT,
+      jobIds: ['a1', 'a2', 'a3', 'a4'],
+      toDate: THU,
+      today: TODAY,
+      actor: ACTOR,
+    });
+
+    expect(result).toMatchObject({ success: true, moved: 4 });
+    expect(jobOf(db, 'solo').scheduled_date).toBe(TUE);
+    for (const id of ['a1', 'a2', 'a3', 'a4']) expect(jobOf(db, id).scheduled_date).toBe(THU);
+    expect(db.changes).toHaveLength(1);
+    expect(db.changes[0]?.job_ids).toEqual(['a1', 'a2', 'a3', 'a4']);
+
+    const undone = await undoVisitChangeCore(supabase, {
+      tenantId: TENANT,
+      changeId: changeIdOf(result as { success: boolean; changeId: string | null }),
+      actor: ACTOR,
+    });
+    expect(undone).toMatchObject({ success: true, restored: 4, leftAlone: 0 });
+    for (const id of ['a1', 'a2', 'a3', 'a4']) expect(jobOf(db, id).scheduled_date).toBe(TUE);
+  });
+
   it('reorders inside one day without logging a change', async () => {
     const db = emptyDb({
       jobs: [

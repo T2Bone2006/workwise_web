@@ -10,6 +10,8 @@ import { CurrentPlanCard, type PlanActionRun, type StripePlanSummary } from './c
 import { PaymentAndInvoices } from './payment-and-invoices';
 import type { ReferralData } from '@/lib/data/referral-page';
 import { ReferralSummary } from './referral-summary';
+import { TeamLine } from './team-line';
+import type { TeamBilling } from '@/lib/data/team-billing-core';
 
 function contactUrl(): string {
   const site = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://joinworkwise.com').replace(/\/$/, '');
@@ -68,7 +70,7 @@ function AddLitePanelSlot() {
   return null;
 }
 
-function StripePlan({ summary, referral }: { summary: StripePlanSummary; referral: ReferralData | null }) {
+function StripePlan({ summary, referral, teamBilling }: { summary: StripePlanSummary; referral: ReferralData | null; teamBilling: TeamBilling | null }) {
   const { pending, run } = usePlanActions();
   const overdue = summary.status === 'past_due';
 
@@ -78,6 +80,7 @@ function StripePlan({ summary, referral }: { summary: StripePlanSummary; referra
         <CancellationBanner endsOn={summary.currentPeriodEnd} pending={pending} run={run} />
       ) : null}
       <CurrentPlanCard summary={summary} pending={pending} run={run} />
+      {teamBilling ? <TeamLine billing={teamBilling} /> : null}
       {overdue ? null : summary.cancelAtPeriodEnd ? (
         <section aria-labelledby="change-plan-blocked-heading">
           <h2 id="change-plan-blocked-heading" className="text-sm font-semibold">
@@ -133,11 +136,14 @@ function EndedCard({ lastChoice }: { lastChoice: PlanChoice | null }) {
 export function PlanBillingTab({
   summary,
   referral = null,
+  teamBilling = null,
 }: {
   summary: Exclude<PlanSummary, { kind: 'managed' }>;
   referral?: ReferralData | null;
+  /** What the team adds to the plan; null leaves the row out (no team, or it couldn't be read). */
+  teamBilling?: TeamBilling | null;
 }) {
   if (summary.kind === 'contact_us') return <ContactUsCard />;
   if (summary.kind === 'ended') return <EndedCard lastChoice={summary.lastChoice} />;
-  return <StripePlan summary={summary} referral={referral} />;
+  return <StripePlan summary={summary} referral={referral} teamBilling={teamBilling} />;
 }

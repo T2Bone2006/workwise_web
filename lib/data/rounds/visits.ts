@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { diffDays, endOfMonth, isValidYmd, startOfMonth, type Ymd } from '@/lib/rounds/dates';
 import { sendsInvoice } from '@/lib/payments/terms';
+import { filterByPerson, type LanePerson } from '@/lib/rounds/lanes';
 import { RESCHEDULE_STATUSES } from '@/lib/rounds/visit-transitions';
 
 export type VisitRow = {
@@ -30,7 +31,18 @@ export type VisitRow = {
   customer_reply_at: string | null;
   customer_sends_invoice: boolean;
   customer_has_email: boolean;
+  /** Who does this visit (workers.id). Null on old rows: the lanes treat that as the owner's. */
+  assigned_worker_id: string | null;
+  /** The round this visit's agreement is in, if any (the calendar groups houses of a round). */
+  round_id: string | null;
+  round_name: string | null;
+  round_colour: string | null;
+  /** Who usually does that round (workers.id); null when it has no usual person, so it is the owner's. */
+  round_lead_worker_id?: string | null;
 };
+
+/** One round on one day of the month, for the month grid's round chips. */
+export type MonthRoundCount = { id: string; name: string; colour: string; count: number };
 
 export type VisitDayCounts = {
   total: number;
@@ -38,7 +50,11 @@ export type VisitDayCounts = {
   skipped: number;
   /** Sum of quoted_amount for non-cancelled visits (matches home “planned £”). */
   plannedAmount: number;
+  /** Rounds with visits that day, biggest first. Absent when nothing is in a round. */
+  rounds?: MonthRoundCount[];
 };
+
+const ROUND_EMBED = 'service_agreements ( round_id, rounds ( name, colour, usual_lead_worker_id ) )';
 
 const VISIT_SELECT = [
   'id',
@@ -64,8 +80,10 @@ const VISIT_SELECT = [
   'customer_confirmation_status',
   'customer_requested_date',
   'customer_reply_at',
+  'assigned_worker_id',
   'created_at',
   'customers ( name, email, payment_terms )',
+  ROUND_EMBED,
 ].join(', ');
 
 function asString(value: unknown): string | null {
@@ -103,6 +121,24 @@ function embedCustomer(value: unknown): {
   return { name, email, paymentTerms };
 }
 
+function embedRound(value: unknown): { id: string | null; name: string | null; colour: string | null; lead: string | null } {
+  const agreement = (Array.isArray(value) ? value[0] : value) as Record<string, unknown> | null | undefined;
+  if (!agreement || typeof agreement !== 'object') return { id: null, name: null, colour: null, lead: null };
+  const round = (Array.isArray(agreement.rounds) ? agreement.rounds[0] : agreement.rounds) as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  const id = asString(agreement.round_id);
+  const name = round && typeof round === 'object' ? asString(round.name) : null;
+  if (!id || !name) return { id: null, name: null, colour: null, lead: null };
+  return {
+    id,
+    name,
+    colour: round && typeof round === 'object' ? asString(round.colour) : null,
+    lead: round && typeof round === 'object' ? asString(round.usual_lead_worker_id) : null,
+  };
+}
+
 export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
   const id = asString(raw.id);
   const referenceNumber = asString(raw.reference_number);
@@ -115,6 +151,7 @@ export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
   }
 
   const customer = embedCustomer(raw.customers);
+  const round = embedRound(raw.service_agreements);
 
   return {
     id,
@@ -123,6 +160,11 @@ export function mapVisitRow(raw: Record<string, unknown>): VisitRow | null {
     customer_name: customer.name,
     customer_sends_invoice: sendsInvoice(customer.paymentTerms),
     customer_has_email: customer.email != null,
+    assigned_worker_id: asString(raw.assigned_worker_id),
+    round_id: round.id,
+    round_name: round.name,
+    round_colour: round.colour,
+    round_lead_worker_id: round.lead,
     service_agreement_id: asString(raw.service_agreement_id),
     agreement_occurrence_date: asYmd(raw.agreement_occurrence_date),
     address,
@@ -151,6 +193,7 @@ export function foldVisitCounts(
     scheduled_date: unknown;
     status: unknown;
     quoted_amount?: unknown;
+    service_agreements?: unknown;
   }>,
 ): Record<Ymd, VisitDayCounts> {
   const counts: Record<Ymd, VisitDayCounts> = {};
@@ -170,8 +213,16 @@ export function foldVisitCounts(
     } else {
       bucket.plannedAmount += asFiniteNumber(row.quoted_amount) ?? 0;
     }
+    const round = row.service_agreements === undefined ? null : embedRound(row.service_agreements);
+    if (round?.id && round.name && row.status !== 'cancelled') {
+      const list = (bucket.rounds ??= []);
+      const found = list.find((r) => r.id === round.id);
+      if (found) found.count += 1;
+      else list.push({ id: round.id, name: round.name, colour: round.colour ?? '#475569', count: 1 });
+    }
     counts[date] = bucket;
   }
+  for (const bucket of Object.values(counts)) bucket.rounds?.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   return counts;
 }
 
@@ -255,6 +306,8 @@ export async function getVisitsForRange(
 export async function getVisitCountsForMonth(
   tenantId: string,
   monthYmd: Ymd,
+  /** Count only one person's visits (the calendar's Person filter). Everyone when left out. */
+  person?: { personId: string | 'all' | 'mine'; people: ReadonlyArray<LanePerson> },
 ): Promise<{ counts: Record<Ymd, VisitDayCounts>; error: Error | null }> {
   try {
     const supabase = await createClient();
@@ -262,7 +315,7 @@ export async function getVisitCountsForMonth(
     const to = endOfMonth(monthYmd);
     const { data, error } = await supabase
       .from('jobs')
-      .select('scheduled_date, status, quoted_amount')
+      .select(`scheduled_date, status, quoted_amount, assigned_worker_id, ${ROUND_EMBED}`)
       .eq('tenant_id', tenantId)
       .gte('scheduled_date', from)
       .lte('scheduled_date', to);
@@ -272,7 +325,9 @@ export async function getVisitCountsForMonth(
       return { counts: {}, error: new Error(error.message) };
     }
 
-    return { counts: foldVisitCounts(data ?? []), error: null };
+    const rows = ((data ?? []) as unknown as Array<{ assigned_worker_id: string | null }>);
+    const kept = person ? filterByPerson(rows, person.personId, person.people) : rows;
+    return { counts: foldVisitCounts(kept as unknown as Parameters<typeof foldVisitCounts>[0]), error: null };
   } catch (err) {
     console.error('[getVisitCountsForMonth]', err);
     return {

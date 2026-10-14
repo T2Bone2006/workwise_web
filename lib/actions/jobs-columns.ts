@@ -2,25 +2,26 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import {
-  isJobsListColumnKey,
-  type JobsListColumnKey,
+  isJobsListColumnId,
+  type JobsListColumnId,
   type TenantSettings,
 } from '@/lib/data/settings-types';
 
 /**
- * Saves which standard fields show as jobs-list columns. Per-account, same
+ * Saves which fields show as jobs-list columns (standard ones, named field groups, spreadsheet columns). Per-account, same
  * `tenants.settings` jsonb the rest of Settings uses — see lib/actions/settings.ts
  * for the established read-merge-write pattern this follows.
  */
 export async function updateJobsListColumns(
   columns: string[]
 ): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
-  const validColumns: JobsListColumnKey[] = columns.filter(isJobsListColumnKey);
+  // Standard fields, named field groups (fg:) and raw spreadsheet columns (sf:).
+  const validColumns: JobsListColumnId[] = [...new Set(columns.filter(isJobsListColumnId))].slice(0, 40);
 
   const supabase = await createClient();
   const { data: tenant } = await supabase

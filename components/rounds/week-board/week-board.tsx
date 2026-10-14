@@ -10,9 +10,13 @@ import {
   type JSX,
 } from 'react';
 import { DndContext } from '@dnd-kit/core';
+import { giveRoundAction, reassignVisitsAction, setUsualLeadAction } from '@/lib/actions/team-assign';
+import type { LanePerson } from '@/lib/rounds/lanes';
+import { segmentByRound, type RoundTag } from '@/lib/rounds/round-groups';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  moveRound,
   moveStopToDay,
   reorderDay,
   swapDays,
@@ -33,6 +37,7 @@ import {
   findHouseMatch,
   formatBoardDay,
   jobAsStop,
+  roundAsStop,
   mondayOf,
   orderAfterDrop,
   rangeEnd,
@@ -78,11 +83,12 @@ function mergeVisits(prev: VisitRow[], fetched: VisitRow[], from: Ymd, to: Ymd):
 async function fetchWeeks(
   from: Ymd,
   weeks: number,
+  person?: string,
 ): Promise<{ ok: true; visits: VisitRow[] } | { ok: false; error: string }> {
   const parts: Promise<Awaited<ReturnType<typeof loadBoardWeeks>>>[] = [];
   for (let done = 0; done < weeks; done += CHUNK_WEEKS) {
     parts.push(
-      loadBoardWeeks({ from: addDays(from, done * 7), weeks: Math.min(CHUNK_WEEKS, weeks - done) }),
+      loadBoardWeeks({ from: addDays(from, done * 7), weeks: Math.min(CHUNK_WEEKS, weeks - done), ...(person && person !== 'all' ? { person } : {}) }),
     );
   }
   const results = await Promise.all(parts);
@@ -134,6 +140,12 @@ export function WeekBoard(props: {
   initialUntold: UntoldMove[];
   /** Forecast by day for the next 9 days; null when there isn't one. */
   weather?: WeatherByDay | null;
+  /** The Person filter ('mine' or a lead's worker id); left out or 'all' for Everyone. */
+  person?: string;
+  /** With a team: who a whole round can be given to. */
+  people?: ReadonlyArray<LanePerson>;
+  /** With a team: days off, so giving a round to someone who is off asks first. */
+  daysOff?: ReadonlyArray<{ workerId: string; from: string; to: string }>;
 }): JSX.Element {
   const { today, brand } = props;
   const [visits, setVisits] = useState(props.initialVisits);
@@ -152,7 +164,9 @@ export function WeekBoard(props: {
   const [clipped, setClipped] = useState({ left: false, right: false });
 
   const [panel, setPanel] = useState<{ stopId: string; date: Ymd } | null>(null);
-  const [moving, setMoving] = useState<{ stopId: string; date: Ymd; jobId?: string } | null>(null);
+  const [moving, setMoving] = useState<{ stopId: string; date: Ymd; jobId?: string; roundId?: string } | null>(null);
+  /** Giving a whole round to someone who is off that day: ask first. */
+  const [confirmGive, setConfirmGive] = useState<{ label: string; person: LanePerson; date: Ymd; run: () => void } | null>(null);
   const [swapping, setSwapping] = useState<Ymd | null>(null);
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -230,8 +244,16 @@ export function WeekBoard(props: {
   const panelStop = findStop(panel);
   // "Move just this job…" moves one job of a combined card as a stop of its own.
   const movingParent = findStop(moving);
-  const movingStop =
-    movingParent && moving?.jobId ? jobAsStop(movingParent, moving.jobId) : movingParent;
+  const movingRoundStop = (() => {
+    if (!moving?.roundId) return null;
+    const segment = segmentByRound(findDay(moving.date)?.stops ?? []).find((seg) => seg.round?.id === moving.roundId);
+    return segment?.round ? roundAsStop(segment.stops, segment.round) : null;
+  })();
+  const movingStop = moving?.roundId
+    ? movingRoundStop
+    : movingParent && moving?.jobId
+      ? jobAsStop(movingParent, moving.jobId)
+      : movingParent;
   const swappingDay = swapping ? findDay(swapping) : null;
 
   // ---------- the floating message ----------
@@ -249,7 +271,7 @@ export function WeekBoard(props: {
   const refresh = useCallback(async () => {
     const current = rangeRef.current;
     const [loaded, moves] = await Promise.all([
-      fetchWeeks(current.from, current.weeks),
+      fetchWeeks(current.from, current.weeks, props.person),
       loadUntoldMoves(),
     ]);
     if (loaded.ok) {
@@ -285,7 +307,7 @@ export function WeekBoard(props: {
         return;
       }
       const next = { from: addDays(mondayOf(date), -14), weeks: 6 };
-      const loaded = await fetchWeeks(next.from, next.weeks);
+      const loaded = await fetchWeeks(next.from, next.weeks, props.person);
       if (!loaded.ok) {
         toast.error(loaded.error);
         return;
@@ -464,6 +486,11 @@ export function WeekBoard(props: {
   /** A day was let go over another day: swap them now. Undo is one tap away and nobody is texted. */
   const dropDay = async (active: Extract<DndActive, { kind: 'day' }>, over: DndTarget) => {
     if (!over || !over.valid) return;
+    if (props.person && props.person !== 'all') {
+      // A swap moves everyone's visits on both days, so it must not run while the board shows one person's.
+      say("Swapping days moves everyone's visits. Set the Person filter to Everyone to swap.", { tone: 'working' });
+      return;
+    }
     const a = active.day.date;
     const b = over.date;
     const movedIds = [...active.day.stops, ...resolveDay(b).stops]
@@ -495,12 +522,110 @@ export function WeekBoard(props: {
     await afterChange(movedIds, null);
   };
 
+  /** A whole round was let go over a day: move all its houses there now. Undo is one tap away; nobody is texted. */
+  const dropRound = async (active: Extract<DndActive, { kind: 'round' }>, over: DndTarget) => {
+    if (!over || !over.valid) return;
+    const jobIds = active.stops.flatMap((s) => s.jobs.filter((j) => j.movable).map((j) => j.id));
+    if (jobIds.length === 0) return;
+    dropSeq.current += 1;
+    const mine = dropSeq.current;
+    setBusyStopId(`round:${active.round.id}`);
+    setOptimistic(applyLocalMove(jobsRef.current, { jobIds, toDate: over.date, orderedJobIds: [] }));
+    let result: Awaited<ReturnType<typeof moveRound>>;
+    try {
+      result = await moveRound({ jobIds, toDate: over.date });
+    } finally {
+      setBusyStopId(null);
+    }
+    if (!result.success) {
+      if (dropSeq.current === mine) setOptimistic(null);
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    announce({
+      text: `Moved ${active.round.name} (${active.stops.length} ${active.stops.length === 1 ? 'house' : 'houses'}) to ${formatBoardDay(over.date)}`,
+      changeId: result.changeId,
+      fromDate: active.fromDate,
+      toDate: over.date,
+      told: false,
+    });
+    await afterChange(jobIds, over.date);
+    if (dropSeq.current === mine) setOptimistic(null);
+  };
+
+  const isOff = (workerId: string, date: Ymd) =>
+    (props.daysOff ?? []).some((d) => d.workerId === workerId && d.from <= date && date <= d.to);
+
+  /** Give a whole round (that day's houses of it) to a person, as one undoable change. */
+  const giveStops = async (stops: BoardStop[], label: string, person: LanePerson) => {
+    const jobIds = stops.flatMap((s) => s.jobs.filter((j) => j.movable).map((j) => j.id));
+    if (jobIds.length === 0) return;
+    const result = await reassignVisitsAction({ jobIds, toWorkerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    if (result.moved === 0) {
+      say('Those visits were already done or moved, so nothing changed.', { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    const changeId = result.changeId;
+    say(`Gave ${label} to ${person.isOwner ? 'you' : person.name}`, {
+      actions: changeId ? [{ label: 'Undo', onClick: () => void undoChange(changeId) }] : undefined,
+    });
+    await afterChange(jobIds, null);
+  };
+
+  /** Giving to someone who is off that day asks first; everyone else is immediate. */
+  const askThenRun = (label: string, person: LanePerson, date: Ymd, run: () => void) => {
+    if (!person.isOwner && isOff(person.workerId, date)) setConfirmGive({ label, person, date, run });
+    else run();
+  };
+
+  const requestGive = (stops: BoardStop[], label: string, person: LanePerson, date: Ymd) =>
+    askThenRun(label, person, date, () => void giveStops(stops, label, person));
+
+  /** Everything one person has on a day goes to someone else, as one undoable change. */
+  const giveDay = async (date: Ymd, fromWorkerId: string, person: LanePerson) => {
+    const result = await giveRoundAction({ date, fromWorkerId, toWorkerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    if (result.moved === 0) {
+      say('Nothing to give: those visits were already done or moved.', { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    const changeId = result.changeId;
+    say(`Gave ${formatBoardDay(date)} to ${person.isOwner ? 'you' : person.name} (${result.moved} ${result.moved === 1 ? 'stop' : 'stops'})`, {
+      actions: changeId ? [{ label: 'Undo', onClick: () => void undoChange(changeId) }] : undefined,
+    });
+    await afterChange([], null);
+  };
+
+  /** Make someone a round's usual person: its upcoming visits follow them. Not an Undo, but easy to change back. */
+  const setUsual = async (round: RoundTag, person: LanePerson) => {
+    const result = await setUsualLeadAction({ roundId: round.id, workerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      return;
+    }
+    say(`${person.isOwner ? 'You do' : `${person.name} now does`} ${round.name} every time`, { durationMs: 4500 });
+    await afterChange([], null);
+  };
+
   const dnd = useBoardDnd({
     weeks,
     busy: busyStopId !== null,
     scroller,
     onDropCard: (a, t) => void dropCard(a, t),
     onDropDay: (a, t) => void dropDay(a, t),
+    onDropRound: (a, t) => void dropRound(a, t),
   });
   const dragging = dnd.active;
   const over = dnd.target;
@@ -509,13 +634,30 @@ export function WeekBoard(props: {
   function columnState(day: BoardDay): {
     liftedStopId: string | null;
     liftedJobId: string | null;
+    liftedRoundId: string | null;
     gapIndex: number | null;
     originIndex: number | null;
     joinStopId: string | null;
     highlight: ColumnHighlight;
   } {
-    const none = { liftedStopId: null, liftedJobId: null, gapIndex: null, originIndex: null, joinStopId: null, highlight: null };
+    const none = {
+      liftedStopId: null,
+      liftedJobId: null,
+      liftedRoundId: null,
+      gapIndex: null,
+      originIndex: null,
+      joinStopId: null,
+      highlight: null,
+    };
     if (!dragging) return none;
+    if (dragging.kind === 'round') {
+      const here = over?.date === day.date;
+      return {
+        ...none,
+        liftedRoundId: dragging.fromDate === day.date ? dragging.round.id : null,
+        highlight: here ? (over?.valid ? 'drop' : 'denied') : null,
+      };
+    }
     if (dragging.kind === 'day') {
       if (dragging.day.date === day.date) return { ...none, highlight: 'swap-source' };
       return { ...none, highlight: over?.date === day.date && over.valid ? 'swap' : null };
@@ -526,6 +668,7 @@ export function WeekBoard(props: {
     return {
       liftedStopId: fromHere && !dragging.single ? dragging.stop.id : null,
       liftedJobId: fromHere && dragging.single ? dragging.single.jobId : null,
+      liftedRoundId: null,
       gapIndex: here && over?.valid && !over.mergeStopId ? over.index : null,
       // Where it came from, shown while it isn't over a valid place (so it can glide back).
       originIndex: fromHere && !dragging.single && !(over?.valid) ? day.stops.findIndex((s) => s.id === dragging.stop.id) : null,
@@ -586,7 +729,7 @@ export function WeekBoard(props: {
         const current = rangeRef.current;
         const next = extendRange(current, dir);
         const fromDate = dir === 'earlier' ? next.from : addDays(rangeEnd(current), 1);
-        const loaded = await fetchWeeks(fromDate, BOARD_LOAD_STEP_WEEKS);
+        const loaded = await fetchWeeks(fromDate, BOARD_LOAD_STEP_WEEKS, props.person);
         if (!loaded.ok) {
           toast.error(loaded.error);
           return;
@@ -663,7 +806,20 @@ export function WeekBoard(props: {
                     onMove={(stop, date) => setMoving({ stopId: stop.id, date })}
                     onMoveJob={(stop, date, jobId) => setMoving({ stopId: stop.id, date, jobId })}
                     onTell={(changeId) => setTell(untoldInfo(changeId))}
-                    onSwap={(d) => setSwapping(d.date)}
+                    people={props.people}
+                    off={new Set((props.people ?? []).filter((p) => isOff(p.workerId, day.date)).map((p) => p.workerId))}
+                    onMoveRound={(_stops, round, date) => setMoving({ stopId: `round:${round.id}`, date, roundId: round.id })}
+                    onGiveRound={(stops, round, person, date) => requestGive(stops, round.name, person, date)}
+                    onGiveStop={(stop, person, date) => requestGive([stop], stop.name, person, date)}
+                    onUsualRound={(round, person) => void setUsual(round, person)}
+                    onGiveDay={(date, from, person) => askThenRun(formatBoardDay(date), person, date, () => void giveDay(date, from, person))}
+                    onSwap={(d) => {
+                      if (props.person && props.person !== 'all') {
+                        say("Swapping days moves everyone's visits. Set the Person filter to Everyone to swap.", { tone: 'working' });
+                        return;
+                      }
+                      setSwapping(d.date);
+                    }}
                   />
                 ))}
               </div>
@@ -737,6 +893,33 @@ export function WeekBoard(props: {
             <Button onClick={() => void sendTell()} disabled={tellBusy}>
               {tellBusy ? <Loader2 className="size-4 animate-spin" /> : null}
               Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmGive !== null} onOpenChange={(open) => !open && setConfirmGive(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmGive ? `${confirmGive.person.name} is off ${formatBoardDay(confirmGive.date)}` : 'Give round'}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {confirmGive ? `Give ${confirmGive.label} to ${confirmGive.person.name} anyway?` : null}
+          </p>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setConfirmGive(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const c = confirmGive;
+                setConfirmGive(null);
+                c?.run();
+              }}
+            >
+              Give anyway
             </Button>
           </DialogFooter>
         </DialogContent>

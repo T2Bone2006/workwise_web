@@ -4,10 +4,12 @@ import { LookCard, Notice } from '@/components/look';
 import { LiteOfferSlot } from '@/components/worker/lite-offer-slot';
 import { ProfileActions } from '@/components/worker/profile-actions';
 import { ProfileDetails, ProfileHeader, ProfileStats } from '@/components/worker/profile-card';
+import { RoundsPhoneNote } from '@/components/worker/rounds-phone-note';
 import { getMyProfile } from '@/lib/data/worker/profile';
+import { getWorkerRoundsExtras } from '@/lib/data/worker/rounds-extras';
 
 export default async function WorkerProfilePage() {
-  const profile = await getMyProfile();
+  const [profile, extras] = await Promise.all([getMyProfile(), getWorkerRoundsExtras()]);
   if (!profile) {
     return (
       <Notice tone="amber" icon={TriangleAlert} title="Couldn't load your profile">
@@ -21,6 +23,7 @@ export default async function WorkerProfilePage() {
       <ProfileHeader profile={profile} />
       <ProfileStats profile={profile} />
       <ProfileDetails profile={profile} />
+      {extras.employerIsRounds ? <RoundsPhoneNote /> : null}
       {profile.hasOwnBusiness ? (
         <LookCard title="Your own business" icon={Briefcase} tone="lite">
           <p className="text-sm text-muted-foreground">

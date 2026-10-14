@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createClient } from '@/lib/supabase/server';
 import { getWorkerLink } from '@/lib/auth/worker-link';
+import { getWorkerRoundsExtras } from '@/lib/data/worker/rounds-extras';
 import { resolveJobSheetFields, parseWorkerVisibleFields } from '@/lib/jobs/worker-visible-fields';
 import {
   WORKER_JOB_COLUMNS,
@@ -35,6 +36,7 @@ type RangeResult = { jobs: WorkerJob[]; ok: boolean };
 export async function getMyJobsInRangeResult(from: string, to: string): Promise<RangeResult> {
   const link = await getWorkerLink();
   if (!link) return { jobs: [], ok: true };
+  const rounds = (await getWorkerRoundsExtras()).employerIsRounds;
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -52,7 +54,7 @@ export async function getMyJobsInRangeResult(from: string, to: string): Promise<
     fail('range', error);
     return { jobs: [], ok: false };
   }
-  return { jobs: data.map((row) => mapJobRow(row)).filter((j): j is WorkerJob => j !== null), ok: true };
+  return { jobs: data.map((row) => mapJobRow(row, null, { rounds })).filter((j): j is WorkerJob => j !== null), ok: true };
 }
 
 export async function getMyJobsInRange(from: string, to: string): Promise<WorkerJob[]> {
@@ -163,13 +165,14 @@ export async function getMyJobsHistory(opts: { tab: JobsTab; page: number }): Pr
         )
       : new Map<string, string>();
 
+  const rounds = (await getWorkerRoundsExtras()).employerIsRounds;
   const jobs = pageRows
-    .map((row) => mapJobRow(row, reasons.get(row.id) ?? null))
+    .map((row) => mapJobRow(row, reasons.get(row.id) ?? null, { rounds }))
     .filter((j): j is WorkerJob => j !== null);
   return { jobs, hasMore, ok: true };
 }
 
-type DetailCustomer = { name?: string | null; phone?: string | null; worker_visible_fields?: unknown };
+type DetailCustomer = { name?: string | null; phone?: string | null; access_notes?: string | null; worker_visible_fields?: unknown };
 type DetailRow = Omit<JobRowForWorker, 'customers'> & {
   assigned_worker_id: string | null;
   source_fields: unknown;
@@ -195,7 +198,7 @@ export async function getMyJob(id: string): Promise<WorkerJobDetail | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('jobs')
-    .select(`${WORKER_JOB_COLUMNS}, assigned_worker_id, source_fields, customers(name, phone, worker_visible_fields)`)
+    .select(`${WORKER_JOB_COLUMNS}, assigned_worker_id, source_fields, customers(name, phone, access_notes, worker_visible_fields)`)
     .eq('id', id)
     .maybeSingle<DetailRow>();
   if (error || !data) {
@@ -224,7 +227,8 @@ export async function getMyJob(id: string): Promise<WorkerJobDetail | null> {
   if (mine && (data.status === 'pending' || data.status === 'pending_send')) return null;
 
   const history = historyRes.error || !historyRes.data ? [] : historyLines(historyRes.data);
-  const base = mapJobRow(data, blockedReasonFromHistory(historyRes.data));
+  const rounds = (await getWorkerRoundsExtras()).employerIsRounds;
+  const base = mapJobRow(data, blockedReasonFromHistory(historyRes.data), { rounds });
   if (!base) return null;
 
   const customer = Array.isArray(data.customers) ? data.customers[0] : data.customers;
@@ -249,6 +253,7 @@ export async function getMyJob(id: string): Promise<WorkerJobDetail | null> {
       parseWorkerVisibleFields(customer?.worker_visible_fields ?? null),
     ),
     customerPhone: customer?.phone?.trim() || null,
+    ...(rounds ? { accessNotes: customer?.access_notes?.trim() || null } : {}),
     declinedByMe: false,
     history,
   };
@@ -267,6 +272,8 @@ function blockedReasonFromHistory(rows: unknown): string | null {
 export async function getMyWaitingJobs(): Promise<WorkerJob[]> {
   const link = await getWorkerLink();
   if (!link) return [];
+  // A Rounds visit needs no accepting, so nothing is "waiting" for a lead.
+  if ((await getWorkerRoundsExtras()).employerIsRounds) return [];
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('jobs')

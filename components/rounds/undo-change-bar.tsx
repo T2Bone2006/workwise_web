@@ -53,6 +53,13 @@ function summaryLine(change: VisitChangeSummary): string {
   if (change.kind === 'skip' || change.kind === 'skip_remaining') {
     return `Skipped ${n} ${noun}${tail}`;
   }
+  if (change.kind === 'reassign') {
+    return `Gave ${n} ${noun} to someone else${tail}`;
+  }
+  if (change.kind === 'push_back') {
+    const to = dayLabel(change.toDate);
+    return `Pushed back ${n} ${noun}${to ? ` to ${to}` : ''}${tail}`;
+  }
   if (change.kind === 'swap_days') {
     const a = dayLabel(change.fromDate) ?? 'a day';
     const b = dayLabel(change.toDate) ?? 'a day';
@@ -85,7 +92,10 @@ export function UndoChangeBar(props: {
 
   const canTell =
     change.notifiedAt == null &&
-    (change.kind === 'reschedule' || change.kind === 'move_remaining' || change.kind === 'swap_days');
+    (change.kind === 'reschedule' ||
+      change.kind === 'move_remaining' ||
+      change.kind === 'swap_days' ||
+      change.kind === 'push_back');
 
   const sendTell = async () => {
     setPending(true);
@@ -148,7 +158,19 @@ export function UndoChangeBar(props: {
           <DialogHeader>
             <DialogTitle>Tell them?</DialogTitle>
           </DialogHeader>
-          {change.toDate ? (
+          {change.kind === 'push_back' ? (
+            // A push back moves each visit to its own day, so there is no single "from → to" to show: the real texts
+            // (sent per customer) carry each customer's own date.
+            <div className="rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-sm">
+              <p className="text-foreground">
+                {brand.businessName}: really sorry, we can&apos;t make [their day]. We&apos;d like to come on [their new day]
+                instead. If that doesn&apos;t work, get in touch.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Each customer gets their own new day. Customers without a mobile get it by email.
+              </p>
+            </div>
+          ) : change.toDate ? (
             <ChangePreview
               text={dayMovedSms({
                 brand,

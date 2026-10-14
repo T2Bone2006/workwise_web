@@ -525,12 +525,15 @@ export function MoveRemainingDialog({
   brand,
   open,
   onOpenChange,
+  scope,
 }: {
   fromDate: Ymd;
   leftoverCount: number;
   brand: SmsBrand;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Only this person's leftovers (a lane on the calendar). Left out = everyone's, as before. */
+  scope?: { workerId: string; name: string };
 }) {
   const router = useRouter();
   const [toDate, setToDate] = useState<Date | undefined>(undefined);
@@ -554,6 +557,7 @@ export function MoveRemainingDialog({
       toDate: target,
       scheduledTime: '',
       notifyCustomers: notify,
+      ...(scope ? { workerId: scope.workerId } : {}),
     });
     setPending(false);
     if (result.success) {
@@ -576,9 +580,9 @@ export function MoveRemainingDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Move remaining</DialogTitle>
+          <DialogTitle>{scope ? `Move ${scope.name}'s remaining` : 'Move remaining'}</DialogTitle>
           <DialogDescription>
-            {leftoverCount} stop{leftoverCount === 1 ? '' : 's'} not yet done on{' '}
+            {leftoverCount} stop{leftoverCount === 1 ? '' : 's'}{scope ? ` of ${scope.name}'s` : ''} not yet done on{' '}
             {formatYmdDisplay(fromDate)} will move to the date you pick. Done
             stays done. Next cycle stays put.
           </DialogDescription>

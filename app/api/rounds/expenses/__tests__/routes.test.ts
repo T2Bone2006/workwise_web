@@ -28,6 +28,11 @@ vi.mock('@/lib/messaging/rounds-tenants', () => ({
 vi.mock('@/lib/stripe/connect', () => ({
   isTenantAdmin: (...a: unknown[]) => isTenantAdmin(...a),
 }));
+// The Rounds API guard checks the owner first; model it with the same switch these tests already use.
+vi.mock('@/lib/api/owner-guard', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/owner-guard')>('@/lib/api/owner-guard');
+  return { ...actual, callerIsOwner: (...a: unknown[]) => isTenantAdmin(...a) };
+});
 vi.mock('@/lib/expenses/expenses-core', () => ({
   addExpenseCore: (...a: unknown[]) => addExpenseCore(...a),
   saveExpenseCore: (...a: unknown[]) => saveExpenseCore(...a),
@@ -192,7 +197,7 @@ describe('the guard', () => {
     isTenantAdmin.mockResolvedValue(false);
     const responses = await everyRoute();
     expect(responses.map((r) => r.status)).toEqual(Array(8).fill(403));
-    expect(await responses[0].json()).toEqual({ error: 'Only the account owner can do this.' });
+    expect(await responses[0].json()).toEqual({ error: 'owner_only' });
     expect(listDraftExpenses).not.toHaveBeenCalled();
     expect(getExpense).not.toHaveBeenCalled();
     expect(loadBooksSummary).not.toHaveBeenCalled();

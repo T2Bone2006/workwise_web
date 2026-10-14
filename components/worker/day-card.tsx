@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { ArrowRight, CalendarCheck, CircleCheck } from 'lucide-react';
 import { EmptyState, LookCard } from '@/components/look';
 import { JobRow, jobDayLabel } from '@/components/worker/job-row';
+import { formatGbp } from '@/lib/money/pence';
 import { cn } from '@/lib/utils';
 import type { DayPlan } from '@/lib/worker/day-plan';
 
@@ -75,6 +76,9 @@ export function DayCard({
   }
 
   const allDone = plan.remaining === 0;
+  // Rounds only: what the day adds up to. Skipped visits aren't counted.
+  const rounds = plan.jobs.some((j) => j.rounds);
+  const dayTotal = plan.jobs.reduce((sum, j) => sum + (j.status === 'cancelled' ? 0 : (j.price ?? 0)), 0);
   return (
     <LookCard title="Today" icon={CalendarCheck} tone="sky" aside={heading}>
       <div className="flex items-center gap-4">
@@ -83,7 +87,7 @@ export function DayCard({
           <p className="text-lg font-semibold tracking-tight">
             {allDone
               ? 'All done for today'
-              : `${plan.remaining} ${plan.remaining === 1 ? 'job' : 'jobs'} to go`}
+              : `${plan.remaining} ${plan.remaining === 1 ? (rounds ? 'stop' : 'job') : rounds ? 'stops' : 'jobs'} to go`}
           </p>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {plan.done} done
@@ -91,6 +95,11 @@ export function DayCard({
             {plan.underway > 0 ? ` · ${plan.underway} under way` : ''}
             {plan.waiting > 0 ? ` · ${plan.waiting} waiting for you` : ''}
           </p>
+          {rounds ? (
+            <p className="mt-1 text-sm font-medium tabular-nums">
+              {plan.total} {plan.total === 1 ? 'stop' : 'stops'} · {formatGbp(dayTotal)}
+            </p>
+          ) : null}
           {plan.next ? (
             <p className="mt-1.5 truncate text-sm">
               <span className="font-medium text-(--tone-rounds-text)">Next:</span>{' '}

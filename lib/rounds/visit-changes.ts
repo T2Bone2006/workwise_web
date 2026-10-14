@@ -21,7 +21,9 @@ export type VisitChangeKind =
   | 'reschedule'
   | 'move_remaining'
   | 'skip_remaining'
-  | 'swap_days';
+  | 'swap_days'
+  | 'reassign'
+  | 'push_back';
 
 export type JobSnapshot = {
   job_id: string;
@@ -36,6 +38,12 @@ export type JobSnapshot = {
   service_agreement_id: string | null;
   agreement_schedule_mode: 'fixed' | 'after_completion' | null;
   agreement_next_due_date: string | null;
+  /** Phase 9. Who the visit belonged to before the change. Absent on older snapshots. */
+  assigned_worker_id?: string | null;
+  /** Phase 9, reassign only: who it was given to, so Undo only puts back a visit that is still with them. */
+  after_worker_id?: string | null;
+  /** Phase 9, push_back only: the day the visit was moved to (each visit moves to its own day). */
+  after_date?: string | null;
 };
 
 export type VisitChangeSummary = {
@@ -60,6 +68,8 @@ const KINDS: readonly VisitChangeKind[] = [
   'move_remaining',
   'skip_remaining',
   'swap_days',
+  'reassign',
+  'push_back',
 ];
 
 const SNAPSHOT_COLUMNS = [
@@ -73,6 +83,7 @@ const SNAPSHOT_COLUMNS = [
   'customer_confirmation_status',
   'customer_requested_date',
   'service_agreement_id',
+  'assigned_worker_id',
   'service_agreements(schedule_mode, next_due_date)',
 ].join(', ');
 
@@ -173,6 +184,9 @@ function snapshotFromRow(row: Record<string, unknown>): JobSnapshot | null {
     service_agreement_id: asNullableString(row.service_agreement_id),
     agreement_schedule_mode: agreement.mode,
     agreement_next_due_date: agreement.nextDue,
+    ...(typeof row.assigned_worker_id === 'string' || row.assigned_worker_id === null
+      ? { assigned_worker_id: row.assigned_worker_id as string | null }
+      : {}),
   };
 }
 
@@ -196,6 +210,13 @@ function parseSnapshot(value: unknown): JobSnapshot | null {
     service_agreement_id: asNullableString(row.service_agreement_id),
     agreement_schedule_mode: mode === 'fixed' || mode === 'after_completion' ? mode : null,
     agreement_next_due_date: asYmdOrNull(row.agreement_next_due_date),
+    ...(typeof row.assigned_worker_id === 'string' || row.assigned_worker_id === null
+      ? { assigned_worker_id: row.assigned_worker_id as string | null }
+      : {}),
+    ...(typeof row.after_worker_id === 'string' || row.after_worker_id === null
+      ? { after_worker_id: row.after_worker_id as string | null }
+      : {}),
+    ...(typeof row.after_date === 'string' ? { after_date: asYmdOrNull(row.after_date) } : {}),
   };
 }
 
@@ -268,7 +289,12 @@ function expectedDateAfterChange(
   fromDate: string | null,
   toDate: string | null,
   snapshotDate: string | null,
+  snapshot?: JobSnapshot,
 ): string | null {
+  // Giving a visit to someone else does not move it: it should still be on its own day.
+  if (kind === 'reassign') return snapshotDate;
+  // A push back sends each visit to its own day, written on the snapshot when it was moved.
+  if (kind === 'push_back') return snapshot?.after_date ?? null;
   if (kind !== 'swap_days') return toDate;
   if (!fromDate || !toDate || !snapshotDate) return null;
   if (snapshotDate === fromDate) return toDate;
@@ -276,8 +302,16 @@ function expectedDateAfterChange(
   return null;
 }
 
-function stillAsLeft(kind: VisitChangeKind, job: { status: string; scheduled_date: string | null }, toDate: string | null): boolean {
+function stillAsLeft(
+  kind: VisitChangeKind,
+  job: { status: string; scheduled_date: string | null; assigned_worker_id?: string | null },
+  toDate: string | null,
+  snapshot?: JobSnapshot,
+): boolean {
   if (kind === 'skip' || kind === 'skip_remaining') return job.status === 'cancelled';
+  if (kind === 'reassign') {
+    return isOpenStatus(job.status) && Boolean(snapshot?.after_worker_id) && job.assigned_worker_id === snapshot?.after_worker_id;
+  }
   if (!toDate) return false;
   return job.scheduled_date === toDate && isOpenStatus(job.status);
 }
@@ -364,13 +398,17 @@ async function listOpenJobIds(
   supabase: SupabaseClient,
   tenantId: string,
   date: string,
+  workerId?: string,
 ): Promise<string[] | null> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('jobs')
     .select('id')
     .eq('tenant_id', tenantId)
     .eq('scheduled_date', date)
     .in('status', [...RESCHEDULE_STATUSES]);
+  // Phase 9: a member of staff moves or skips only their own leftovers. No worker = everyone's, as before.
+  if (workerId) query = query.eq('assigned_worker_id', workerId);
+  const { data, error } = await query;
   if (error) {
     console.error('[visit-changes] list jobs:', error);
     return null;
@@ -401,7 +439,7 @@ async function clearReplyLabels(
   if (error) console.error('[visit-changes] clear reply labels:', error);
 }
 
-async function finishLoggedChange(
+export async function finishLoggedChange(
   supabase: SupabaseClient,
   p: LoggedChange,
 ): Promise<string | null> {
@@ -973,9 +1011,11 @@ export async function moveRemainingWithLog(
     scheduledTime?: string | null;
     actor: Actor;
     notifyCustomers?: boolean;
+    /** Only this person's leftovers (the staff API and the owner's "just Dave"). Omitted = everyone's. */
+    workerId?: string;
   },
 ): Promise<{ success: true; moved: number; changeId: string | null } | { success: false; error: string }> {
-  const jobIds = await listOpenJobIds(supabase, p.tenantId, p.fromDate);
+  const jobIds = await listOpenJobIds(supabase, p.tenantId, p.fromDate, p.workerId);
   if (!jobIds) return { success: false, error: 'Failed to load leftover stops.' };
   const before = await loadSnapshots(supabase, p.tenantId, jobIds);
   if (!before) return { success: false, error: 'Could not load the visits. Try again.' };
@@ -986,6 +1026,7 @@ export async function moveRemainingWithLog(
     toDate: p.toDate,
     scheduledTime: p.scheduledTime,
     actor: p.actor,
+    jobIds,
   });
   if (!result.success) {
     const movedIds = await listedJobsOnDate(supabase, p.tenantId, jobIds, p.toDate);
@@ -1025,10 +1066,12 @@ export async function skipRemainingCore(
     date: Ymd;
     actor: Actor;
     notifyCustomers?: boolean;
+    /** Only this person's leftovers. Omitted = everyone's, as before. */
+    workerId?: string;
   },
 ): Promise<{ success: true; skipped: number; changeId: string | null } | { success: false; error: string }> {
   if (!isValidYmd(p.date)) return { success: false, error: 'Pick a valid date.' };
-  const jobIds = await listOpenJobIds(supabase, p.tenantId, p.date);
+  const jobIds = await listOpenJobIds(supabase, p.tenantId, p.date, p.workerId);
   if (!jobIds) return { success: false, error: 'Failed to load leftover stops.' };
   const result = await skipListed(supabase, {
     tenantId: p.tenantId,
@@ -1068,6 +1111,7 @@ type RestoreOutcome = 'restored' | 'leftAlone' | 'error';
 type UndoJob = {
   status: string;
   scheduled_date: string | null;
+  assigned_worker_id: string | null;
 };
 
 async function loadJobForUndo(
@@ -1077,7 +1121,7 @@ async function loadJobForUndo(
 ): Promise<{ ok: true; job: UndoJob | null } | { ok: false }> {
   const { data, error } = await supabase
     .from('jobs')
-    .select('id, status, scheduled_date')
+    .select('id, status, scheduled_date, assigned_worker_id')
     .eq('id', jobId)
     .eq('tenant_id', tenantId)
     .maybeSingle();
@@ -1091,7 +1135,11 @@ async function loadJobForUndo(
   if (!status) return { ok: true, job: null };
   return {
     ok: true,
-    job: { status, scheduled_date: asYmdOrNull(row.scheduled_date) },
+    job: {
+      status,
+      scheduled_date: asYmdOrNull(row.scheduled_date),
+      assigned_worker_id: asNullableString(row.assigned_worker_id),
+    },
   };
 }
 
@@ -1224,6 +1272,40 @@ async function restoreSkippedJob(
   return 'restored';
 }
 
+/** Undo of a reassignment: the visit goes back to who had it, but only if it is still open and still with the person it was given to. */
+async function restoreReassignedJob(
+  supabase: SupabaseClient,
+  tenantId: string,
+  snapshot: JobSnapshot,
+  status: string,
+  actor: Actor,
+): Promise<RestoreOutcome> {
+  if (!snapshot.after_worker_id) return 'leftAlone';
+  const { data, error } = await supabase
+    .from('jobs')
+    .update({ assigned_worker_id: snapshot.assigned_worker_id ?? null })
+    .eq('id', snapshot.job_id)
+    .eq('tenant_id', tenantId)
+    .eq('assigned_worker_id', snapshot.after_worker_id)
+    .in('status', [...RESCHEDULE_STATUSES])
+    .select('id');
+  if (error) {
+    console.error('[undoVisitChangeCore] restore reassign:', error);
+    return 'error';
+  }
+  if (!Array.isArray(data) || data.length === 0) return 'leftAlone';
+
+  await writeHistory(supabase, {
+    jobId: snapshot.job_id,
+    fromStatus: status,
+    toStatus: status,
+    notes: 'Reassignment undone',
+    metadata: { from: snapshot.after_worker_id, to: snapshot.assigned_worker_id ?? null },
+    actor,
+  });
+  return 'restored';
+}
+
 async function restoreMovedJob(
   supabase: SupabaseClient,
   tenantId: string,
@@ -1315,8 +1397,9 @@ export async function undoVisitChangeCore(
       summary.fromDate,
       summary.toDate,
       snapshot.scheduled_date,
+      snapshot,
     );
-    if (!loadedJob.job || !stillAsLeft(summary.kind, loadedJob.job, expectedDate)) {
+    if (!loadedJob.job || !stillAsLeft(summary.kind, loadedJob.job, expectedDate, snapshot)) {
       leftAlone += 1;
       continue;
     }
@@ -1327,6 +1410,8 @@ export async function undoVisitChangeCore(
     }
     const outcome = isSkip
       ? await restoreSkippedJob(supabase, p.tenantId, snapshot, p.actor)
+      : summary.kind === 'reassign'
+      ? await restoreReassignedJob(supabase, p.tenantId, snapshot, loadedJob.job.status, p.actor)
       : await restoreMovedJob(
           supabase,
           p.tenantId,
@@ -1384,12 +1469,12 @@ export async function latestUndoableChange(
 
 export type UntoldMove = {
   changeId: string;
-  kind: 'reschedule' | 'move_remaining' | 'swap_days';
+  kind: 'reschedule' | 'move_remaining' | 'swap_days' | 'push_back';
   fromDate: string | null;
   toDate: string | null;
   createdAt: string;
-  /** Each job in the change and the day it was on before (a swap sends jobs both ways). */
-  jobs: { jobId: string; fromDate: string | null }[];
+  /** Each job in the change and the day it was on before (a swap sends jobs both ways). A push back also gives the day each job was sent to. */
+  jobs: { jobId: string; fromDate: string | null; toDate?: string | null }[];
 };
 
 /**
@@ -1410,7 +1495,7 @@ export async function listUntoldMoves(
     .eq('tenant_id', tenantId)
     .is('undone_at', null)
     .is('notified_at', null)
-    .in('kind', ['reschedule', 'move_remaining', 'swap_days'])
+    .in('kind', ['reschedule', 'move_remaining', 'swap_days', 'push_back'])
     .gte('created_at', cutoff)
     .order('created_at', { ascending: false })
     .limit(50);
@@ -1425,7 +1510,7 @@ export async function listUntoldMoves(
     const summary = toSummary(row);
     if (!summary) continue;
     const kind = summary.kind;
-    if (kind !== 'reschedule' && kind !== 'move_remaining' && kind !== 'swap_days') continue;
+    if (kind !== 'reschedule' && kind !== 'move_remaining' && kind !== 'swap_days' && kind !== 'push_back') continue;
     const ahead =
       kind === 'swap_days'
         ? (summary.fromDate ?? '') >= opts.today || (summary.toDate ?? '') >= opts.today
@@ -1440,6 +1525,7 @@ export async function listUntoldMoves(
       jobs: parseSnapshots(row.before).map((snapshot) => ({
         jobId: snapshot.job_id,
         fromDate: snapshot.scheduled_date,
+        ...(kind === 'push_back' ? { toDate: snapshot.after_date ?? null } : {}),
       })),
     });
   }

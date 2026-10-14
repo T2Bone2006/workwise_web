@@ -5,12 +5,20 @@ import { GripVertical, MoreHorizontal } from 'lucide-react';
 import { useDraggable } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
 import { formatGbp } from '@/lib/money/pence';
-import { formatBoardDay, type BoardDay, type BoardStop } from '@/lib/rounds/week-board';
+import { formatBoardDay, roundAsStop, type BoardDay, type BoardStop } from '@/lib/rounds/week-board';
+import type { LanePerson } from '@/lib/rounds/lanes';
+import { segmentByRound, type RoundTag } from '@/lib/rounds/round-groups';
+import { RoundGroup, RoundGroupMenu, RoundPersonMenu } from '@/components/rounds/round-group';
+import { dayPeople, expectedForStop, whoDoes } from '@/lib/rounds/who-does';
+import { personColours } from '@/lib/rounds/lanes';
+import type { Tone } from '@/components/look/tones';
+import { PersonChipButton } from '@/components/team/assignee-chip';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { DayWeather } from '@/components/weather/day-weather';
@@ -18,6 +26,27 @@ import type { DayWeather as DayWeatherData } from '@/lib/weather/met-norway';
 import { BoardStopCard } from './board-stop-card';
 
 export type ColumnHighlight = 'drop' | 'swap' | 'denied' | 'swap-source' | null;
+
+/** The handle on a round group: pick the whole round up and put it on another day. */
+function RoundGrip({ date, round, disabled }: { date: string; round: RoundTag; disabled: boolean }): JSX.Element | null {
+  return disabled ? null : <ActiveRoundGrip date={date} round={round} />;
+}
+
+function ActiveRoundGrip({ date, round }: { date: string; round: RoundTag }): JSX.Element {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: `roundhead:${date}:${round.id}`, data: { date, roundId: round.id } });
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      type="button"
+      aria-label={`Drag all of ${round.name} onto another day`}
+      className="-ml-0.5 shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:bg-muted"
+    >
+      <GripVertical className="size-3.5" />
+    </button>
+  );
+}
 
 /** One day: header with its totals, grip and ⋯ menu, then its stops top to bottom. */
 export function BoardDayColumn(props: {
@@ -27,6 +56,8 @@ export function BoardDayColumn(props: {
   liftedStopId: string | null;
   /** One job of a stop here that is in the air (the stop stays), if any. */
   liftedJobId: string | null;
+  /** The round group of this day that is in the air, if any. */
+  liftedRoundId: string | null;
   /** Where a dashed gap is open in this column (index among its other stops), or null. */
   gapIndex: number | null;
   /** Show a dashed outline where the lifted stop came from (it isn't over a valid place). */
@@ -45,6 +76,18 @@ export function BoardDayColumn(props: {
   onMoveJob: (stop: BoardStop, date: string, jobId: string) => void;
   onTell: (changeId: string) => void;
   onSwap: (day: BoardDay) => void;
+  /** Move a whole round group to another day (the dialog). */
+  onMoveRound: (stops: BoardStop[], round: RoundTag, date: string) => void;
+  /** With a team: who a whole round can be given to, and who is off today. */
+  people?: ReadonlyArray<LanePerson>;
+  off?: ReadonlySet<string>;
+  onGiveRound: (stops: BoardStop[], round: RoundTag, person: LanePerson, date: string) => void;
+  /** Give one house to someone (its ⋯ menu). */
+  onGiveStop: (stop: BoardStop, person: LanePerson, date: string) => void;
+  /** Make someone a round's usual person (every time). */
+  onUsualRound: (round: RoundTag, person: LanePerson) => void;
+  /** Give everything one person has on this day to someone else. */
+  onGiveDay: (date: string, fromWorkerId: string, to: LanePerson) => void;
 }): JSX.Element {
   const { day } = props;
   const gripOk = !day.isPast && day.stops.some((s) => s.movable) && !props.locked;
@@ -67,6 +110,15 @@ export function BoardDayColumn(props: {
       />
     );
   };
+
+  const ownerId = props.people?.find((p) => p.isOwner)?.workerId ?? null;
+  const nameOf = (id: string | null) => {
+    const p = props.people?.find((x) => x.workerId === id);
+    return p ? (p.isOwner ? 'You' : (p.name.trim().split(/\s+/)[0] ?? p.name)) : 'You';
+  };
+  const colours = props.people ? personColours(props.people) : new Map<string, Tone>();
+  const toneOf = (id: string | null): Tone => (id ? colours.get(id) : undefined) ?? 'slate';
+  const working = props.people ? dayPeople(day.stops, ownerId) : [];
 
   const summary = [
     `${day.total} ${day.total === 1 ? 'stop' : 'stops'}`,
@@ -129,6 +181,40 @@ export function BoardDayColumn(props: {
             ) : null}
           </p>
           <p className="truncate text-xs text-muted-foreground">{summary}</p>
+          {working.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="Who is working">
+              {working.map((w) => {
+                const others = (props.people ?? []).filter((p) => p.workerId !== w.workerId);
+                const canGive = !day.isPast && !props.locked && w.workerId !== null && others.length > 0;
+                const chip = (
+                  <PersonChipButton
+                    name={nameOf(w.workerId)}
+                    colour={toneOf(w.workerId)}
+                    count={w.stops}
+                    size="sm"
+                    chevron={false}
+                    disabled={!canGive}
+                    aria-label={`${nameOf(w.workerId)} has ${w.stops} ${w.stops === 1 ? 'stop' : 'stops'}${canGive ? '. Give their day to someone else' : ''}`}
+                  />
+                );
+                if (!canGive) return <span key={w.workerId ?? 'none'}>{chip}</span>;
+                return (
+                  <DropdownMenu key={w.workerId ?? 'none'}>
+                    <DropdownMenuTrigger asChild>{chip}</DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuLabel>Give {nameOf(w.workerId) === 'You' ? 'your' : `${nameOf(w.workerId)}'s`} day to</DropdownMenuLabel>
+                      {others.map((p) => (
+                        <DropdownMenuItem key={p.workerId} onSelect={() => props.onGiveDay(day.date, w.workerId as string, p)}>
+                          {p.isOwner ? 'You' : p.name}
+                          {props.off?.has(p.workerId) ? <span className="ml-auto text-xs text-(--tone-amber-text)">Off</span> : null}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                );
+              })}
+            </div>
+          ) : null}
           {/* Always one line tall, so columns line up when a day has no forecast. */}
           <div className="mt-0.5 flex h-4 items-center overflow-hidden">
             {props.weather ? <DayWeather weather={props.weather} className="whitespace-nowrap" /> : null}
@@ -159,24 +245,74 @@ export function BoardDayColumn(props: {
           </div>
         ) : null}
         {gapAt(0)}
-        {day.stops.map((stop) => (
-          <Fragment key={stop.id}>
-            <BoardStopCard
-              stop={stop}
-              date={day.date}
-              flash={stop.jobIds.some((id) => props.flashIds.has(id))}
-              lifted={stop.id === props.liftedStopId}
-              liftedJobId={stop.jobIds.includes(props.liftedJobId ?? '') ? props.liftedJobId : null}
-              join={stop.id === props.joinStopId}
-              locked={props.locked}
-              onOpen={(s) => props.onOpen(s, day.date)}
-              onMove={(s) => props.onMove(s, day.date)}
-              onMoveJob={(s, jobId) => props.onMoveJob(s, day.date, jobId)}
-              onTell={props.onTell}
-            />
-            {stop.id === props.liftedStopId ? null : gapAt(++othersSeen)}
-          </Fragment>
-        ))}
+        {segmentByRound(day.stops).map((segment, segIndex) => {
+          const round = segment.round;
+          const who = whoDoes(segment.stops, ownerId);
+          // In a group, a card is only tagged when it isn't with the person doing most of the round; outside one, when it
+          // isn't with its round's usual person (or the owner).
+          const expectedFor = (stop: BoardStop): string | null | undefined =>
+            !props.people ? undefined : round ? who.workerId : expectedForStop(stop.round, ownerId);
+          const cards = segment.stops.map((stop) => (
+            <Fragment key={stop.id}>
+              <BoardStopCard
+                stop={stop}
+                date={day.date}
+                flash={stop.jobIds.some((id) => props.flashIds.has(id))}
+                lifted={stop.id === props.liftedStopId}
+                liftedJobId={stop.jobIds.includes(props.liftedJobId ?? '') ? props.liftedJobId : null}
+                join={stop.id === props.joinStopId}
+                locked={props.locked}
+                onOpen={(s) => props.onOpen(s, day.date)}
+                onMove={(s) => props.onMove(s, day.date)}
+                onMoveJob={(s, jobId) => props.onMoveJob(s, day.date, jobId)}
+                onTell={props.onTell}
+                people={props.people}
+                off={props.off}
+                expectedId={expectedFor(stop)}
+                onGive={props.people ? (s, person) => props.onGiveStop(s, person, day.date) : undefined}
+              />
+              {stop.id === props.liftedStopId ? null : gapAt(++othersSeen)}
+            </Fragment>
+          ));
+          if (!round) return <Fragment key={`plain-${segIndex}`}>{cards}</Fragment>;
+          const whole = roundAsStop(segment.stops, round);
+          const canMove = Boolean(whole) && !day.isPast && !props.locked;
+          return (
+            <RoundGroup
+              key={`round-${round.id}-${segIndex}`}
+              round={round}
+              houses={segment.stops.filter((s) => s.state !== 'skipped').length}
+              amount={segment.stops.reduce((sum, s) => sum + s.amount, 0)}
+              lifted={props.liftedRoundId === round.id}
+              grip={<RoundGrip date={day.date} round={round} disabled={!canMove} />}
+              who={
+                props.people ? (
+                  <RoundPersonMenu
+                    name={nameOf(who.workerId)}
+                    colour={toneOf(who.workerId)}
+                    extra={who.others}
+                    people={props.people}
+                    currentWorkerId={who.workerId}
+                    usualWorkerId={round.leadWorkerId ?? ownerId}
+                    off={props.off}
+                    disabled={!canMove}
+                    onThisDay={(person) => props.onGiveRound(segment.stops, round, person, day.date)}
+                    onEveryTime={(person) => props.onUsualRound(round, person)}
+                  />
+                ) : undefined
+              }
+              actions={
+                <RoundGroupMenu
+                  roundName={round.name}
+                  canMove={canMove}
+                  onMove={() => props.onMoveRound(segment.stops, round, day.date)}
+                />
+              }
+            >
+              {cards}
+            </RoundGroup>
+          );
+        })}
       </div>
     </section>
   );

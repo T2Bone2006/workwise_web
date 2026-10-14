@@ -73,6 +73,14 @@ export function crumbsForPath(pathname: string): Crumb[] {
   if (parts.length === 0) return [];
 
   const [root, a, b, c, d] = parts;
+
+  if (root === 'portal') {
+    const home: Crumb = { label: 'Your jobs', href: '/portal' };
+    if (a === 'jobs' && b) return [home, { label: 'Job' }];
+    if (a === 'pro') return [home, { label: 'WorkWise Pro' }];
+    return [{ label: 'Your jobs' }];
+  }
+
   const section = SECTION[root];
   if (!section) return [{ label: root }];
 

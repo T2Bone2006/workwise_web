@@ -667,3 +667,89 @@ describe('server actions', () => {
     expect(getStripe).not.toHaveBeenCalled();
   });
 });
+
+describe('a subscription with a Rounds team line (Phase 9)', () => {
+  const TEAM_ENV: Record<string, string> = {
+    STRIPE_PRICE_ROUNDS_TEAM_MONTHLY: 'price_team_m',
+    STRIPE_PRICE_ROUNDS_TEAM_YEARLY: 'price_team_y',
+  };
+
+  function withTeam(planPrice: string, teamFirst = false, quantity = 2) {
+    const plan = { id: 'si_1', quantity: 1, price: { id: planPrice }, current_period_end: PERIOD_END };
+    const team = { id: 'si_team', quantity, price: { id: 'price_team_m' }, current_period_end: PERIOD_END };
+    return liveSub({ items: { data: teamFirst ? [team, plan] : [plan, team] } });
+  }
+
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(TEAM_ENV)) {
+      if (!(key in savedEnv)) savedEnv[key] = process.env[key];
+      process.env[key] = value;
+    }
+  });
+
+  it('reads the plan from the plan line even when the team line comes first', async () => {
+    wire(withTeam('price_rounds_m', true));
+    const summary = await getPlanSummary(TENANT);
+    expect(summary).toMatchObject({ kind: 'stripe', choice: { plan: 'rounds', interval: 'month' } });
+  });
+
+  it('leaves the team line alone when an upgrade keeps the same interval', async () => {
+    wire(withTeam('price_rounds_m'));
+    stripe.invoices.createPreview.mockResolvedValue({ amount_due: 2400, period_end: PERIOD_END, next_payment_attempt: null });
+    stripe.subscriptions.update.mockResolvedValue(liveSub({ pending_update: null }));
+    await changePlan(TENANT, { plan: 'both', interval: 'month' }, 2400, 'nonce-t1');
+    expect(stripe.subscriptions.update.mock.calls[0][1].items).toEqual([{ id: 'si_1', price: 'price_both_m' }]);
+  });
+
+  it('moves the team line to the yearly price in the same call when the plan goes yearly', async () => {
+    wire(withTeam('price_rounds_m'));
+    stripe.invoices.createPreview.mockResolvedValue({ amount_due: 2400, period_end: PERIOD_END, next_payment_attempt: null });
+    stripe.subscriptions.update.mockResolvedValue(liveSub({ pending_update: null }));
+    await changePlan(TENANT, { plan: 'rounds', interval: 'year' }, 2400, 'nonce-t2');
+    expect(stripe.subscriptions.update.mock.calls[0][1].items).toEqual([
+      { id: 'si_1', price: 'price_rounds_y' },
+      { id: 'si_team', price: 'price_team_y' },
+    ]);
+  });
+
+  it('previews that same change including the team line', async () => {
+    wire(withTeam('price_rounds_m'));
+    await previewPlanChange(TENANT, { plan: 'rounds', interval: 'year' });
+    expect(stripe.invoices.createPreview.mock.calls[0][0].subscription_details.items).toEqual([
+      { id: 'si_1', price: 'price_rounds_y' },
+      { id: 'si_team', price: 'price_team_y' },
+    ]);
+  });
+
+  it('says the next yearly bill is the plan plus every lead, not the plan alone', async () => {
+    wire(withTeam('price_rounds_m'));
+    stripe.invoices.createPreview.mockResolvedValue({ amount_due: 40000, period_end: PERIOD_END, next_payment_attempt: null, lines: { data: [] } });
+    const preview = await previewPlanChange(TENANT, { plan: 'rounds', interval: 'year' });
+    // £350 for the plan + 2 leads x £100 = £550 a year.
+    expect(preview).toMatchObject({ ok: true, thenLabel: '£550 a year' });
+  });
+
+  it('keeps the team line, with its quantity, in both phases of a downgrade at renewal', async () => {
+    const sub = withTeam('price_both_m');
+    wire(sub);
+    const created = {
+      id: 'sched_t',
+      status: 'active',
+      current_phase: { start_date: 1_700_000_000, end_date: PERIOD_END },
+      phases: [{ start_date: 1_700_000_000, end_date: PERIOD_END, items: [{ price: 'price_both_m' }], discounts: [] }],
+    };
+    stripe.subscriptionSchedules.create.mockResolvedValue(created);
+    stripe.subscriptionSchedules.update.mockResolvedValue(created);
+    const result = await changePlan(TENANT, { plan: 'rounds', interval: 'month' }, 0, 'nonce-t3');
+    expect(result).toEqual({ ok: true, applied: 'at_renewal' });
+    const params = stripe.subscriptionSchedules.update.mock.calls[0][1];
+    expect(params.phases[0].items).toEqual([
+      { price: 'price_both_m', quantity: 1 },
+      { price: 'price_team_m', quantity: 2 },
+    ]);
+    expect(params.phases[1].items).toEqual([
+      { price: 'price_rounds_m', quantity: 1 },
+      { price: 'price_team_m', quantity: 2 },
+    ]);
+  });
+});

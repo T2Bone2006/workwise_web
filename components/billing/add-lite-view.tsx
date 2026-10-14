@@ -14,6 +14,7 @@ import { PhoneScene, RoundScene, WebsiteScene } from "./add-lite-scenes";
 export type AddLiteOffer = {
   todayPence: number;
   thenLabel: string;
+  nowLabel: string;
   effectiveDate: string;
   interval: BillingInterval;
   foundingLine: string | null;
@@ -185,7 +186,7 @@ export function AddLiteView({
                   <dd className="text-right">
                     <span className="font-medium">Rounds</span>
                     <span className="block text-xs text-muted-foreground tabular-nums">
-                      {formatPence(PLANS.rounds.pence[per])} a {per}
+                      {offer.nowLabel}
                     </span>
                   </dd>
                 </div>

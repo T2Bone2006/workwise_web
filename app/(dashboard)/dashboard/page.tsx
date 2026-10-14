@@ -20,6 +20,7 @@ import {
   type FieldFilterValueOption,
 } from '@/lib/jobs/field-filter';
 import { JobsTable } from '@/components/jobs/jobs-table';
+import { getFieldGroupsForTenant } from '@/lib/data/field-groups';
 import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banner';
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
@@ -37,6 +38,7 @@ import { TeamTodayCard } from '@/components/jobs/overview/team-today-card';
 import { loadBooksSummary } from '@/lib/books/summary';
 import { currentMonth } from '@/lib/books/periods';
 import { getRoundsHomeData } from '@/lib/data/rounds/home';
+import { getTeamToday } from '@/lib/data/rounds/team-today';
 import { loadComingUp } from '@/lib/data/rounds/coming-up';
 import { loadNeedsYou } from '@/lib/data/rounds/needs-you';
 import { loadWeather } from '@/lib/data/weather';
@@ -213,7 +215,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     // The overview is always today; other days live in the calendar. Each card's
     // read fails on its own (that card says so) and never breaks the page.
     const settings = await getRoundsSettings(supabase, tenantId);
-    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow] = await Promise.all([
+    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow, teamToday] = await Promise.all([
       getRoundsHomeData(tenantId),
       loadNeedsYou(supabase, { tenantId, today }),
       loadBooksSummary(supabase, { tenantId, period: currentMonth(today) }).catch(() => null),
@@ -233,6 +235,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               () => ({ data: null }),
             )
         : Promise.resolve({ data: null }),
+      // Only the owner's Dashboard has this card; a read problem leaves the card out and nothing else.
+      getTeamToday(tenantId, today).catch(() => null),
     ]);
     const firstName = firstNameOf(nameRow.data?.full_name) ?? firstNameOf(user?.user_metadata?.full_name);
     const weather = await loadWeather(supabase, { tenantId, visitPoints: data.todayVisits });
@@ -251,6 +255,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         workingDays={settings.working_days}
         roundValue={roundValue}
         weather={weather}
+        teamToday={teamToday}
       />
     );
   }
@@ -283,6 +288,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     proHome,
     declinedJobs,
     getStarted,
+    fieldGroups,
   ] = await Promise.all([
     getJobsStatusSummary(tenantId, { date_from: day, date_to: day }),
     getPendingSendJobsForTenant(tenantId),
@@ -293,6 +299,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     newLook ? getProHomeData(tenantId, day) : Promise.resolve(null),
     newLook ? getDeclinedJobs(tenantId) : Promise.resolve([]),
     newLook ? getGetStartedState(tenantId) : Promise.resolve(null),
+    getFieldGroupsForTenant(tenantId),
   ]);
 
   const fieldFilterOptions = SYSTEM_FILTER_FIELDS.map((f) => ({
@@ -384,6 +391,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         fieldFilterOptions={fieldFilterOptions}
         fieldFilterValuesByField={fieldFilterValuesByField}
         initialVisibleColumns={visibleColumns}
+        fieldGroups={fieldGroups}
         workers={workers.map((w) => ({ id: w.id, full_name: w.full_name }))}
         basePath="/dashboard"
         variant="day"

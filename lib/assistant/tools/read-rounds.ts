@@ -27,6 +27,7 @@ import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from '@/lib/books/categor
 import { currentMonth, currentTaxYear, periodRange, type Period } from '@/lib/books/periods';
 import { loadBooksSummary } from '@/lib/books/summary';
 import { listExpenses } from '@/lib/data/expenses';
+import { readMoneyInPayments } from '@/lib/books/money-in';
 import { getCustomerBalance, getOwedCustomers } from '@/lib/data/payments/owed';
 import { loadComingUp } from '@/lib/data/rounds/coming-up';
 import { readAllPages } from '@/lib/data/read-all-pages';
@@ -607,12 +608,8 @@ async function lastMonths(ctx: AssistantCtx, count: number) {
   }
   const from = `${keys[0]}-01`;
   const [payments, expenses] = await Promise.all([
-    readAllPages(
-      (a, z2) =>
-        ctx.db.from('payments').select('id, amount, refunded_amount, received_at').eq('tenant_id', ctx.tenantId)
-          .eq('status', 'active').gte('received_at', londonDayBoundsUtc(from).startIso).order('received_at').order('id').range(a, z2),
-      'Could not load payments',
-    ),
+    // Money the owner has received: cash a team member still holds is counted when it is handed over.
+    readMoneyInPayments(ctx.db, { tenantId: ctx.tenantId, columns: 'id, amount, refunded_amount', fromIso: londonDayBoundsUtc(from).startIso }),
     readAllPages(
       (a, z2) =>
         ctx.db.from('expenses').select('id, spent_on, amount').eq('tenant_id', ctx.tenantId).eq('status', 'confirmed')
@@ -622,7 +619,7 @@ async function lastMonths(ctx: AssistantCtx, count: number) {
   ]);
   const totals = new Map(keys.map((k) => [k, { in: 0, out: 0 }]));
   for (const p of payments) {
-    const k = monthKey(todayInLondon(new Date(String(p.received_at))));
+    const k = monthKey(todayInLondon(new Date(p.book_at)));
     const t = totals.get(k);
     if (t) t.in += Math.max(0, (Number(p.amount) || 0) - (Number(p.refunded_amount) || 0));
   }

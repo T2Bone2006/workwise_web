@@ -5,6 +5,9 @@ const getTenantIdForCurrentUser = vi.fn();
 const getTenantProducts = vi.fn();
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: (...a: unknown[]) => createClient(...a) }));
+vi.mock('@/lib/auth/require-owner', () => ({
+  getOwnerTenantId: (...a: unknown[]) => getTenantIdForCurrentUser(...a),
+}));
 vi.mock('@/lib/data/tenant', () => ({
   getTenantIdForCurrentUser: (...a: unknown[]) => getTenantIdForCurrentUser(...a),
 }));

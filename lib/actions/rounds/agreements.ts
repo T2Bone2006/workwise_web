@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, type Ymd } from '@/lib/rounds/dates';
 import { createAgreementCore } from '@/lib/rounds/create-agreement';
@@ -206,7 +206,7 @@ async function assertCatalog(
 export async function createAgreement(
   input: AgreementInput,
 ): Promise<{ success: true; id: string; generated: number } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const parsed = agreementSchema.safeParse(input);
@@ -226,7 +226,7 @@ export async function updateAgreement(
   input: AgreementInput,
   opts: { applyPriceToFuture: boolean },
 ): Promise<{ success: true; regenerated: number } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -253,7 +253,7 @@ export async function pauseAgreement(
   id: string,
   pausedUntil: Ymd | null,
 ): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -272,7 +272,7 @@ export async function pauseAgreement(
 }
 
 export async function resumeAgreement(id: string): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -287,7 +287,7 @@ export async function resumeAgreement(id: string): Promise<ActionResult> {
 }
 
 export async function endAgreement(id: string): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -307,7 +307,7 @@ export async function endAgreement(id: string): Promise<ActionResult> {
 export async function regenerateAgreementVisits(
   id: string,
 ): Promise<{ success: true; inserted: number } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -342,7 +342,7 @@ export async function setCustomerHouse(
   postcode: string,
   pin?: { lat: number; lng: number } | null,
 ): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const parsed = agreementSchema

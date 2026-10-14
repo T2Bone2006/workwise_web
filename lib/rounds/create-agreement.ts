@@ -109,7 +109,12 @@ async function assertCatalog(
  */
 export async function createAgreementCore(
   supabase: SupabaseClient,
-  params: { tenantId: string; values: AgreementValues },
+  params: {
+    tenantId: string;
+    values: AgreementValues;
+    /** A member of staff adding a customer on their round: the agreement and its visits are theirs. Default: the owner. */
+    assignedWorkerId?: string | null;
+  },
 ): Promise<CreateAgreementResult> {
   const { tenantId, values } = params;
 
@@ -128,7 +133,7 @@ export async function createAgreementCore(
       ...agreementWriteFields(values, coords),
       next_due_date: values.anchor_date,
       status: 'active',
-      assigned_worker_id: solo?.id ?? null,
+      assigned_worker_id: params.assignedWorkerId ?? solo?.id ?? null,
     })
     .select(AGREEMENT_COLUMNS)
     .single();

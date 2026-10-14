@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { lookupPin } from '@/lib/utils/places';
 import { pinLatSchema, pinLngSchema } from '@/lib/validations/rounds/agreement';
 
 /** The address and postcode for a spot dropped on the map. Signed-in traders only (it uses the Google key). */
 export async function POST(req: Request) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
 
   try {

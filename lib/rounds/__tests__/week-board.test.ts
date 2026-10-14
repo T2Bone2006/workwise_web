@@ -48,6 +48,10 @@ function visit(over: Partial<VisitRow> & Pick<VisitRow, 'id'>): VisitRow {
     customer_reply_at: null,
     customer_sends_invoice: false,
     customer_has_email: false,
+    assigned_worker_id: null,
+    round_id: null,
+    round_name: null,
+    round_colour: null,
     ...over,
   };
 }

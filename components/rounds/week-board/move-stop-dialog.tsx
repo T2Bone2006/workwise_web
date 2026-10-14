@@ -4,7 +4,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { format } from 'date-fns';
 import { CalendarIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { moveStopToDay, tellCustomersAboutChange } from '@/lib/actions/rounds/visits';
+import { moveRound, moveStopToDay, tellCustomersAboutChange } from '@/lib/actions/rounds/visits';
 import { dayMovedSms, type SmsBrand } from '@/lib/messaging/templates';
 import { formatVisitDay } from '@/lib/payments/messages';
 import type { Ymd } from '@/lib/rounds/dates';
@@ -22,6 +22,7 @@ import { Calendar } from '@/components/ui/calendar';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -89,7 +90,10 @@ export function MoveStopDialog(props: {
     const target = toYmd(toDate);
     setPending(true);
     try {
-      const moved = await moveStopToDay({ jobIds: stop.jobIds, toDate: target });
+      // A whole round can be dozens of houses; one house is at most a few jobs.
+      const moved = stop.id.startsWith('round:')
+        ? await moveRound({ jobIds: stop.jobIds, toDate: target })
+        : await moveStopToDay({ jobIds: stop.jobIds, toDate: target });
       if (!moved.success) {
         toast.error(moved.error);
         props.onFinished(null);
@@ -129,6 +133,11 @@ export function MoveStopDialog(props: {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{stop ? `Move ${stop.name}` : 'Move'}</DialogTitle>
+          {stop?.id.startsWith('round:') ? (
+            <DialogDescription>
+              Every house in the round that is still to do moves together. Each customer&apos;s next visit stays on its usual date.
+            </DialogDescription>
+          ) : null}
         </DialogHeader>
         <div className="space-y-1.5">
           <Label>Move to</Label>

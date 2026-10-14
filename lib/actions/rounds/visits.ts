@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { isValidYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { createOneOffVisitCore } from '@/lib/rounds/one-off';
@@ -35,6 +35,7 @@ import {
   completeVisitSchema,
   moveRemainingSchema,
   moveStopSchema,
+  moveRoundSchema,
   oneOffVisitSchema,
   reorderDaySchema,
   rescheduleVisitSchema,
@@ -46,6 +47,7 @@ import {
   type CompleteVisitInput,
   type MoveRemainingInput,
   type MoveStopInput,
+  type MoveRoundInput,
   type OneOffVisitInput,
   type ReorderDayInput,
   type RescheduleVisitInput,
@@ -80,7 +82,7 @@ async function requireActor(): Promise<
   | { success: true; tenantId: string; actor: Actor }
   | { success: false; error: string }
 > {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const supabase = await createClient();
@@ -252,6 +254,7 @@ export async function moveRemaining(
     scheduledTime: emptyToNull(parsed.data.scheduledTime),
     actor: ctx.actor,
     notifyCustomers: notify,
+    ...(parsed.data.workerId ? { workerId: parsed.data.workerId } : {}),
   });
   if (!result.success) return result;
 
@@ -283,6 +286,33 @@ export async function moveStopToDay(
     jobIds: parsed.data.jobIds,
     toDate: parsed.data.toDate,
     orderedJobIds: parsed.data.orderedJobIds,
+    today: todayInLondon(),
+    actor: ctx.actor,
+  });
+  if (!result.success) return result;
+
+  revalidateVisits();
+  return result;
+}
+
+/** Move a whole round's houses (all on one day) to another day as one change. Never texts; "Tell them" does. */
+export async function moveRound(
+  input: MoveRoundInput,
+): Promise<
+  | { success: true; moved: number; changeId: string | null; orderSaved: boolean }
+  | { success: false; error: string }
+> {
+  const ctx = await requireRoundsActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = moveRoundSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  const result = await moveStopToDayWithLog(supabase, {
+    tenantId: ctx.tenantId,
+    jobIds: parsed.data.jobIds,
+    toDate: parsed.data.toDate,
     today: todayInLondon(),
     actor: ctx.actor,
   });
@@ -382,6 +412,7 @@ export async function skipRemaining(
     date: parsed.data.date,
     actor: ctx.actor,
     notifyCustomers: notify,
+    ...(parsed.data.workerId ? { workerId: parsed.data.workerId } : {}),
   });
   if (!result.success) return result;
 
@@ -475,6 +506,8 @@ export async function reorderDay(input: ReorderDayInput): Promise<ActionResult> 
 
 export async function optimiseDay(
   date: Ymd,
+  /** Only this person's route (the calendar's lanes). Left out = the whole day, as before. */
+  workerId?: string,
 ): Promise<{ success: true; distanceKm: number; stops: number } | { success: false; error: string }> {
   const ctx = await requireActor();
   if (!ctx.success) return ctx;
@@ -485,6 +518,7 @@ export async function optimiseDay(
     tenantId: ctx.tenantId,
     date,
     persist: true,
+    ...(workerId && /^[0-9a-f-]{36}$/i.test(workerId) ? { workerId } : {}),
   });
   if (!result.success) return result;
 

@@ -23,6 +23,7 @@ interface JobOriginRealtimeViewProps {
   tenantSkills: TenantSkillRow[];
   mapData?: JobDetailMapData | null;
   industryData?: unknown;
+  reportFields?: unknown;
   completionNotes?: string;
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
   receivingBusinessName?: string | null;
@@ -37,6 +38,7 @@ export function JobOriginRealtimeView({
   tenantSkills,
   mapData,
   industryData,
+  reportFields,
   completionNotes,
   attachmentPhotos,
   receivingBusinessName,
@@ -134,6 +136,7 @@ export function JobOriginRealtimeView({
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryData}
+        reportFields={reportFields}
         completionNotes={completionNotes}
         attachmentPhotos={attachmentPhotos}
         isNetworkOriginView={true}

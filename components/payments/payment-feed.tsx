@@ -56,8 +56,9 @@ export function PaymentFeed({ rows, today }: { rows: PaymentHistoryRow[]; today:
                 </span>
                 <span className="pointer-events-none min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-medium tracking-tight">{row.customerName}</span>
-                  <span className="mt-0.5 block">
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
                     <Tag tone={methodTone(row.method)}>{paymentMethodLabel(row.method)}</Tag>
+                    {row.heldBy ? <Tag tone="amber">with {row.heldBy}</Tag> : null}
                   </span>
                 </span>
                 <span className="pointer-events-none text-base font-semibold text-(--tone-emerald-solid) tabular-nums">

@@ -36,6 +36,11 @@ vi.mock('@/lib/messaging/rounds-tenants', () => ({
 vi.mock('@/lib/stripe/connect', () => ({
   isTenantAdmin: (...a: unknown[]) => isTenantAdmin(...a),
 }));
+// The Rounds API guard is owner-only now; here the caller is the owner unless a test says otherwise through isTenantAdmin.
+vi.mock('@/lib/api/owner-guard', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/owner-guard')>('@/lib/api/owner-guard');
+  return { ...actual, callerIsOwner: async () => true };
+});
 vi.mock('@/lib/direct-debit/after-collection', () => ({
   resolveFailedCollection: (_a: unknown, p: unknown) => resolveFailedCollection(p),
   cancelDirectDebit: (_a: unknown, p: unknown) => cancelDirectDebit(p),

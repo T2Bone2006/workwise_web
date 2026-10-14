@@ -3,8 +3,6 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { createClientFromBearer } from '@/lib/auth/bearer';
-import type { TenantSettings } from '@/lib/data/settings-types';
-import { lookFromSettings } from '@/lib/data/tenant-look-core';
 import { ENTITLED_STATUSES, PRO_TIER_PRODUCTS, type Product } from '@/lib/data/tenant-products';
 import { todayInLondon, type Ymd } from '@/lib/rounds/dates';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -41,9 +39,7 @@ function fail(status: number, error: string): Failure {
 /**
  * The account owner of a Rounds, Lite and/or Pro business, from the phone's
  * bearer token or the dashboard's cookie. Pro workers never get it (they are not
- * admins), and a Pro business only gets it once its dashboard is on the new look
- * (`settings.look = 'new'`), so a Pro business still on the classic look is
- * refused exactly as before.
+ * admins). A Pro office gets it like any other business (there is no look switch any more).
  */
 export async function requireAssistantCaller(
   request: Request,
@@ -91,11 +87,6 @@ export async function requireAssistantCaller(
   }
   const products = new Set((subs ?? []).map((s) => (s as { product: Product }).product));
   const hasPro = PRO_TIER_PRODUCTS.some((p) => products.has(p));
-  if (hasPro) {
-    const { data: tenant } = await admin.from('tenants').select('settings').eq('id', tenantId).maybeSingle();
-    const settings = ((tenant as { settings?: unknown } | null)?.settings ?? null) as TenantSettings | null;
-    if (lookFromSettings(true, settings) !== 'new') return fail(403, 'Forbidden');
-  }
   const hasRounds = products.has('rounds');
   const hasLite = products.has('lite');
   if (!hasRounds && !hasLite && !hasPro) return fail(403, 'plan_ended');

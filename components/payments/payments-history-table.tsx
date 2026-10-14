@@ -58,12 +58,16 @@ export function PaymentsHistoryTable({
     router.push(`/payments?${params.toString()}`);
   };
 
-  const total = shown.reduce((sum, row) => sum + row.amount, 0);
+  // Cash a team member has not handed over yet is the customer's payment, not money in: it is listed (tagged) below
+  // but left out of "Came in" until the owner ticks it, the same rule as In & out (Phase 9, D10).
+  const counted = shown.filter((row) => !row.heldBy);
+  const total = counted.reduce((sum, row) => sum + row.amount, 0);
+  const withTeam = shown.reduce((sum, row) => (row.heldBy ? sum + row.amount : sum), 0);
   // Cash, cheque and other are all slate, so they share one slice: a colour never means two things.
   const groupOf = (method: string) => (['cash', 'cheque', 'other'].includes(method) ? 'cash' : method);
-  const mix = [...new Set(shown.map((row) => groupOf(row.method)))]
+  const mix = [...new Set(counted.map((row) => groupOf(row.method)))]
     .map((group) => {
-      const inGroup = shown.filter((row) => groupOf(row.method) === group);
+      const inGroup = counted.filter((row) => groupOf(row.method) === group);
       return {
         value: group,
         label: group === 'cash' ? 'Cash, cheque, other' : paymentMethodLabel(group),
@@ -86,7 +90,8 @@ export function PaymentsHistoryTable({
               </p>
             </div>
             <p className="pb-1 text-sm text-muted-foreground">
-              from {shown.length === 1 ? '1 payment' : `${shown.length} payments`}, by how they paid
+              from {counted.length === 1 ? '1 payment' : `${counted.length} payments`}, by how they paid
+              {withTeam > 0 ? ` · ${formatGbp(withTeam)} more is with your team, not counted yet` : ''}
             </p>
           </div>
           <div className="mt-3.5 flex h-2 gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Money in, by how it was paid">

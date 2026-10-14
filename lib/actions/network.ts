@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 
 type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -33,7 +33,7 @@ function getOtherParticipantTenantId(connection: ConnectionRow, tenantId: string
 }
 
 async function getCurrentTenantAndUser() {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { tenantId: null, userId: null, error: 'No tenant assigned.' };
   }
@@ -177,7 +177,7 @@ export async function respondToConnection(
 
 export async function revokeConnection(connectionId: string): Promise<ActionResult<{ id: string; status: string }>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -230,7 +230,7 @@ export async function updateConnectionSettings(
   settings: { trade_types: string[]; coverage_radius_miles: number }
 ): Promise<ActionResult<{ id: string; trade_types: string[]; coverage_radius_miles: number }>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -300,7 +300,7 @@ export async function dispatchJobToNetwork(
   notes?: string
 ): Promise<ActionResult<DispatchRow>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -448,7 +448,7 @@ export async function handleNetworkJobDeclined(
   dispatchId: string
 ): Promise<ActionResult<{ newJobId: string }>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -561,7 +561,7 @@ export type NetworkInboxActionResult =
 
 export async function acceptNetworkJob(dispatchId: string): Promise<NetworkInboxActionResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -606,7 +606,7 @@ export async function acceptNetworkJob(dispatchId: string): Promise<NetworkInbox
 
 export async function declineNetworkJob(dispatchId: string): Promise<NetworkInboxActionResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -653,7 +653,7 @@ export async function declineEntireDispatch(
   dispatchId: string
 ): Promise<ActionResult<{ success: number; failed: number; errors: string[] }>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -726,7 +726,7 @@ export async function bulkDispatchToNetwork(
   connectionId: string
 ): Promise<ActionResult<{ success: number; failed: number; errors: string[] }>> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }

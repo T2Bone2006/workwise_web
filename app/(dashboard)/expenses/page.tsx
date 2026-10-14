@@ -14,6 +14,7 @@ import {
 } from '@/lib/books/periods';
 import { loadBooksSummary } from '@/lib/books/summary';
 import { getVatRegistered, listDraftExpenses, listExpenses } from '@/lib/data/expenses';
+import { teamPayExpenseIds } from '@/lib/data/expenses-team-pay';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { todayInLondon } from '@/lib/rounds/dates';
@@ -48,6 +49,9 @@ export default async function ExpensesPage({ searchParams }: ExpensesPageProps) 
           getVatRegistered(supabase, tenantId),
         ])
       : [[], [], await getVatRegistered(supabase, tenantId)];
+
+  const teamPayIds = await teamPayExpenseIds(supabase, tenantId, expenses.map((e) => e.id));
+  const markedExpenses = expenses.map((e) => (teamPayIds.has(e.id) ? { ...e, isTeamPay: true } : e));
 
   let inOutPanel: React.ReactNode = null;
   if (tab === 'in-out') {
@@ -89,7 +93,7 @@ export default async function ExpensesPage({ searchParams }: ExpensesPageProps) 
       <ExpensesTabs
         tab={tab}
         drafts={drafts}
-        expenses={expenses}
+        expenses={markedExpenses}
         period={expensesPeriod}
         currentPeriod={currentPeriod}
         vatRegistered={vatRegistered}

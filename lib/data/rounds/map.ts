@@ -2,6 +2,8 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { validAssignees } from '@/lib/team/assign';
 import { readAllPages } from '@/lib/data/read-all-pages';
 import { getOwedCustomers } from '@/lib/data/payments/owed';
 import { getVisitsForRange } from '@/lib/data/rounds/visits';
@@ -15,6 +17,10 @@ export type RoundsMapData = {
   places: MapPlace[];
   /** The business's named rounds. */
   rounds: RoundRow[];
+  /** Who usually does each round (workers.id), null = the owner. Only filled when the business has a lead. */
+  usualLeads: Record<string, string | null>;
+  /** The owner and each active lead, for the round editor's "Usually done by" choice. Empty when there is no team. */
+  leadOptions: Array<{ workerId: string; name: string; isOwner: boolean }>;
   /** Customers whose address could not be placed on the map. */
   unmappedCustomers: number;
   /** Plain-English lines for parts that failed to load; the map still shows. */
@@ -33,6 +39,29 @@ function customerEmbed(value: unknown): { name: string; phone: string | null } {
   const name = typeof row?.name === 'string' && row.name.trim() !== '' ? row.name : 'Customer';
   const phone = typeof row?.phone === 'string' && row.phone.trim() !== '' ? row.phone : null;
   return { name, phone };
+}
+
+/** Usual lead per round and the people a round can be given to. Never throws: no team (or an error) gives nothing. */
+async function loadUsualLeads(
+  tenantId: string,
+): Promise<{ usualLeads: Record<string, string | null>; leadOptions: RoundsMapData['leadOptions'] }> {
+  const none = { usualLeads: {}, leadOptions: [] };
+  try {
+    const admin = createAdminClient();
+    const [assignees, rounds] = await Promise.all([
+      validAssignees(admin, tenantId),
+      admin.from('rounds').select('id, usual_lead_worker_id').eq('tenant_id', tenantId),
+    ]);
+    if (!assignees.some((a) => !a.isOwner)) return none;
+    const usualLeads: Record<string, string | null> = {};
+    for (const row of (rounds.data ?? []) as Array<{ id: string; usual_lead_worker_id: string | null }>) {
+      usualLeads[row.id] = row.usual_lead_worker_id;
+    }
+    return { usualLeads, leadOptions: assignees };
+  } catch (err) {
+    console.error('[getRoundsMapData] usual leads', err instanceof Error ? err.message : 'failed');
+    return none;
+  }
 }
 
 /** The earliest visit still to do for each agreement, from today on. Null if it couldn't be read. */
@@ -103,7 +132,7 @@ export async function getRoundsMapData(tenantId: string): Promise<RoundsMapData>
     }));
   } catch (err) {
     console.error('[getRoundsMapData] agreements', err instanceof Error ? err.message : 'failed');
-    return { places: [], rounds: [], unmappedCustomers: 0, notes, error: 'Could not load your customers.' };
+    return { places: [], rounds: [], usualLeads: {}, leadOptions: [], unmappedCustomers: 0, notes, error: 'Could not load your customers.' };
   }
 
   const from = monthStart < weekStart ? monthStart : weekStart;
@@ -135,5 +164,6 @@ export async function getRoundsMapData(tenantId: string): Promise<RoundsMapData>
     weekStart,
     weekEnd,
   });
-  return { places, rounds: roundData?.rounds ?? [], unmappedCustomers, notes, error: null };
+  const { usualLeads, leadOptions } = await loadUsualLeads(tenantId);
+  return { places, rounds: roundData?.rounds ?? [], usualLeads, leadOptions, unmappedCustomers, notes, error: null };
 }

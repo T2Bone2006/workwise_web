@@ -24,9 +24,9 @@ export function TenantSelector({ options, selectedCustomerId }: TenantSelectorPr
   const router = useRouter();
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-      <Label htmlFor="portal-tenant-select" className="text-sm text-muted-foreground shrink-0">
-        Viewing jobs for:
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor="portal-tenant-select" className="text-xs font-medium text-muted-foreground">
+        Provider
       </Label>
       <Select
         value={selectedCustomerId}
@@ -34,10 +34,7 @@ export function TenantSelector({ options, selectedCustomerId }: TenantSelectorPr
           router.push(`/portal?tenant=${customerId}`);
         }}
       >
-        <SelectTrigger
-          id="portal-tenant-select"
-          className="w-full border-sky-300/60 bg-white/70 backdrop-blur-sm dark:border-sky-800/50 dark:bg-background/60 sm:w-[280px]"
-        >
+        <SelectTrigger id="portal-tenant-select" className="w-full sm:w-[240px]">
           <SelectValue placeholder="Select provider" />
         </SelectTrigger>
         <SelectContent>

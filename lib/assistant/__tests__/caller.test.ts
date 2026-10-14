@@ -45,17 +45,9 @@ describe('who may ask Lily', () => {
     expect(r.ok && r.ctx).toMatchObject({ hasRounds: true, hasLite: false, hasPro: false, tenantId: 't1' });
   });
 
-  it('refuses a Pro business still on the classic look (RS Locksmiths stay untouched)', async () => {
+  it('lets a Pro office in whatever an old look setting says (there is no look switch any more)', async () => {
     subscriptions = [{ product: 'pro' }];
     tenantSettings = {};
-    const r = await requireAssistantCaller(request);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.response.status).toBe(403);
-  });
-
-  it('lets a Pro office in once its business is on the new look', async () => {
-    subscriptions = [{ product: 'pro' }];
-    tenantSettings = { look: 'new' };
     const r = await requireAssistantCaller(request);
     expect(r.ok && r.ctx).toMatchObject({ hasPro: true, hasRounds: false, hasLite: false });
   });

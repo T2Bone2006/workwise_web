@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getTenantProducts } from '@/lib/data/tenant-products';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getPaymentSettings } from '@/lib/data/payments/settings';
 import type { ConnectStatus } from '@/lib/payments/connect-status';
 import {
@@ -25,7 +25,7 @@ async function requireConnectOwner(): Promise<
   | { ok: true; tenantId: string; email: string | null }
   | { ok: false; error: string }
 > {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { ok: false, error: 'Not signed in' };
 
   const products = await getTenantProducts();

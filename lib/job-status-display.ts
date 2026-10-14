@@ -9,6 +9,7 @@ export type JobStatusUi =
   | 'pending'
   | 'pending_send'
   | 'assigned'
+  | 'accepted'
   | 'in_progress'
   | 'paused'
   | 'completed'
@@ -77,6 +78,19 @@ export const JOB_STATUS_DISPLAY: Record<
   },
   assigned: {
     label: 'Assigned',
+    summaryBarClass: cnGlass(
+      GLASS,
+      'border-amber-300/70 bg-gradient-to-br from-amber-100/95 via-orange-50/75 to-amber-100/70 text-amber-950',
+      'dark:border-amber-700/45 dark:from-amber-950/45 dark:via-orange-950/20 dark:to-amber-900/30 dark:text-amber-200'
+    ),
+    badgeClass: cnGlass(
+      GLASS,
+      'border-amber-300/65 bg-gradient-to-br from-amber-100/90 to-orange-50/70 text-amber-950',
+      'dark:border-amber-700/40 dark:from-amber-950/40 dark:to-orange-950/20 dark:text-amber-200'
+    ),
+  },
+  accepted: {
+    label: 'Accepted',
     summaryBarClass: cnGlass(
       GLASS,
       'border-amber-300/70 bg-gradient-to-br from-amber-100/95 via-orange-50/75 to-amber-100/70 text-amber-950',

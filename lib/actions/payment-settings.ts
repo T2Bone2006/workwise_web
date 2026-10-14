@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { setCompanyLogoCore } from '@/lib/business/logo';
 import { savePaymentSettingsCore } from '@/lib/payments/money-core';
@@ -26,7 +26,7 @@ async function requireRounds(): Promise<
     }
   | { success: false; error: string }
 > {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not signed in' };
 
   const products = await getTenantProducts();

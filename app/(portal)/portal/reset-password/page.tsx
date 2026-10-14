@@ -1,23 +1,19 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+  AuthAlert,
+  AuthShell,
+  authButtonClassName,
+  authLinkClassName,
+} from '@/components/auth/auth-shell';
+import { PortalPasswordInput } from '@/components/portal/portal-password-input';
 
 const DEFAULT_ERROR_MESSAGE = 'This reset link is invalid or has expired.';
-const PORTAL_LOGIN_PATH = '/portal/login';
+const PORTAL_LOGIN_PATH = '/login';
 
 type PagePhase = 'interstitial' | 'loading' | 'form' | 'error';
 
@@ -116,146 +112,102 @@ function PortalResetPasswordContent() {
   }
 
   const title =
-    phase === 'interstitial'
+    phase === 'interstitial' || phase === 'loading'
       ? 'Reset your password'
       : phase === 'error'
         ? 'Reset link problem'
         : 'Set a new password';
 
-  const description =
-    phase === 'interstitial'
-      ? 'Click below to continue resetting your portal password'
-      : phase === 'loading'
-        ? 'Validating your reset link…'
-        : phase === 'form'
-          ? 'Choose a new password for the WorkWise customer portal'
-          : errorMessage ?? DEFAULT_ERROR_MESSAGE;
+  const subtitle =
+    phase === 'interstitial' || phase === 'loading'
+      ? 'Confirm this link, then choose a new password for the customer portal.'
+      : phase === 'form'
+        ? 'Choose a new password for the customer portal. At least 8 characters.'
+        : errorMessage ?? DEFAULT_ERROR_MESSAGE;
 
   return (
-    <div className="mx-auto w-full max-w-[400px]">
-      <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mb-6 flex justify-center">
-            <Image
-              src="/workwise_logo.png"
-              alt="WorkWise"
-              width={120}
-              height={120}
-              className="h-auto w-[120px] object-contain"
-              priority
-            />
+    <AuthShell title={title} subtitle={subtitle} side="neutral">
+      {phase === 'interstitial' ? (
+        <button type="button" className={authButtonClassName} onClick={() => void handleContinue()}>
+          Continue
+        </button>
+      ) : phase === 'loading' ? (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-[#5E5A54] dark:text-[#A9B6C8]">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Checking your link…
+        </div>
+      ) : phase === 'form' ? (
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {submitError ? <AuthAlert>{submitError}</AuthAlert> : null}
+          <PortalPasswordInput
+            id="password"
+            label="New password"
+            value={password}
+            onChange={(value) => {
+              setPassword(value);
+              setPasswordError(null);
+              setSubmitError(null);
+            }}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            error={passwordError}
+          />
+          <PortalPasswordInput
+            id="confirm-password"
+            label="Confirm password"
+            value={confirmPassword}
+            onChange={(value) => {
+              setConfirmPassword(value);
+              setConfirmError(null);
+              setSubmitError(null);
+            }}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            error={confirmError}
+          />
+          <div className="pt-1">
+            <button type="submit" className={authButtonClassName} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  Updating password…
+                </>
+              ) : (
+                'Set new password'
+              )}
+            </button>
           </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {phase === 'interstitial' ? (
-            <Button variant="gradient" className="w-full" onClick={() => void handleContinue()}>
-              Continue
-            </Button>
-          ) : phase === 'loading' ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-8">
-              <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
-              <p className="text-sm text-muted-foreground">Validating your reset link…</p>
-            </div>
-          ) : phase === 'form' ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  disabled={isSubmitting}
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setPasswordError(null);
-                    setSubmitError(null);
-                  }}
-                />
-                {passwordError ? <p className="text-sm text-destructive">{passwordError}</p> : null}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirm password</Label>
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  disabled={isSubmitting}
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    setConfirmError(null);
-                    setSubmitError(null);
-                  }}
-                />
-                {confirmError ? <p className="text-sm text-destructive">{confirmError}</p> : null}
-              </div>
-              {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}
-              <Button type="submit" variant="gradient" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                    Updating password…
-                  </>
-                ) : (
-                  'Set New Password'
-                )}
-              </Button>
-            </form>
-          ) : (
-            <p className="text-center text-sm text-muted-foreground">
-              This reset link is invalid or has expired.{' '}
-              <Link href="/portal/forgot-password" className="text-primary hover:underline">
-                Request a new link
-              </Link>
-              .
-            </p>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        </form>
+      ) : (
+        <p className="text-sm leading-relaxed text-[#5E5A54] dark:text-[#A9B6C8]">
+          This reset link is invalid or has expired.{' '}
+          <Link href="/forgot-password" className={authLinkClassName}>
+            Request a new link
+          </Link>
+          .
+        </p>
+      )}
+    </AuthShell>
   );
 }
 
-function PortalResetPasswordLoadingCard() {
+function PortalResetPasswordFallback() {
   return (
-    <div className="mx-auto w-full max-w-[400px]">
-      <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mb-6 flex justify-center">
-            <Image
-              src="/workwise_logo.png"
-              alt="WorkWise"
-              width={120}
-              height={120}
-              className="h-auto w-[120px] object-contain"
-              priority
-            />
-          </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            Reset your password
-          </CardTitle>
-          <CardDescription>
-            Click below to continue resetting your portal password
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="gradient" className="w-full" disabled>
-            Continue
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthShell
+      title="Reset your password"
+      subtitle="Confirm this link, then choose a new password for the customer portal."
+      side="neutral"
+    >
+      <button type="button" className={authButtonClassName} disabled>
+        Continue
+      </button>
+    </AuthShell>
   );
 }
 
 export default function PortalResetPasswordPage() {
   return (
-    <Suspense fallback={<PortalResetPasswordLoadingCard />}>
+    <Suspense fallback={<PortalResetPasswordFallback />}>
       <PortalResetPasswordContent />
     </Suspense>
   );

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { generateSeedWorkers, SEED_EMAIL_DOMAIN } from '@/lib/seed/workers';
 
 const MAX_SEED_COUNT = 100;
@@ -12,7 +12,7 @@ const MAX_SEED_COUNT = 100;
  */
 export async function POST(req: Request) {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return NextResponse.json({ error: 'Not authenticated or no tenant' }, { status: 401 });
     }
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
  */
 export async function DELETE() {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return NextResponse.json({ error: 'Not authenticated or no tenant' }, { status: 401 });
     }
@@ -139,7 +139,7 @@ export async function DELETE() {
  */
 export async function GET() {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return NextResponse.json({ error: 'Not authenticated or no tenant' }, { status: 401 });
     }

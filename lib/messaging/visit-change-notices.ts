@@ -36,6 +36,8 @@ type NoticeJob = HouseFields & {
   service_agreement_id: string | null;
   route_position: number | null;
   scheduled_time: string | null;
+  /** Where the visit is now. A push back moves each visit to its own day, so this is its new day. */
+  scheduled_date?: string | null;
 };
 
 type ClaimedChange = {
@@ -145,6 +147,7 @@ function noticeJob(raw: unknown): NoticeJob | null {
     route_position:
       typeof position === 'number' && Number.isFinite(position) ? position : null,
     scheduled_time: asId(row.scheduled_time),
+    scheduled_date: asYmd(row.scheduled_date),
   };
 }
 
@@ -214,7 +217,7 @@ async function loadJobs(
   const { data, error } = await admin
     .from('jobs')
     .select(
-      'id, customer_id, address, postcode, service_agreement_id, route_position, scheduled_time',
+      'id, customer_id, address, postcode, service_agreement_id, route_position, scheduled_time, scheduled_date',
     )
     .eq('tenant_id', tenantId)
     .in('id', jobIds);
@@ -367,6 +370,22 @@ function splitByOldDay(groups: NoticeJob[][], dates: Map<string, string | null>)
   return split;
 }
 
+/** A push back moves each visit to its own day, so a house's visits are told together only if they moved from and to the same days. */
+function splitByMove(groups: NoticeJob[][], dates: Map<string, string | null>): NoticeJob[][] {
+  const split: NoticeJob[][] = [];
+  for (const group of groups) {
+    const byMove = new Map<string, NoticeJob[]>();
+    for (const job of group) {
+      const key = `${dates.get(job.id) ?? ''}>${job.scheduled_date ?? ''}`;
+      const list = byMove.get(key);
+      if (list) list.push(job);
+      else byMove.set(key, [job]);
+    }
+    split.push(...byMove.values());
+  }
+  return split;
+}
+
 async function bodyForStop(
   admin: SupabaseClient,
   tenantId: string,
@@ -381,6 +400,12 @@ async function bodyForStop(
   if (isMoveKind(change.kind)) {
     const toDay = dayLabel(change.toDate);
     if (!toDay) return null;
+    return dayMovedSms({ brand, fromDay, toDay });
+  }
+  if (change.kind === 'push_back') {
+    // Each visit was moved to its own day; the job row says where it is now.
+    const toDay = dayLabel(first?.scheduled_date ?? null);
+    if (!toDay || toDay === fromDay) return null;
     return dayMovedSms({ brand, fromDay, toDay });
   }
   if (change.kind === 'swap_days') {
@@ -427,6 +452,8 @@ export async function notifyVisitChange(p: {
     const groups =
       change.kind === 'swap_days'
         ? splitByOldDay(groupHouseStops(jobs), change.dates)
+        : change.kind === 'push_back'
+        ? splitByMove(groupHouseStops(jobs), change.dates)
         : groupHouseStops(jobs);
     const ctx = await getTenantMessagingContext(admin, p.tenantId);
     const brand = ctx
@@ -488,7 +515,12 @@ export async function requestChangeNotice(
   if (change.notifiedAt) {
     return { success: true, alreadyTold: true, notified: emptyCounts() };
   }
-  if (change.kind !== 'reschedule' && change.kind !== 'move_remaining' && change.kind !== 'swap_days') {
+  if (
+    change.kind !== 'reschedule' &&
+    change.kind !== 'move_remaining' &&
+    change.kind !== 'swap_days' &&
+    change.kind !== 'push_back'
+  ) {
     return { success: false, error: 'Only moves can be told.' };
   }
   const tooLate =

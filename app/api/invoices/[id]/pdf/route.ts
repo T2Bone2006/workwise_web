@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getInvoice } from '@/lib/data/payments/invoices';
 import { getPaymentSettings } from '@/lib/data/payments/settings';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { renderInvoicePdf } from '@/lib/invoices/render';
 import { toInvoiceViewModel } from '@/lib/invoices/view-model';
 import { invoiceLinkUrl } from '@/lib/payments/tokens';
@@ -25,7 +25,7 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const supabase = await createClient();
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return new NextResponse(null, { status: 404 });
   }

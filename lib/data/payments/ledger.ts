@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PaymentMethod } from '@/lib/payments/money-core';
 import { sendsInvoice } from '@/lib/payments/terms';
 import { getCustomerBalance } from '@/lib/data/payments/owed';
+import { heldByField } from '@/lib/data/payments/history';
+import { isMissingHeldColumn } from '@/lib/books/money-in';
 
 export type LedgerVisit = {
   jobId: string;
@@ -40,6 +42,8 @@ export type LedgerPayment = {
   disputedAt: string | null;
   disputeStatus: string | null;
   voidReason: string | null;
+  /** The team member holding this cash for the owner, until it is handed over. Absent otherwise. */
+  heldBy?: string;
   allocations: { jobId: string; amount: number }[];
 };
 
@@ -199,6 +203,7 @@ function mapPayment(raw: Record<string, unknown>): LedgerPayment | null {
     disputedAt: asString(raw.disputed_at),
     disputeStatus: asString(raw.dispute_status),
     voidReason: asString(raw.void_reason),
+    ...heldByField(raw),
     allocations,
   };
 }
@@ -262,30 +267,37 @@ export async function getCustomerLedger(
       .not('payment_status', 'is', null)
       .order('completed_at', { ascending: false })
       .limit(50),
-    supabase
-      .from('payments')
-      .select(
-        [
-          'id',
-          'amount',
-          'refunded_amount',
-          'method',
-          'source',
-          'status',
-          'received_at',
-          'note',
-          'applies_to_job_id',
-          'invoice_id',
-          'disputed_at',
-          'dispute_status',
-          'void_reason',
-          'payment_allocations ( job_id, amount )',
-        ].join(', '),
-      )
-      .eq('tenant_id', tenantId)
-      .eq('customer_id', customerId)
-      .order('received_at', { ascending: false })
-      .limit(50),
+    (async () => {
+      const run = (withHeld: boolean) =>
+        supabase
+          .from('payments')
+          .select(
+            [
+              'id',
+              'amount',
+              'refunded_amount',
+              'method',
+              'source',
+              'status',
+              'received_at',
+              'note',
+              'applies_to_job_id',
+              'invoice_id',
+              'disputed_at',
+              'dispute_status',
+              'void_reason',
+              ...(withHeld ? ['collected_by_worker_id', 'collected_by_name', 'handed_over_at'] : []),
+              'payment_allocations ( job_id, amount )',
+            ].join(', '),
+          )
+          .eq('tenant_id', tenantId)
+          .eq('customer_id', customerId)
+          .order('received_at', { ascending: false })
+          .limit(50);
+      const first = await run(true);
+      // Before the Phase 9 migration is pasted there are no held-cash columns: ask again without them.
+      return first.error && isMissingHeldColumn(first.error) ? run(false) : first;
+    })(),
     supabase
       .from('payment_allocations')
       .select('job_id, charge_id, amount, payments!inner ( customer_id )')

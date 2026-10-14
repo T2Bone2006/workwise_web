@@ -9,6 +9,9 @@ import {
 import { getRecentJobsForCustomer } from '@/lib/data/jobs';
 import { getRoundsCustomerById } from '@/lib/data/rounds/customers';
 import { getRoundMembership } from '@/lib/data/rounds/round-membership';
+import { loadRoundLeads } from '@/lib/team/round-leads';
+import { validAssignees } from '@/lib/team/assign';
+import type { PickerRound } from '@/components/rounds/agreement-round-picker';
 import type { RoundRow } from '@/lib/rounds/rounds';
 import {
   getAgreementsForCustomer,
@@ -30,10 +33,13 @@ import {
   CustomerVisitsCard,
   type ForecastVisitRow,
 } from '@/components/rounds/customer-visits-card';
+import { format, parseISO } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, todayInLondon } from '@/lib/rounds/dates';
 import { CustomerHeader, type CustomerHeaderTag } from '@/components/rounds/customer-header';
+import { LooksFineButton } from '@/components/team/added-by-banner';
+import { getCustomerAddedBy } from '@/lib/data/rounds/added-by';
 import { NextVisitsCard, type NextVisit } from '@/components/rounds/next-visits-card';
 import { forecastVisits, type AgreementSchedule } from '@/lib/rounds/recurrence';
 import type { RoundsSettings } from '@/lib/rounds/settings';
@@ -189,9 +195,25 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       if (round) roundByAgreement[agreementId] = round;
     }
 
+    // Who usually does each round, so the round menu on a house can say so.
+    const pickerSupabase = await createClient();
+    const [roundLeads, assignees] = await Promise.all([
+      loadRoundLeads(pickerSupabase, tenantId).catch(() => new Map<string, string>()),
+      validAssignees(pickerSupabase, tenantId).catch(() => []),
+    ]);
+    const nameOf = new Map(assignees.map((a) => [a.workerId, a.name]));
+    const hasTeam = assignees.some((a) => !a.isOwner);
+    const pickerRounds: PickerRound[] = (membership?.rounds ?? []).map((r) => {
+      const lead = roundLeads.get(r.id);
+      return { ...r, leadName: lead ? (nameOf.get(lead) ?? null) : null };
+    });
+
     const optedOut =
       typeof messaging.flags?.messaging_opt_out_at === 'string' && messaging.flags.messaging_opt_out_at.trim() !== '';
+    const addedBy = await getCustomerAddedBy(tenantId, customerId);
+    const addedFirst = addedBy?.name.trim().split(/\s+/)[0] ?? '';
     const tags: CustomerHeaderTag[] = [];
+    if (addedBy && !addedBy.checkedAt) tags.push({ tone: 'amber', label: `Added by ${addedFirst}` });
     if (!customer.is_active) tags.push({ tone: 'slate', label: 'Inactive' });
     if (customer.is_active && agreements.length > 0 && live.length === 0) {
       tags.push(
@@ -233,15 +255,23 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
               }
             />
           }
+          addedNote={
+            addedBy?.checkedAt
+              ? `Added by ${addedBy.name}${addedBy.addedOn ? ` on ${format(parseISO(addedBy.addedOn.slice(0, 10)), 'd MMM')}` : ''}`
+              : null
+          }
           actions={
-            customer.is_active ? (
-              <CustomerDeleteButton
-                customerId={customerId}
-                customerName={customer.name}
-                useDeactivate
-                redirectTo={paths.customers}
-              />
-            ) : null
+            <>
+              {addedBy && !addedBy.checkedAt ? <LooksFineButton customerId={customerId} /> : null}
+              {customer.is_active ? (
+                <CustomerDeleteButton
+                  customerId={customerId}
+                  customerName={customer.name}
+                  useDeactivate
+                  redirectTo={paths.customers}
+                />
+              ) : null}
+            </>
           }
         />
 
@@ -264,6 +294,8 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
               customerId={customerId}
               agreements={agreements}
               roundByAgreement={roundByAgreement}
+              pickerRounds={pickerRounds}
+              hasTeam={hasTeam}
               fetchError={agreementsError?.message ?? null}
             />
             <div id="visits" className="scroll-mt-4">

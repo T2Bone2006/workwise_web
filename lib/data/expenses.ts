@@ -16,6 +16,8 @@ export type ExpenseRow = {
   source: 'receipt_scan' | 'manual';
   aiConfidence: number | null;
   createdAt: string;
+  /** The wages line made by recording a payment to a team member (changed on the Pay page, not here). */
+  isTeamPay?: boolean;
 };
 
 const COLUMNS =

@@ -12,6 +12,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import type { Ymd } from '@/lib/rounds/dates';
+import { segmentByRound, type RoundTag } from '@/lib/rounds/round-groups';
 import {
   canDropOn,
   canSwap,
@@ -34,7 +35,9 @@ export type DndActive =
       /** Set when only one job of a combined card is being moved: the card it came from stays put. */
       single: { stopId: string; jobId: string } | null;
     }
-  | { kind: 'day'; day: BoardDay };
+  | { kind: 'day'; day: BoardDay }
+  /** A whole round's houses on one day, picked up by the group's grip. Dropping on a day moves them all. */
+  | { kind: 'round'; fromDate: Ymd; round: RoundTag; stops: BoardStop[] };
 
 /**
  * Where a drop would land. For a card, `index` is the spot among that day's other stops
@@ -128,6 +131,7 @@ type Params = {
   scroller: RefObject<HTMLDivElement | null>;
   onDropCard: (active: Extract<DndActive, { kind: 'card' }>, target: DndTarget) => void;
   onDropDay: (active: Extract<DndActive, { kind: 'day' }>, target: DndTarget) => void;
+  onDropRound: (active: Extract<DndActive, { kind: 'round' }>, target: DndTarget) => void;
 };
 
 /**
@@ -220,6 +224,11 @@ export function useBoardDnd(params: Params) {
 
     if (current.kind === 'day') {
       setTarget({ date, valid: canSwap(current.day, day), index: 0, mergeStopId: null });
+      return;
+    }
+    if (current.kind === 'round') {
+      // Any coming day but the one it is on. It lands at the end of that day; no gap opens.
+      setTarget({ date, valid: canDropOn(day) && date !== current.fromDate, index: 0, mergeStopId: null });
       return;
     }
     if (!canDropOn(day)) {
@@ -433,6 +442,15 @@ export function useBoardDnd(params: Params) {
             single: { stopId: parent.id, jobId: single.id },
           };
         }
+      } else if (id.startsWith('roundhead:')) {
+        const date = event.active.data.current?.date as Ymd | undefined;
+        const roundId = event.active.data.current?.roundId as string | undefined;
+        const day = date ? dayAt(date) : null;
+        const segment = day ? segmentByRound(day.stops).find((seg) => seg.round?.id === roundId) : undefined;
+        const stops = segment?.stops.filter((s) => s.movable) ?? [];
+        if (day && segment?.round && stops.length > 0 && !day.isPast) {
+          next = { kind: 'round', fromDate: day.date, round: segment.round, stops };
+        }
       } else if (id.startsWith('dayhead:')) {
         const day = dayAt(id.slice(8));
         if (day && !day.isPast && day.stops.some((s) => s.movable)) next = { kind: 'day', day };
@@ -501,6 +519,11 @@ export function useBoardDnd(params: Params) {
       if (current.kind === 'day') {
         finish();
         latest.current.onDropDay(current, over);
+        return;
+      }
+      if (current.kind === 'round') {
+        finish();
+        latest.current.onDropRound(current, over);
         return;
       }
 

@@ -25,12 +25,17 @@ export type PaymentCsvRow = {
   method: string;
   source: string;
   note: string | null;
+  /** A team member collected this cash and handed it to the owner: their name. The date is the day it was handed over. */
+  collectedBy?: string | null;
 };
 
 export const PAYMENT_HEADERS = ['Date received', 'Customer', 'Amount', 'Refunded', 'Counted', 'Method', 'Source'];
 
 export function paymentsCsv(rows: PaymentCsvRow[], audience: Audience): CsvFile {
-  const headers = audience === 'trader' ? [...PAYMENT_HEADERS, 'Note'] : PAYMENT_HEADERS;
+  // The extra column appears only when someone on the team collected cash, so a business without a team gets the same file as before.
+  const showCollector = rows.some((r) => Boolean(r.collectedBy));
+  const head = showCollector ? [...PAYMENT_HEADERS, 'Collected by'] : PAYMENT_HEADERS;
+  const headers = audience === 'trader' ? [...head, 'Note'] : head;
   return file(
     'payments.csv',
     headers,
@@ -43,9 +48,21 @@ export function paymentsCsv(rows: PaymentCsvRow[], audience: Audience): CsvFile 
         Math.max(0, Math.round((r.amount - r.refunded) * 100) / 100),
         paymentMethodLabel(r.method),
         r.source,
+        ...(showCollector ? [r.collectedBy ?? ''] : []),
       ];
       return audience === 'trader' ? [...base, r.note] : base;
     }),
+  );
+}
+
+/** Cash and cheques the team has collected and not yet handed over. Not money in yet, so not in payments.csv. */
+export type HeldCashCsvRow = { takenOn: string; customerName: string; amount: number; method: string; heldBy: string };
+
+export function heldCashCsv(rows: HeldCashCsvRow[]): CsvFile {
+  return file(
+    'held-cash.csv',
+    ['Date taken', 'Customer', 'Amount', 'Method', 'Held by'],
+    rows.map((r) => [r.takenOn, r.customerName, r.amount, paymentMethodLabel(r.method), r.heldBy]),
   );
 }
 

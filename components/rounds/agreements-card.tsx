@@ -14,6 +14,7 @@ import {
 } from '@/lib/actions/rounds/agreements';
 import type { AgreementListRow } from '@/lib/data/rounds/agreements';
 import { RoundChip } from '@/components/rounds/round-chip';
+import { AgreementRoundPicker, type PickerRound } from '@/components/rounds/agreement-round-picker';
 import type { RoundRow } from '@/lib/rounds/rounds';
 import { frequencyLabel } from '@/lib/rounds/parse-frequency';
 import type { Ymd } from '@/lib/rounds/dates';
@@ -93,12 +94,17 @@ export function AgreementsCard({
   customerId,
   agreements,
   roundByAgreement,
+  pickerRounds,
+  hasTeam = false,
   fetchError = null,
 }: {
   customerId: string;
   agreements: AgreementListRow[];
   /** The named round each place is in, if any. */
   roundByAgreement?: Record<string, RoundRow>;
+  /** Every round, with who usually does it: lets the owner change a house's round right here. */
+  pickerRounds?: PickerRound[];
+  hasTeam?: boolean;
   fetchError?: string | null;
 }) {
   const router = useRouter();
@@ -163,7 +169,16 @@ export function AgreementsCard({
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium text-foreground">{agreement.title}</p>
             {statusBadge(agreement.status)}
-            {roundByAgreement?.[agreement.id] ? <RoundChip round={roundByAgreement[agreement.id]!} /> : null}
+            {pickerRounds && pickerRounds.length > 0 && agreement.status !== 'ended' ? (
+              <AgreementRoundPicker
+                agreementId={agreement.id}
+                currentRoundId={roundByAgreement?.[agreement.id]?.id ?? null}
+                rounds={pickerRounds}
+                hasTeam={hasTeam}
+              />
+            ) : roundByAgreement?.[agreement.id] ? (
+              <RoundChip round={roundByAgreement[agreement.id]!} />
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
             {[agreement.address, agreement.postcode].filter(Boolean).join(', ')}

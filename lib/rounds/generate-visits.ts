@@ -11,6 +11,7 @@ import {
   type AgreementSchedule,
 } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
+import { loadRoundLeads } from '@/lib/team/round-leads';
 import type { RoundsSettings } from '@/lib/rounds/settings';
 
 export const AGREEMENT_COLUMNS = [
@@ -36,6 +37,7 @@ export const AGREEMENT_COLUMNS = [
   'paused_until',
   'ended_at',
   'assigned_worker_id',
+  'round_id',
   'default_payment_method',
   'reminder_enabled',
   'access_notes',
@@ -76,6 +78,8 @@ export type AgreementRow = {
   paused_until: Ymd | null;
   ended_at: string | null;
   assigned_worker_id: string | null;
+  /** The named round this place is in (Phase 9: its usual lead decides who new visits go to). */
+  round_id?: string | null;
   default_payment_method:
     | 'cash'
     | 'bank_transfer'
@@ -198,6 +202,7 @@ export function mapAgreementRow(raw: Record<string, unknown>): AgreementRow | nu
     ended_at: typeof raw.ended_at === 'string' ? raw.ended_at : null,
     assigned_worker_id:
       typeof raw.assigned_worker_id === 'string' ? raw.assigned_worker_id : null,
+    ...(typeof raw.round_id === 'string' ? { round_id: raw.round_id } : {}),
     default_payment_method: asPaymentMethod(raw.default_payment_method),
     reminder_enabled: raw.reminder_enabled !== false,
     access_notes: typeof raw.access_notes === 'string' ? raw.access_notes : null,
@@ -272,6 +277,8 @@ export async function generateVisitsForAgreement(
     agreement: AgreementRow;
     settings: RoundsSettings;
     workerId: string | null;
+    /** The usual lead of the agreement's round, if it has one. Wins over the agreement's own assignee. */
+    roundLeadWorkerId?: string | null;
     today?: Ymd;
   },
 ): Promise<GenerateResult> {
@@ -302,7 +309,7 @@ export async function generateVisitsForAgreement(
   let inserted = 0;
   if (visits.length > 0) {
     const serviceName = await catalogName(supabase, params.agreement.service_catalog_id);
-    const workerId = params.agreement.assigned_worker_id ?? params.workerId;
+    const workerId = params.roundLeadWorkerId ?? params.agreement.assigned_worker_id ?? params.workerId;
     const rows = visits.map((visit) =>
       buildVisitInsert({
         tenantId: params.tenantId,
@@ -423,6 +430,7 @@ export async function generateVisitsForTenant(
   ]);
   const workerId = solo?.id ?? null;
   const horizon = horizonEnd(today, settings);
+  const roundLeads = await loadRoundLeads(supabase, params.tenantId);
 
   const pausedDue = await fetchAgreements(
     supabase,
@@ -476,6 +484,7 @@ export async function generateVisitsForTenant(
         agreement,
         settings,
         workerId,
+        roundLeadWorkerId: agreement.round_id ? (roundLeads.get(agreement.round_id) ?? null) : null,
         today,
       });
       inserted += result.inserted;

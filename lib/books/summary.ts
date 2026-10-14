@@ -9,6 +9,7 @@ import {
   type ExpenseOut,
   type PaymentIn,
 } from '@/lib/books/summary-pure';
+import { readMoneyInPayments } from '@/lib/books/money-in';
 import { readAllPages } from '@/lib/data/read-all-pages';
 import { londonDayBoundsUtc } from '@/lib/rounds/dates';
 
@@ -32,19 +33,14 @@ export async function loadBooksSummary(
   const endIso = londonDayBoundsUtc(period.to).endIso; // next London midnight, exclusive
 
   const [paymentRows, expenseRows, settings] = await Promise.all([
-    readAllPages((from, to) =>
-      db
-        .from('payments')
-        .select('amount, refunded_amount, received_at, method')
-        .eq('tenant_id', p.tenantId)
-        .eq('status', 'active')
-        .gte('received_at', startIso)
-        .lt('received_at', endIso)
-        .order('received_at', { ascending: true })
-        .order('id', { ascending: true })
-        .range(from, to),
-      'Could not load the books',
-    ),
+    // Money the owner has received: cash a team member is still holding is left out until it is handed over.
+    readMoneyInPayments(db, {
+      tenantId: p.tenantId,
+      columns: 'id, amount, refunded_amount, method',
+      fromIso: startIso,
+      toIso: endIso,
+      errorMessage: 'Could not load the books',
+    }),
     readAllPages((from, to) =>
       db
         .from('expenses')
@@ -67,7 +63,7 @@ export async function loadBooksSummary(
   if (settings.error) throw new Error('Could not load the books');
 
   const payments: PaymentIn[] = paymentRows.map((r) => ({
-    receivedAt: String(r.received_at),
+    receivedAt: r.book_at,
     amount: num(r.amount),
     refundedAmount: num(r.refunded_amount),
     method: String(r.method ?? 'other'),

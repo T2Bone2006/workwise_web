@@ -96,6 +96,8 @@ export function VisitStopCard({
   dimmed,
   isNext,
   brand,
+  assignee,
+  compact,
 }: {
   visit: VisitRow;
   /** Other services at the same house on this day, including `visit`. */
@@ -109,6 +111,10 @@ export function VisitStopCard({
   /** The next stop still to do (blue, like the phone). */
   isNext?: boolean;
   brand: SmsBrand;
+  /** Who has this visit and a Give to… menu, when the business has a team. */
+  assignee?: ReactNode;
+  /** In a narrow lane: always stack the details above the buttons, whatever the screen width. */
+  compact?: boolean;
 }) {
   const services = visits && visits.length > 0 ? visits : [visit];
   const several = services.length > 1;
@@ -139,7 +145,7 @@ export function VisitStopCard({
         aria-hidden
       />
 
-      <div className="relative flex flex-col gap-3 p-3 pl-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:p-4 sm:pl-5">
+      <div className={cn('relative flex flex-col gap-3 p-3 pl-4', !compact && 'sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:p-4 sm:pl-5')}>
         <div className="flex min-w-0 flex-1 gap-2.5 sm:gap-3">
           {leading}
           {position != null ? (
@@ -197,6 +203,7 @@ export function VisitStopCard({
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               <span className="font-mono tabular-nums">{visit.reference_number}</span>
+              {assignee}
               {skippedWhy ? (
                 <span className="text-(--tone-rose-text)">
                   · {skippedWhy}
@@ -206,7 +213,7 @@ export function VisitStopCard({
           </div>
         </div>
 
-        <div className="w-full space-y-2 sm:w-auto sm:shrink-0 sm:pt-0.5">
+        <div className={cn('w-full space-y-2', !compact && 'sm:w-auto sm:shrink-0 sm:pt-0.5')}>
           {services.map((row) => (
             <div key={row.id} className="flex flex-wrap items-center justify-between gap-2">
               {several ? (

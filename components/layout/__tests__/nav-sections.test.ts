@@ -57,6 +57,7 @@ describe('buildNavSections for workers', () => {
   it('leaves everyone who is not a worker exactly as before', () => {
     const pro = featuresFromProducts(products({ products: ['pro'], isPro: true, primary: 'pro' }));
     expect(hrefs(pro)).toContain('/jobs');
+    expect(hrefs(pro)).toContain('/jobs/calendar');
     expect(hrefs(pro)).not.toContain('/worker');
     const rounds = featuresFromProducts(products({ products: ['rounds'], hasRounds: true, primary: 'rounds' }));
     expect(hrefs(rounds)).toContain('/calendar');

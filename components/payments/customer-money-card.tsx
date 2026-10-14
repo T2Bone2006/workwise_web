@@ -170,6 +170,9 @@ export function CustomerMoneyCard({
             {formatReceived(payment.receivedAt)} · {paymentMethodLabel(payment.method)} ·{' '}
             {formatGbp(payment.amount)}
           </p>
+          {payment.heldBy ? (
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">With {payment.heldBy}, not handed in yet</p>
+          ) : null}
           {refunded ? (
             <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
               Refunded {formatGbp(payment.refundedAmount)}

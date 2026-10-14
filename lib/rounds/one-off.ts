@@ -3,6 +3,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { oneOffReferenceNumber } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
+import { leadForCustomer } from '@/lib/team/round-leads';
 import type { Actor } from '@/lib/rounds/visit-transitions';
 import { resolveJobCoordinates } from '@/lib/utils/geocoding';
 import type { OneOffVisitValues } from '@/lib/validations/rounds/visit';
@@ -92,7 +93,7 @@ export async function listOneOffCustomerOptions(
 /** Insert one visit not tied to an agreement. Shared by the dashboard action and the phone API. */
 export async function createOneOffVisitCore(
   supabase: SupabaseClient,
-  p: { tenantId: string; actor: Actor; values: OneOffVisitValues },
+  p: { tenantId: string; actor: Actor; values: OneOffVisitValues; assignedWorkerId?: string | null },
 ): Promise<{ success: true; jobId: string } | { success: false; error: string }> {
   const { tenantId, actor, values } = p;
 
@@ -122,7 +123,7 @@ export async function createOneOffVisitCore(
       tenant_id: tenantId,
       reference_number: oneOffReferenceNumber(values.scheduled_date, random4hex()),
       customer_id: values.customer_id,
-      assigned_worker_id: solo?.id ?? null,
+      assigned_worker_id: p.assignedWorkerId ?? (await leadForCustomer(supabase, tenantId, values.customer_id)) ?? solo?.id ?? null,
       service_agreement_id: null,
       agreement_occurrence_date: null,
       address: values.address,

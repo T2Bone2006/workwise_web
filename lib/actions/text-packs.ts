@@ -2,7 +2,7 @@
 
 import { createTextPackCheckout } from '@/lib/messaging/text-packs';
 import type { TextPackKey } from '@/lib/messaging/credits';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -10,7 +10,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 export async function startTextPackCheckout(
   packKey: string,
 ): Promise<{ url: string } | { error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { error: 'Not signed in' };
 
   const products = await getTenantProducts();

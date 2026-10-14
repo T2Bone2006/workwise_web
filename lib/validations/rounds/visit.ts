@@ -30,6 +30,8 @@ export const moveRemainingSchema = z.object({
   toDate: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   scheduledTime: hhmmTimeSchema,
   notifyCustomers: z.boolean().optional(),
+  /** Only this person's leftovers (the calendar's lanes). Left out = everyone's, as before. */
+  workerId: z.string().uuid('Invalid person').optional(),
 });
 
 export type MoveRemainingInput = z.input<typeof moveRemainingSchema>;
@@ -83,6 +85,8 @@ export type OneOffVisitValues = z.output<typeof oneOffVisitSchema>;
 export const skipRemainingSchema = z.object({
   date: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   notifyCustomers: z.boolean().optional(),
+  /** Only this person's leftovers. Left out = everyone's, as before. */
+  workerId: z.string().uuid('Invalid person').optional(),
 });
 
 export type SkipRemainingInput = z.input<typeof skipRemainingSchema>;
@@ -105,6 +109,14 @@ export const moveStopSchema = z.object({
   orderedJobIds: z.array(z.string().uuid('Invalid job')).max(300).optional(),
 });
 
+/** A whole round's houses for one day, moved together. One logged change, so one Undo. */
+export const moveRoundSchema = z.object({
+  jobIds: z.array(z.string().uuid('Invalid job')).min(1).max(300),
+  toDate: boardYmd,
+});
+
+export type MoveRoundInput = z.input<typeof moveRoundSchema>;
+
 export type MoveStopInput = z.input<typeof moveStopSchema>;
 export type MoveStopValues = z.output<typeof moveStopSchema>;
 
@@ -122,3 +134,33 @@ export const tellChangeSchema = z.object({ changeId: z.string().uuid('Invalid ch
 
 export type TellChangeInput = z.input<typeof tellChangeSchema>;
 export type TellChangeValues = z.output<typeof tellChangeSchema>;
+
+export const reassignVisitsSchema = z.object({
+  jobIds: z.array(z.string().uuid('Invalid job')).min(1).max(100),
+  toWorkerId: z.string().uuid('Invalid person'),
+});
+export type ReassignVisitsInput = z.input<typeof reassignVisitsSchema>;
+
+export const giveRoundSchema = z.object({
+  date: z.string().refine(isValidYmd, { message: 'Invalid date' }),
+  fromWorkerId: z.string().uuid('Invalid person'),
+  toWorkerId: z.string().uuid('Invalid person'),
+  roundId: z.string().uuid('Invalid round').nullable().optional(),
+});
+export type GiveRoundInput = z.input<typeof giveRoundSchema>;
+
+export const setUsualLeadSchema = z.object({
+  roundId: z.string().uuid('Invalid round'),
+  workerId: z.string().uuid('Invalid person').nullable(),
+});
+export type SetUsualLeadInput = z.input<typeof setUsualLeadSchema>;
+
+export const pushBackSchema = z
+  .object({
+    workerId: z.string().uuid('Invalid person'),
+    offFrom: z.string().refine(isValidYmd, { message: 'Invalid date' }),
+    offTo: z.string().refine(isValidYmd, { message: 'Invalid date' }),
+    notifyCustomers: z.boolean().optional(),
+  })
+  .refine((v) => v.offTo >= v.offFrom, { message: 'The last day can’t be before the first day.', path: ['offTo'] });
+export type PushBackInputValues = z.input<typeof pushBackSchema>;

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { TEAM_PAY_EXPENSE_MESSAGE, expenseIsTeamPay } from '@/lib/data/expenses-team-pay';
 import { RECEIPT_BUCKET } from '@/lib/expenses/read-receipt';
 import { roundMoney } from '@/lib/money/pence';
 import type { AddExpense, SaveExpense } from '@/lib/validations/expenses';
@@ -65,6 +66,7 @@ export async function saveExpenseCore(
   db: SupabaseClient,
   p: { tenantId: string; values: SaveExpense },
 ): Promise<ExpenseCoreResult> {
+  if (await expenseIsTeamPay(db, p.tenantId, p.values.expenseId)) return { ok: false, error: TEAM_PAY_EXPENSE_MESSAGE };
   const { data: existing, error: readError } = await db
     .from('expenses')
     .select('id, confirmed_at')
@@ -101,6 +103,7 @@ export async function deleteExpenseCore(
   admin: SupabaseClient,
   p: { tenantId: string; expenseId: string },
 ): Promise<ExpenseCoreResult> {
+  if (await expenseIsTeamPay(db, p.tenantId, p.expenseId)) return { ok: false, error: TEAM_PAY_EXPENSE_MESSAGE };
   const { data, error } = await db
     .from('expenses')
     .delete()

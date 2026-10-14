@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { serviceSchema, type ServiceInput } from '@/lib/validations/rounds/service';
 
 export type ActionResult = { success: true } | { success: false; error: string };
@@ -58,7 +58,7 @@ function toInsertRow(
 export async function createService(
   input: ServiceInput,
 ): Promise<{ success: true; id: string } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const parsed = serviceSchema.safeParse(input);
@@ -91,7 +91,7 @@ export async function updateService(
   id: string,
   input: ServiceInput,
 ): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -126,7 +126,7 @@ export async function updateService(
 }
 
 export async function deactivateService(id: string): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const idParsed = uuidSchema.safeParse(id);
@@ -153,7 +153,7 @@ const groupKeySchema = z.string().regex(/^[a-z_]+$/, 'Unknown preset group');
 export async function addServicePresets(
   group: string,
 ): Promise<{ success: true; added: number; label: string } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const groupParsed = groupKeySchema.safeParse(group);

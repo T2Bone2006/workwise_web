@@ -30,6 +30,7 @@ export function CustomerHeader({
   places,
   actions,
   editPanel,
+  addedNote,
 }: {
   name: string;
   place: string | null;
@@ -45,6 +46,8 @@ export function CustomerHeader({
   actions: React.ReactNode;
   /** The editable fields, shown when Edit is open. */
   editPanel: React.ReactNode;
+  /** A quiet line for a customer a member of staff added and the owner has checked: "Added by Dave on 3 Oct". */
+  addedNote?: string | null;
 }) {
   const [editing, setEditing] = useState(false);
   const phoneLabel = formatUkPhoneDisplay(phoneE164) || phone?.trim() || null;
@@ -99,6 +102,7 @@ export function CustomerHeader({
                 {email ? <CopyChip kind="email" label="Email" value={email} /> : null}
               </div>
             ) : null}
+            {addedNote ? <p className="mt-2 text-xs text-muted-foreground">{addedNote}</p> : null}
             {access ? (
               <p className="mt-2.5 flex items-start gap-1.5 text-sm text-amber-900 dark:text-amber-200">
                 <KeyRound className="mt-0.5 size-3.5 shrink-0" aria-hidden />

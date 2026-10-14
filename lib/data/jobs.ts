@@ -13,11 +13,18 @@ import {
   type FieldFilterValueOption,
   type SystemFilterFieldKey,
 } from '@/lib/jobs/field-filter';
+import {
+  buildFieldGroupValueFilter,
+  decodeFieldGroupRef,
+  valueForFieldGroup,
+  type FieldGroup,
+} from '@/lib/jobs/field-groups';
+import { getFieldGroupsForTenant } from '@/lib/data/field-groups';
 import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
 import {
-  isJobsListColumnKey,
+  isJobsListColumnId,
   getDefaultJobsListColumns,
-  type JobsListColumnKey,
+  type JobsListColumnId,
 } from '@/lib/data/settings-types';
 
 export type { JobMatchPill };
@@ -85,6 +92,11 @@ export interface JobRow {
   /** Group this job travels with (see job_groups); null/undefined = ungrouped. */
   job_group_id?: string | null;
   job_group_label?: string | null;
+  /**
+   * When `status` is cancelled: the time the office chose, from
+   * `job_status_history.created_at`. Absent on other statuses.
+   */
+  cancelled_at?: string | null;
 }
 
 /** JobRow plus lifecycle timestamps/notes needed for export — not fetched by the paginated list query. */
@@ -230,8 +242,18 @@ function toError(err: unknown): Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JobsQuery = any;
 
+/** Field groups, fetched only when the filters actually name one. */
+async function groupsNeededBy(tenantId: string, filters: JobsFilters): Promise<FieldGroup[]> {
+  const needs = (filters.field_filters ?? []).some((f) => decodeFieldGroupRef(f.field) !== null);
+  return needs ? getFieldGroupsForTenant(tenantId) : [];
+}
+
 /** Applies the shared status/priority/customer/date/search filters used by both the paginated list and export. */
-function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
+function applyJobsFilters(
+  query: JobsQuery,
+  filters: JobsFilters,
+  groups: FieldGroup[] = []
+): JobsQuery {
   let q = query;
   if (filters.status) {
     if (Array.isArray(filters.status) && filters.status.length > 0) {
@@ -278,12 +300,35 @@ function applyJobsFilters(query: JobsQuery, filters: JobsFilters): JobsQuery {
   const fieldFilters = filters.field_filters ?? [];
   for (const { field, value } of fieldFilters) {
     if (!field?.trim() || value == null || value === '') continue;
-    q = applyFieldValueFilter(q, field.trim(), value);
+    q = applyFieldValueFilter(q, field.trim(), value, groups);
   }
   return q;
 }
 
-function applyFieldValueFilter(query: JobsQuery, field: string, value: string): JobsQuery {
+function applyFieldGroupFilter(
+  query: JobsQuery,
+  group: FieldGroup,
+  value: string
+): JobsQuery {
+  if (group.aliases.length === 0) return query.is('id', null); // a field with no columns matches nothing
+  if (group.aliases.length === 1) {
+    return query.contains('source_fields', { [group.aliases[0]]: value });
+  }
+  return query.or(buildFieldGroupValueFilter(group.aliases, value));
+}
+
+function applyFieldValueFilter(
+  query: JobsQuery,
+  field: string,
+  value: string,
+  groups: FieldGroup[] = []
+): JobsQuery {
+  const groupId = decodeFieldGroupRef(field);
+  if (groupId) {
+    const group = groups.find((g) => g.id === groupId);
+    // A field that has since been deleted: ignore the stale filter rather than empty the list.
+    return group ? applyFieldGroupFilter(query, group, value) : query;
+  }
   if (isSourceFieldFilter(field)) {
     const key = decodeSourceFieldFilter(field);
     if (!key) return query;
@@ -316,7 +361,11 @@ function applyJobsListSort(query: JobsQuery, filters: JobsFilters): JobsQuery {
   return query.order(sortCol, { ascending }).order('id', { ascending: false });
 }
 
-function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow {
+function mapJobRow(
+  row: Record<string, unknown>,
+  filters?: JobsFilters,
+  groups: FieldGroup[] = []
+): JobRow {
   const customer = row.customer as { id?: string; name?: string } | null;
   const worker = row.worker as { id?: string; full_name?: string } | null;
   const jobGroup = row.job_group as { id?: string; label?: string } | null;
@@ -368,7 +417,7 @@ function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow 
     });
   } else if (filters?.field_filters && filters.field_filters.length > 0) {
     const pills = filters.field_filters
-      .map((f) => pillForActiveFieldFilter(mapped, f.field, f.value))
+      .map((f) => pillForActiveFieldFilter(mapped, f.field, f.value, groups))
       .filter((p): p is JobMatchPill => !!p)
       .slice(0, 3);
     if (pills.length > 0) mapped.match_pills = pills;
@@ -380,8 +429,18 @@ function mapJobRow(row: Record<string, unknown>, filters?: JobsFilters): JobRow 
 function pillForActiveFieldFilter(
   job: JobRow,
   field: string,
-  value: string
+  value: string,
+  groups: FieldGroup[] = []
 ): JobMatchPill | null {
+  const groupId = decodeFieldGroupRef(field);
+  if (groupId) {
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return null;
+    // Show the value that matched the filter, even if the job also has another header of the group.
+    const matched = group.aliases.find((a) => job.source_fields?.[a]?.trim() === value);
+    const actual = matched ? value : valueForFieldGroup(group, job.source_fields);
+    return actual ? { label: `${group.name}: ${actual}` } : null;
+  }
   if (isSourceFieldFilter(field)) {
     const key = decodeSourceFieldFilter(field);
     if (!key) return null;
@@ -455,7 +514,8 @@ export async function getJobsForTenant(
       .eq('tenant_id', tenantId)
       .range(from, to);
 
-    query = applyJobsFilters(query, filters);
+    const groups = await groupsNeededBy(tenantId, filters);
+    query = applyJobsFilters(query, filters, groups);
     query = applyJobsListSort(query, filters);
 
     const { data, error, count } = await query;
@@ -470,8 +530,9 @@ export async function getJobsForTenant(
     }
 
     const jobs: JobRow[] = (Array.isArray(data) ? data : []).map((row) =>
-      mapJobRow(row as Record<string, unknown>, filters)
+      mapJobRow(row as Record<string, unknown>, filters, groups)
     );
+    await attachCancellationTimes(supabase, jobs);
 
     return {
       jobs,
@@ -520,7 +581,8 @@ export async function getJobsForExport(
       .eq('tenant_id', tenantId)
       .range(0, cappedLimit - 1);
 
-    query = applyJobsFilters(query, filters);
+    const groups = await groupsNeededBy(tenantId, filters);
+    query = applyJobsFilters(query, filters, groups);
     query = applyJobsListSort(query, filters);
 
     const { data, error } = await query;
@@ -568,6 +630,23 @@ export async function getJobsForExport(
 }
 
 const EXPORT_HISTORY_CHUNK = 150;
+
+/** Fills `cancelled_at` for cancelled rows on this page from status history. */
+async function attachCancellationTimes(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  jobs: JobRow[]
+): Promise<void> {
+  const cancelled = jobs.filter((job) => job.status === 'cancelled');
+  if (cancelled.length === 0) return;
+  const times = await loadStatusSetAtTimes(
+    supabase,
+    cancelled.map((job) => ({ id: job.id, status: job.status }))
+  );
+  for (const job of cancelled) {
+    job.cancelled_at = times.get(job.id) ?? null;
+  }
+}
 
 /**
  * Latest `job_status_history.created_at` where `to_status` matches each job's
@@ -1240,7 +1319,7 @@ export async function getRecentJobsForCustomer(
  */
 export async function getJobsListColumnsForTenant(
   tenantId: string
-): Promise<JobsListColumnKey[]> {
+): Promise<JobsListColumnId[]> {
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
@@ -1256,7 +1335,7 @@ export async function getJobsListColumnsForTenant(
       ?.columns;
     if (!Array.isArray(stored)) return getDefaultJobsListColumns();
     const filtered = stored.filter(
-      (key): key is JobsListColumnKey => typeof key === 'string' && isJobsListColumnKey(key)
+      (key): key is JobsListColumnId => typeof key === 'string' && isJobsListColumnId(key)
     );
     return filtered.length > 0 ? filtered : getDefaultJobsListColumns();
   } catch (err) {
@@ -1321,6 +1400,37 @@ export async function getFieldFilterValuesForTenant(
 ): Promise<{ values: FieldFilterValueOption[]; error: Error | null }> {
   try {
     if (!field.trim()) return { values: [], error: null };
+
+    const groupId = decodeFieldGroupRef(field);
+    if (groupId) {
+      const group = (await getFieldGroupsForTenant(tenantId)).find((g) => g.id === groupId);
+      if (!group || group.aliases.length === 0) return { values: [], error: null };
+      const supabase = await createClient();
+      let groupQuery = supabase
+        .from('jobs')
+        .select('source_fields')
+        .eq('tenant_id', tenantId);
+      if (customerId) groupQuery = groupQuery.eq('customer_id', customerId);
+      const { data, error } = await groupQuery.limit(SOURCE_FIELDS_SCAN_LIMIT);
+      if (error) {
+        console.error('[getFieldFilterValuesForTenant] group', error);
+        return { values: [], error: toError(error) };
+      }
+      const values = new Set<string>();
+      for (const row of data ?? []) {
+        const fields = parseSourceFields((row as { source_fields?: unknown }).source_fields);
+        for (const alias of group.aliases) {
+          const v = fields[alias]?.trim();
+          if (v) values.add(v);
+        }
+      }
+      return {
+        values: [...values]
+          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          .map((v) => ({ value: v, label: v })),
+        error: null,
+      };
+    }
 
     if (isSourceFieldFilter(field)) {
       const key = decodeSourceFieldFilter(field);

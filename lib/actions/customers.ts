@@ -13,7 +13,8 @@ import {
 } from '@/lib/payments/charges-core';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
-import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { contactChoiceToColumn } from '@/lib/messaging/channel';
@@ -31,7 +32,7 @@ const LEAD_LINK_WARNING = "Customer added, but it couldn't be linked to the enqu
 
 async function linkFromLead(leadId: string, customerId: string): Promise<string | undefined> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) return LEAD_LINK_WARNING;
     const linked = await linkLeadToCustomer(createAdminClient(), {
       tenantId,
@@ -197,7 +198,7 @@ export async function createRoundsCustomer(formData: FormData): Promise<
   if (owesFromBefore > 0) {
     const supabase = await createClient();
     const [tenantId, { data: { user } }] = await Promise.all([
-      getTenantIdForCurrentUser(),
+      getOwnerTenantId(),
       supabase.auth.getUser(),
     ]);
     const charge = tenantId
@@ -398,7 +399,7 @@ export async function deleteCustomer(customerId: string) {
 }
 
 export async function deactivateCustomer(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -510,7 +511,7 @@ export async function deactivateCustomer(customerId: string) {
 }
 
 export async function reactivateCustomer(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -545,7 +546,7 @@ export async function reactivateCustomer(customerId: string) {
 }
 
 export async function getCustomerActiveJobCount(customerId: string): Promise<number> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return 0;
 
   const supabase = await createClient();
@@ -960,7 +961,7 @@ export async function inviteCustomerToPortal(customerId: string) {
 
 
 export async function revokeCustomerInvite(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1037,7 +1038,7 @@ export async function revokeCustomerInvite(inviteId: string) {
 }
 
 export async function resendCustomerInvite(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1114,7 +1115,7 @@ export async function resendCustomerInvite(inviteId: string) {
 
 
 export async function deactivateCustomerPortalAccess(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1190,7 +1191,7 @@ export async function deactivateCustomerPortalAccess(customerId: string) {
 }
 
 export async function reactivateCustomerPortalAccess(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1250,7 +1251,7 @@ export async function updateCustomerWorkerFields(
   customerId: string,
   fields: WorkerVisibleField[]
 ): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated' };
   }

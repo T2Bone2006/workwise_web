@@ -26,6 +26,17 @@ export function fakeDb(tables: Record<string, Row[]> = {}, opts: { files?: Recor
       b.gte = (k: string, v: number | string) => { preds.push((r) => (r[k] as number | string) >= v); return b; };
       b.lt = (k: string, v: number | string) => { preds.push((r) => (r[k] as number | string) < v); return b; };
       b.lte = (k: string, v: number | string) => { preds.push((r) => (r[k] as number | string) <= v); return b; };
+      b.not = (k: string, op: string, v: unknown) => { preds.push((r) => (op === 'is' && v === null ? (r[k] ?? null) !== null : !((v as unknown[]) ?? []).includes?.(r[k]))); return b; };
+      b.or = (expr: string) => {
+        const terms = expr.split(',').map((t) => {
+          const [col, ...rest] = t.trim().split('.');
+          const op = rest.join('.');
+          return (r: Row) => (op === 'is.null' ? (r[col] ?? null) === null : op === 'not.is.null' ? (r[col] ?? null) !== null : false);
+        });
+        preds.push((r) => terms.some((f) => f(r)));
+        return b;
+      };
+      b.limit = () => b;
       b.order = () => b;
       b.range = (a: number, z: number) => { range = [a, z]; return b; };
       const run = () => {

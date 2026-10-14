@@ -1,18 +1,24 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Building2,
   Calculator,
+  ClipboardCheck,
   User,
   AlertTriangle,
   CreditCard,
+  Layers,
   MessageSquare,
   Route,
   Wallet,
+  Wrench,
+  type LucideIcon,
 } from 'lucide-react';
+import { parseFieldGroups } from '@/lib/jobs/field-groups';
+import { parseJobReportFields } from '@/lib/jobs/job-report-fields';
 import { useLook } from '@/components/look/use-look';
 import { cn } from '@/lib/utils';
 import type { SettingsPageData } from '@/lib/data/settings-types';
@@ -27,6 +33,9 @@ import type { AccessSummary } from '@/lib/accountant/access';
 import { SettingsUserTab } from './settings-user-tab';
 import { SettingsDangerTab } from './settings-danger-tab';
 import { SettingsRoundsTab } from './settings-rounds-tab';
+import { SettingsJobReportSection } from './settings-job-report-section';
+import { SettingsSkillsSection } from './settings-skills-section';
+import { SettingsFieldGroupsSection } from './settings-field-groups-section';
 import {
   SettingsMessagesSection,
   useMessagingSectionData,
@@ -59,6 +68,9 @@ interface SettingsViewProps {
 /** The new look's shorter tab names. Classic (Pro) keeps its own. */
 const NEW_LABELS: Record<string, string> = {
   company: 'Company',
+  completion: 'Job completion',
+  skills: 'Skills',
+  'job-fields': 'Job fields',
   rounds: 'Rounds',
   messages: 'Messages',
   payments: 'Payments',
@@ -68,12 +80,18 @@ const NEW_LABELS: Record<string, string> = {
   danger: 'Danger zone',
 };
 
-const baseTabs = [
+interface SettingsTab {
+  value: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const baseTabs: SettingsTab[] = [
   { value: 'company', label: 'Company Settings', icon: Building2 },
   { value: 'billing', label: 'Billing', icon: CreditCard },
   { value: 'profile', label: 'User Profile', icon: User },
   { value: 'danger', label: 'Danger Zone', icon: AlertTriangle },
-] as const;
+];
 
 export function SettingsView({
   initialData,
@@ -95,9 +113,25 @@ export function SettingsView({
   const fresh = useLook() === 'new';
   const onSaved = () => router.refresh();
   const messaging = useMessagingSectionData();
-  const tabs = rounds
+  const isAdmin = initialData.user?.role === 'admin';
+  const showCompletion = showSkills && isAdmin;
+  const showJobFields = showSkills && isAdmin;
+  const storedSettings = initialData.tenant?.settings;
+  const jobReportFields = useMemo(
+    () => parseJobReportFields(storedSettings?.job_report_fields),
+    [storedSettings?.job_report_fields]
+  );
+  const fieldGroups = useMemo(
+    () => parseFieldGroups(storedSettings?.field_groups),
+    [storedSettings?.field_groups]
+  );
+  const proTabs: SettingsTab[] = [
+    ...(showCompletion ? [{ value: 'completion', label: 'Job Completion', icon: ClipboardCheck }] : []),
+    ...(showSkills ? [{ value: 'skills', label: 'Skills', icon: Wrench }] : []),
+    ...(showJobFields ? [{ value: 'job-fields', label: 'Job Fields', icon: Layers }] : []),
+  ];
+  const roundsTabs: SettingsTab[] = rounds
     ? [
-        baseTabs[0],
         { value: 'rounds', label: 'Rounds', icon: Route },
         ...(messaging
           ? [{ value: 'messages', label: 'Customer messages', icon: MessageSquare }]
@@ -108,13 +142,11 @@ export function SettingsView({
         ...(accountant
           ? [{ value: 'accountant', label: 'Accountant & data', icon: Calculator }]
           : []),
-        ...baseTabs.slice(1),
       ]
-    : [...baseTabs];
+    : [];
+  const tabs = [baseTabs[0], ...proTabs, ...roundsTabs, ...baseTabs.slice(1)];
   const tabValues = new Set(tabs.map((item) => item.value));
-  const initialTab = defaultTab && tabValues.has(defaultTab as (typeof tabs)[number]['value'])
-    ? defaultTab
-    : 'company';
+  const initialTab = defaultTab && tabValues.has(defaultTab) ? defaultTab : 'company';
   const [tab, setTab] = useState(initialTab);
   const [formDirty, setFormDirty] = useState(false);
 
@@ -181,14 +213,31 @@ export function SettingsView({
         <TabsContent value="company" className="mt-0 outline-none">
           <SettingsCompanyTab
             data={initialData}
-            initialTenantSkills={initialTenantSkills}
-            showSkills={showSkills}
             companyLogoUrl={companyLogoUrl}
             showLogo={Boolean(payments)}
             onSaved={onSaved}
             onDirtyChange={setFormDirty}
           />
         </TabsContent>
+        {showCompletion && (
+          <TabsContent value="completion" className="mt-0 outline-none">
+            <SettingsJobReportSection initialFields={jobReportFields} onSaved={onSaved} />
+          </TabsContent>
+        )}
+        {showSkills && initialData.tenant && (
+          <TabsContent value="skills" className="mt-0 outline-none">
+            <SettingsSkillsSection
+              tenantId={initialData.tenant.id}
+              initialSkills={initialTenantSkills}
+              onSaved={onSaved}
+            />
+          </TabsContent>
+        )}
+        {showJobFields && (
+          <TabsContent value="job-fields" className="mt-0 outline-none">
+            <SettingsFieldGroupsSection initialGroups={fieldGroups} onSaved={onSaved} />
+          </TabsContent>
+        )}
         {rounds && (
           <TabsContent value="rounds" className="mt-0 outline-none">
             <SettingsRoundsTab

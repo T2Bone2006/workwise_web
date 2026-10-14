@@ -19,7 +19,8 @@ export type OwnerPushKind =
   | 'dd_failed'
   | 'dd_cancelled'
   | 'dd_active'
-  | 'dd_attention';
+  | 'dd_attention'
+  | 'cash_handin';
 
 export type OwnerPush = {
   kind: OwnerPushKind;

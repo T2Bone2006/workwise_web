@@ -23,6 +23,8 @@ export type TenantFeatures = {
   workerOnly: boolean;
   /** The employer's business name, for the 'Work for …' block. */
   workerEmployer: string | null;
+  /** The employer is a Rounds business, so the worker area's third tab reads "Visits", not "Jobs". */
+  workerEmployerIsRounds?: boolean;
 };
 
 export function featuresFromProducts(products: TenantProducts): TenantFeatures {
@@ -41,7 +43,7 @@ export function featuresFromProducts(products: TenantProducts): TenantFeatures {
 }
 
 /** The sidebar shape for an employee: the worker area and nothing from the office. */
-export function employeeFeatures(employerName: string | null): TenantFeatures {
+export function employeeFeatures(employerName: string | null, employerIsRounds = false): TenantFeatures {
   return {
     pro: false,
     rounds: false,
@@ -53,6 +55,7 @@ export function employeeFeatures(employerName: string | null): TenantFeatures {
     worker: true,
     workerOnly: true,
     workerEmployer: employerName,
+    ...(employerIsRounds ? { workerEmployerIsRounds: true } : {}),
   };
 }
 

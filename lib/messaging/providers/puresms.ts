@@ -11,6 +11,8 @@ import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 const SEND_URL = 'https://connect-api.divergent.cloud/sms/send';
 const TIMEOUT_MS = 10_000;
 const MAX_SKEW_MS = 5 * 60 * 1000;
+/** A sender name (WorkWise). A phone number is refused so a job alert cannot use the reply number. */
+const NAME_SENDER = /^[A-Za-z][A-Za-z0-9]{2,10}$/;
 
 const FAILED_STATUSES = new Set([
   'Failed',
@@ -19,6 +21,15 @@ const FAILED_STATUSES = new Set([
   'Cancelled',
   'Deleted',
 ]);
+
+/** A name override, or the env sender. null means the override was not a name. */
+function resolveSender(override: string | undefined, envSender: string | undefined): string | null | undefined {
+  if (override != null && override !== '') {
+    return NAME_SENDER.test(override) ? override : null;
+  }
+  const env = envSender?.trim();
+  return env ? env : undefined;
+}
 
 function fieldErrors(errors: unknown): string | null {
   if (!errors || typeof errors !== 'object' || Array.isArray(errors)) return null;
@@ -35,12 +46,12 @@ export async function pureSmsSend(
   input: SendTextInput,
 ): Promise<SendTextResult> {
   const apiKey = process.env.PURESMS_API_KEY;
-  const sender = process.env.PURESMS_SENDER;
+  const sender = resolveSender(input.sender, process.env.PURESMS_SENDER);
   if (!apiKey || !sender) {
     return {
       ok: false,
       provider: 'puresms',
-      error: 'PureSMS is not configured',
+      error: sender === null ? 'Sender must be a name' : 'PureSMS is not configured',
       retryable: false,
     };
   }

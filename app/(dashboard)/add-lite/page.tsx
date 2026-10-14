@@ -39,6 +39,7 @@ export default async function AddLitePage() {
     offer = {
       todayPence: preview.todayPence,
       thenLabel: preview.thenLabel,
+      nowLabel: preview.nowLabel,
       effectiveDate: preview.effectiveDate,
       interval,
       foundingLine,

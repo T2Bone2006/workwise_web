@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { sendJobOutcomeEmail } from '@/lib/jobs/send-job-outcome-email';
 
 /** Only a job that has reached the end of its cycle has anything to report. */
@@ -18,7 +18,7 @@ export async function sendJobSummaryToRecipient(params: {
   recipient: string;
   note?: string;
 }): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated' };
   }

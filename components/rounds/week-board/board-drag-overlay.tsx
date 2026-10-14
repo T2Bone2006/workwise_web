@@ -40,7 +40,15 @@ export function BoardDragOverlay({
       className="pointer-events-none fixed left-0 top-0 z-50 shadow-xl"
       style={active.kind === 'card' ? { width: active.width } : undefined}
     >
-      {active.kind === 'card' ? (
+      {active.kind === 'round' ? (
+        <div
+          className="whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold text-white"
+          style={{ backgroundColor: active.round.colour }}
+        >
+          {`${active.round.name} · ${active.stops.length} ${active.stops.length === 1 ? 'house' : 'houses'}`}
+          {target && !target.valid ? <span className="ml-2 font-semibold opacity-90">· can&apos;t go there</span> : null}
+        </div>
+      ) : active.kind === 'card' ? (
         <>
           {note ? (
             <span

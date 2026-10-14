@@ -9,6 +9,7 @@ import {
   INVOICE_COLUMNS,
   type InvoiceRecord,
 } from '@/lib/data/payments/invoices';
+import { readMoneyInPayments } from '@/lib/books/money-in';
 import { readAllPages } from '@/lib/data/read-all-pages';
 import { invoiceStatus, type InvoiceStatusLabel } from '@/lib/invoices/status';
 import { fromPence, toPence } from '@/lib/money/pence';
@@ -187,26 +188,21 @@ export async function accountantPayments(
 ): Promise<AccountantPayment[]> {
   const startIso = londonDayBoundsUtc(range.from).startIso;
   const endIso = londonDayBoundsUtc(range.to).endIso;
-  const rows = await readAllPages(
-    (from, to) =>
-      admin
-        .from('payments')
-        .select('id, amount, refunded_amount, received_at, method, customers(name)')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-        .gte('received_at', startIso)
-        .lt('received_at', endIso)
-        .order('received_at', { ascending: false })
-        .order('id', { ascending: true })
-        .range(from, to),
-    'Could not load payments',
-  );
+  // Money the owner has received: cash a team member is still holding is not in here until it is handed over.
+  const rows = (
+    await readMoneyInPayments(admin, {
+      tenantId,
+      columns: 'id, amount, refunded_amount, method, customers(name)',
+      fromIso: startIso,
+      toIso: endIso,
+    })
+  ).sort((a, b) => (a.book_at < b.book_at ? 1 : a.book_at > b.book_at ? -1 : String(a.id).localeCompare(String(b.id))));
   return rows.map((r) => {
     const embed = r.customers;
     const customer = (Array.isArray(embed) ? embed[0] : embed) as { name?: unknown } | null | undefined;
     return {
       id: String(r.id),
-      receivedOn: londonDateOf(String(r.received_at)),
+      receivedOn: londonDateOf(r.book_at),
       customerName: typeof customer?.name === 'string' ? customer.name : '',
       amount: num(r.amount),
       refunded: num(r.refunded_amount),
@@ -282,20 +278,13 @@ export async function accountantFlags(
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId)
       .eq('status', 'draft'),
-    readAllPages(
-      (from, to) =>
-        admin
-          .from('payments')
-          .select('id, amount, refunded_amount')
-          .eq('tenant_id', tenantId)
-          .eq('status', 'active')
-          .gt('refunded_amount', 0)
-          .gte('received_at', startIso)
-          .lt('received_at', endIso)
-          .order('id', { ascending: true })
-          .range(from, to),
-      'Could not load payments',
-    ),
+    readMoneyInPayments(admin, {
+      tenantId,
+      columns: 'id, amount, refunded_amount',
+      fromIso: startIso,
+      toIso: endIso,
+      refine: (q) => q.gt('refunded_amount', 0),
+    }),
     readAllPages(
       (from, to) =>
         admin

@@ -6,6 +6,7 @@ import { LookCard, Notice, Tag } from '@/components/look';
 import { JobHistoryCard } from '@/components/worker/job-history-card';
 import { JobSheetCard } from '@/components/worker/job-sheet-card';
 import { PhoneNote } from '@/components/worker/phone-note';
+import { RoundsVisitCard } from '@/components/worker/rounds-visit-card';
 import { toLookTone } from '@/components/worker/tone';
 import { Button } from '@/components/ui/button';
 import { getMyJob } from '@/lib/data/worker/jobs';
@@ -88,6 +89,10 @@ export default async function WorkerJobPage({ params, searchParams }: PageProps)
       <LookCard title="The job" icon={ClipboardList} tone="indigo">
         <p className="text-sm leading-relaxed whitespace-pre-line">{job.description}</p>
       </LookCard>
+
+      {job.rounds && !job.declinedByMe ? (
+        <RoundsVisitCard price={job.price ?? null} phone={job.customerPhone} accessNotes={job.accessNotes ?? null} />
+      ) : null}
 
       <JobSheetCard rows={job.sheet} />
 

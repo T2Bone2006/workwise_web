@@ -33,3 +33,9 @@ export function directionsHref(address: string | null, postcode: string | null):
   const query = [address, postcode].filter((p): p is string => !!p && p.trim().length > 0).join(', ');
   return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : null;
 }
+
+/** An sms: link for the customer's phone number, or null if it is not a UK number. */
+export function smsHref(phone: string | null | undefined): string | null {
+  const tel = telHref(phone);
+  return tel ? tel.replace(/^tel:/, 'sms:') : null;
+}

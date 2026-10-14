@@ -7,10 +7,18 @@ import { PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import {
   choiceForPriceId,
   classifyChange,
+  formatPence,
+  PLANS,
   priceIdFor,
   priceLabel,
   type PlanChoice,
 } from '@/lib/billing/plans';
+import {
+  isRoundsTeamPrice,
+  ROUNDS_TEAM_MONTHLY_PENCE,
+  ROUNDS_TEAM_YEARLY_PENCE,
+  teamPriceIdFor,
+} from '@/lib/billing/rounds-team-core';
 
 export type CardSummary = { brand: string; last4: string; expMonth: number; expYear: number };
 export type InvoiceRow = {
@@ -49,6 +57,8 @@ export type ChangePreview =
       target: PlanChoice;
       todayPence: number;
       thenLabel: string;
+      /** What they pay each period on the current plan (the plan plus any leads), to set beside `thenLabel`. */
+      nowLabel: string;
       effectiveDate: string;
       /** When the next full bill is due. After a monthly to yearly switch the year starts today
        *  (the billing day moves to the day they switched), so this is a year from now. */
@@ -117,8 +127,57 @@ function dayMonth(unixSeconds: number): string {
   );
 }
 
+/**
+ * The item that is the plan: the one whose price is a known plan price. A Rounds subscription can also carry a
+ * "Rounds team member" line (Phase 9), so "the first item" is not safe to assume. Falls back to the first item that
+ * is not a team line, then to the first item, so a subscription with an unknown price reads as it always did.
+ */
+export function planItemOf(subscription: Stripe.Subscription): Stripe.SubscriptionItem | undefined {
+  const items = subscription.items?.data ?? [];
+  return (
+    items.find((i) => choiceForPriceId(i.price?.id)) ??
+    items.find((i) => !isRoundsTeamPrice(i.price?.id)) ??
+    items[0]
+  );
+}
+
+type TeamLine = { id: string; priceId: string; quantity: number };
+
+function teamLineOf(subscription: Stripe.Subscription): TeamLine | null {
+  const item = (subscription.items?.data ?? []).find((i) => isRoundsTeamPrice(i.price?.id));
+  return item ? { id: item.id, priceId: item.price.id, quantity: item.quantity ?? 1 } : null;
+}
+
+/**
+ * "£350 a year" for the plan alone, or "£470 a year" when the subscription also carries a team line (Phase 9): the
+ * next bill after a plan change is the plan plus every lead, not the plan alone.
+ */
+function thenLabelFor(subscription: Stripe.Subscription, target: PlanChoice): string {
+  const line = teamLineOf(subscription);
+  if (!line || line.quantity <= 0) return priceLabel(target);
+  const perLead = target.interval === 'year' ? ROUNDS_TEAM_YEARLY_PENCE : ROUNDS_TEAM_MONTHLY_PENCE;
+  const total = PLANS[target.plan].pence[target.interval] + line.quantity * perLead;
+  return `${formatPence(total)} ${target.interval === 'month' ? 'a month' : 'a year'}`;
+}
+
+/** Subscription-update items that move the team line to the price for `interval` (none if there is no team line or it already matches). */
+function teamItemUpdates(subscription: Stripe.Subscription, interval: 'month' | 'year'): Array<{ id: string; price: string }> {
+  const line = teamLineOf(subscription);
+  const wanted = teamPriceIdFor(interval);
+  if (!line || !wanted || wanted === line.priceId) return [];
+  return [{ id: line.id, price: wanted }];
+}
+
+/** Schedule-phase items for the team line: its current price, or the price for another interval. */
+function teamPhaseItems(subscription: Stripe.Subscription, interval?: 'month' | 'year'): Array<{ price: string; quantity: number }> {
+  const line = teamLineOf(subscription);
+  if (!line) return [];
+  const price = (interval && teamPriceIdFor(interval)) || line.priceId;
+  return [{ price, quantity: line.quantity }];
+}
+
 export function periodEndUnix(subscription: Stripe.Subscription): number | null {
-  const item = subscription.items?.data?.[0];
+  const item = planItemOf(subscription);
   const legacy = (subscription as unknown as { current_period_end?: number }).current_period_end;
   return item?.current_period_end ?? legacy ?? null;
 }
@@ -129,7 +188,7 @@ function priceIdOf(price: string | { id?: string } | null | undefined): string |
 }
 
 function subscriptionPriceId(subscription: Stripe.Subscription): string | null {
-  return priceIdOf(subscription.items?.data?.[0]?.price);
+  return priceIdOf(planItemOf(subscription)?.price);
 }
 
 function idOf(value: string | { id: string } | null | undefined): string | null {
@@ -322,7 +381,7 @@ async function loadBilling(tenantId: string): Promise<Loaded> {
     }
     const priceId = subscriptionPriceId(subscription);
     const choice = choiceForPriceId(priceId);
-    const itemId = subscription.items?.data?.[0]?.id;
+    const itemId = planItemOf(subscription)?.id;
     if (!priceId || !choice || !itemId) return { kind: 'contact_us', reason: 'unknown_price' };
     const status = subscription.status;
     if (status !== 'active' && status !== 'past_due' && status !== 'trialing' && status !== 'incomplete') {
@@ -381,7 +440,7 @@ async function previewLoaded(loaded: Loaded, target: PlanChoice): Promise<Change
   if (loaded.choice.interval === 'month' && target.interval === 'year' && hasActiveDiscount(loaded.subscription)) {
     return { ok: false, error: YEARLY_AFTER_OFFER };
   }
-  const thenLabel = priceLabel(target);
+  const thenLabel = thenLabelFor(loaded.subscription, target);
   if (kind === 'up_now' && (await activeScheduleId(loaded.subscription))) {
     return { ok: false, error: CANCEL_WAITING };
   }
@@ -399,7 +458,7 @@ async function previewLoaded(loaded: Loaded, target: PlanChoice): Promise<Change
     customer: loaded.customerId,
     subscription: loaded.subscription.id,
     subscription_details: {
-      items: [{ id: loaded.itemId, price: priceIdFor(target) }],
+      items: [{ id: loaded.itemId, price: priceIdFor(target) }, ...teamItemUpdates(loaded.subscription, target.interval)],
       ...(startsNewYear(loaded.choice, target) ? { billing_cycle_anchor: 'now' as const } : {}),
       proration_behavior: 'always_invoice',
     },
@@ -411,6 +470,7 @@ async function previewLoaded(loaded: Loaded, target: PlanChoice): Promise<Change
     target,
     todayPence: preview.amount_due,
     thenLabel,
+    nowLabel: thenLabelFor(loaded.subscription, loaded.choice),
     effectiveDate: new Date().toISOString(),
     renewsOn: new Date(renewsOn * 1000).toISOString(),
   };
@@ -438,7 +498,7 @@ async function applyUpgrade(loaded: Ready, target: PlanChoice, nonce: string): P
   const updated = await getStripe().subscriptions.update(
     loaded.subscription.id,
     {
-      items: [{ id: loaded.itemId, price: priceIdFor(target) }],
+      items: [{ id: loaded.itemId, price: priceIdFor(target) }, ...teamItemUpdates(loaded.subscription, target.interval)],
       ...(startsNewYear(loaded.choice, target) ? { billing_cycle_anchor: 'now' as const } : {}),
       proration_behavior: 'always_invoice',
       payment_behavior: 'pending_if_incomplete',
@@ -466,14 +526,14 @@ async function applyDowngrade(loaded: Ready, target: PlanChoice, nonce: string):
       proration_behavior: 'none',
       phases: [
         {
-          items: [{ price: loaded.priceId, quantity: 1 }],
+          items: [{ price: loaded.priceId, quantity: 1 }, ...teamPhaseItems(loaded.subscription)],
           start_date: phase0.start_date,
           end_date: loaded.periodEnd,
           discounts: phaseDiscounts(phase0, loaded.subscription),
           proration_behavior: 'none',
         },
         {
-          items: [{ price: newPriceId, quantity: 1 }],
+          items: [{ price: newPriceId, quantity: 1 }, ...teamPhaseItems(loaded.subscription, target.interval)],
           duration: { interval: target.interval, interval_count: 1 },
           discounts: carriedDiscounts(phase0, loaded.subscription, loaded.periodEnd),
           proration_behavior: 'none',
@@ -619,7 +679,8 @@ function pendingChange(
   if (boundary == null) return null;
   const next = schedule.phases.find((phase) => phase.start_date >= boundary);
   if (!next) return null;
-  const priceId = priceIdOf(next.items[0]?.price);
+  const planPhaseItem = next.items.find((i) => choiceForPriceId(priceIdOf(i.price))) ?? next.items[0];
+  const priceId = priceIdOf(planPhaseItem?.price);
   if (!priceId || priceId === currentPriceId) return null;
   const choice = choiceForPriceId(priceId);
   if (!choice) return null;

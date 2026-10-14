@@ -265,6 +265,19 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
     (attachmentRows ?? []) as JobAttachmentRow[]
   );
 
+  const { data: reportSettingsRow } = await supabase
+    .from('tenants')
+    .select('settings')
+    .eq('id', jobRow.tenant_id as string)
+    .maybeSingle();
+  const reportSettings =
+    reportSettingsRow?.settings &&
+    typeof reportSettingsRow.settings === 'object' &&
+    !Array.isArray(reportSettingsRow.settings)
+      ? (reportSettingsRow.settings as { job_report_fields?: unknown })
+      : null;
+  const reportFields = reportSettings?.job_report_fields;
+
   const industryRaw = jobRow.industry_data;
   const showJobReport = !isIndustryDataEmpty(industryRaw);
   const industryDataForDetail =
@@ -318,6 +331,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryDataForDetail}
+        reportFields={reportFields}
         completionNotes={
           job.status === 'completed'
             ? completionNotesTrimmed
@@ -362,6 +376,7 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
         tenantSkills={tenantSkills}
         mapData={mapData}
         industryData={industryDataForDetail}
+        reportFields={reportFields}
         completionNotes={
           job.status === 'completed'
             ? completionNotesTrimmed

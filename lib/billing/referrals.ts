@@ -6,6 +6,7 @@ import { getStripe } from '@/lib/stripe/client';
 import { ENTITLED_STATUSES, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { choiceForPriceId, isPlanKey, monthlyPence, type PlanKey } from '@/lib/billing/plans';
 import { proChoiceForPriceId } from '@/lib/billing/pro-plan-prices';
+import { isRoundsTeamPrice } from '@/lib/billing/rounds-team-core';
 import { PRO_TIER_ORDER, isProTier } from '@/lib/billing/pro-plans';
 import {
   billsNeeded,
@@ -23,9 +24,25 @@ export function paidValuePence(invoice: Pick<Stripe.Invoice, 'subtotal' | 'total
   return paidValue(invoice);
 }
 
-/** Pure. True when the invoice is paid and paidValuePence ≥ monthlyPence(plan). */
+/**
+ * Pure. What the trader paid for the PLAN on this invoice. A Rounds team line (£10 a lead) is not part of the plan:
+ * it must never lift a half-price month up to "a full bill". With a team line on the invoice this adds up the plan
+ * lines only (each line's amount less its own discounts); with none it is exactly paidValuePence.
+ */
+export function planPaidValuePence(invoice: Stripe.Invoice): number {
+  const lines = invoice.lines?.data ?? [];
+  if (!lines.some((line) => isRoundsTeamPrice(priceIdOfLine(line)))) return paidValuePence(invoice);
+  return lines
+    .filter((line) => choiceForPriceId(priceIdOfLine(line)) !== null)
+    .reduce((sum, line) => {
+      const off = (line.discount_amounts ?? []).reduce((total, row) => total + row.amount, 0);
+      return sum + (line.amount ?? 0) - off;
+    }, 0);
+}
+
+/** Pure. True when the invoice is paid and planPaidValuePence ≥ monthlyPence(plan). */
 export function invoiceQualifies(invoice: Stripe.Invoice, plan: PlanKey): boolean {
-  return invoice.status === 'paid' && paidValuePence(invoice) >= monthlyPence(plan);
+  return invoice.status === 'paid' && planPaidValuePence(invoice) >= monthlyPence(plan);
 }
 
 /** For the panel (step 16). Service-role read filtered by referrer_tenant_id = tenantId

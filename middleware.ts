@@ -70,13 +70,25 @@ export async function middleware(request: NextRequest) {
     pathname === '/dashboard' || pathname.startsWith('/dashboard') || isWorkerAreaPath(pathname);
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
   const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
-  const isPortalLogin = pathname === '/portal/login';
+  const isPortalLogin = pathname === '/portal/login' || pathname.startsWith('/portal/login/');
   const isPortalForgotPassword =
     pathname === '/portal/forgot-password' || pathname.startsWith('/portal/forgot-password/');
   const isPortalResetPassword =
     pathname === '/portal/reset-password' || pathname.startsWith('/portal/reset-password/');
-  const isPortalAuthRoute =
-    isPortalLogin || isPortalAcceptInvite || isPortalForgotPassword || isPortalResetPassword;
+  // Invite and password-reset links stay on their own pages. Sign-in is /login.
+  const isPortalAuthRoute = isPortalAcceptInvite || isPortalResetPassword;
+
+  if (isPortalLogin) {
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
+    copyCookiesToResponse(response, redirectResponse);
+    return redirectResponse;
+  }
+
+  if (isPortalForgotPassword) {
+    const redirectResponse = NextResponse.redirect(new URL('/forgot-password', request.url));
+    copyCookiesToResponse(response, redirectResponse);
+    return redirectResponse;
+  }
 
   if (!isAuthenticated && isDashboard) {
     const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
@@ -85,7 +97,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!isAuthenticated && isPortalPage && !isPortalAuthRoute) {
-    const redirectResponse = NextResponse.redirect(new URL('/portal/login', request.url));
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
     copyCookiesToResponse(response, redirectResponse);
     return redirectResponse;
   }
@@ -140,12 +152,6 @@ export async function middleware(request: NextRequest) {
       if (isAuthenticated && isLoginPage) {
         const destination = isCustomerPortal ? '/portal' : '/dashboard';
         const redirectResponse = NextResponse.redirect(new URL(destination, request.url));
-        copyCookiesToResponse(response, redirectResponse);
-        return redirectResponse;
-      }
-
-      if (isAuthenticated && isPortalLogin && isCustomerPortal) {
-        const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
         copyCookiesToResponse(response, redirectResponse);
         return redirectResponse;
       }

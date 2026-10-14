@@ -42,9 +42,7 @@ export function employeeRouteDecision(pathname: string): 'continue' | 'home' {
   return isWorkerWebPath(pathname) ? 'continue' : 'home';
 }
 
-/**
- * Still used by the customer-portal login, which keeps refusing workers.
- */
+/** Shown on /login when a link arrives with ?error=worker_app. */
 export const WORKER_WEB_LOGIN_ERROR =
   'Worker accounts use the WorkWise mobile app, not the website. Please open the app to sign in.';
 

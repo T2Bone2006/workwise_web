@@ -43,11 +43,13 @@ export function planDay(jobs: readonly WorkerJob[], ymd: string): DayPlan {
     if (job.status === 'completed') done += 1;
     else if (job.status === 'incomplete') notCompleted += 1;
     else if (UNDERWAY_STATUSES.has(job.status)) underway += 1;
-    else if (job.status === 'assigned') waiting += 1;
+    else if (job.status === 'assigned' && !job.rounds) waiting += 1;
   }
 
   const next =
-    day.find((j) => UNDERWAY_STATUSES.has(j.status)) ?? day.find((j) => j.status === 'accepted') ?? null;
+    day.find((j) => UNDERWAY_STATUSES.has(j.status)) ??
+    day.find((j) => j.status === 'accepted' || (j.rounds && j.status === 'assigned')) ??
+    null;
 
   return {
     date: ymd,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { callerIsOwner, ownerOnlyResponse } from '@/lib/api/owner-guard';
 import { createClientFromBearer, resolveTenantForUser } from '@/lib/auth/bearer';
 import { tenantHasRounds } from '@/lib/messaging/rounds-tenants';
 import type { Actor } from '@/lib/rounds/visit-transitions';
@@ -45,6 +46,13 @@ export async function requireRoundsApi(
         { status: 403, headers: { 'Cache-Control': 'no-store' } },
       ),
     };
+  }
+
+  // Default deny: these routes are the owner's. A member of staff is a users row with role 'worker' in the
+  // same business and resolves to the same tenant above, so the role is checked here, last, so the
+  // 401 / 403 / plan_ended answers keep their order.
+  if (!(await callerIsOwner(auth.supabase, auth.userId))) {
+    return { ok: false, response: ownerOnlyResponse() };
   }
 
   return { ok: true, ctx: { ...auth, tenantId } };

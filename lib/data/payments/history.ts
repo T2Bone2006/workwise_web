@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addDays, londonDayBoundsUtc, startOfMonth, type Ymd } from '@/lib/rounds/dates';
+import { isMissingHeldColumn, readMoneyInPayments } from '@/lib/books/money-in';
 import type { PaymentMethod } from '@/lib/payments/money-core';
 import type { LedgerPayment } from '@/lib/data/payments/ledger';
 
@@ -19,6 +20,15 @@ function asFiniteNumber(value: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+/** "with Dave": cash a team member is holding for the owner. Absent for every other payment. */
+export function heldByField(raw: Record<string, unknown>): { heldBy?: string } {
+  const handedOver = asString(raw.handed_over_at);
+  const name = asString(raw.collected_by_name);
+  const worker = asString(raw.collected_by_worker_id);
+  if (handedOver || (!name && !worker)) return {};
+  return { heldBy: name ?? 'A team member' };
 }
 
 function mapHistoryRow(raw: Record<string, unknown>): PaymentHistoryRow | null {
@@ -72,10 +82,33 @@ function mapHistoryRow(raw: Record<string, unknown>): PaymentHistoryRow | null {
     disputedAt: asString(raw.disputed_at),
     disputeStatus: asString(raw.dispute_status),
     voidReason: asString(raw.void_reason),
+    ...heldByField(raw),
     allocations,
     customerId,
     customerName,
   };
+}
+
+function historyColumns(withHeld: boolean): string {
+  return [
+    'id',
+    'customer_id',
+    'amount',
+    'refunded_amount',
+    'method',
+    'source',
+    'status',
+    'received_at',
+    'note',
+    'applies_to_job_id',
+    'invoice_id',
+    'disputed_at',
+    'dispute_status',
+    'void_reason',
+    ...(withHeld ? ['collected_by_worker_id', 'collected_by_name', 'handed_over_at'] : []),
+    'customers ( id, name )',
+    'payment_allocations ( job_id, amount )',
+  ].join(', ');
 }
 
 export async function getPaymentHistory(
@@ -91,26 +124,7 @@ export async function getPaymentHistory(
 ): Promise<{ rows: PaymentHistoryRow[]; error: string | null }> {
   let query = supabase
     .from('payments')
-    .select(
-      [
-        'id',
-        'customer_id',
-        'amount',
-        'refunded_amount',
-        'method',
-        'source',
-        'status',
-        'received_at',
-        'note',
-        'applies_to_job_id',
-        'invoice_id',
-        'disputed_at',
-        'dispute_status',
-        'void_reason',
-        'customers ( id, name )',
-        'payment_allocations ( job_id, amount )',
-      ].join(', '),
-    )
+    .select(historyColumns(true))
     .eq('tenant_id', tenantId)
     .order('received_at', { ascending: false })
     .limit(opts?.limit ?? 100);
@@ -128,7 +142,16 @@ export async function getPaymentHistory(
     query = query.lte('received_at', opts.to);
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error && isMissingHeldColumn(error)) {
+    // Before the Phase 9 migration is pasted there are no held-cash columns: ask again without them.
+    let again = supabase.from('payments').select(historyColumns(false)).eq('tenant_id', tenantId).order('received_at', { ascending: false }).limit(opts?.limit ?? 100);
+    if (!opts?.includeVoid) again = again.eq('status', 'active');
+    if (opts?.method) again = again.eq('method', opts.method);
+    if (opts?.from) again = again.gte('received_at', opts.from);
+    if (opts?.to) again = again.lte('received_at', opts.to);
+    ({ data, error } = await again);
+  }
   if (error) {
     console.error('getPaymentHistory failed', error);
     return { rows: [], error: error.message };
@@ -142,7 +165,7 @@ export async function getPaymentHistory(
   return { rows, error: null };
 }
 
-/** Sum of active cash + cheque payments whose received_at falls on this London date. */
+/** Sum of active cash + cheque payments the owner received on this London date (held team cash counts on the day it is handed over). */
 export async function getCashTakenOn(
   supabase: SupabaseClient,
   tenantId: string,
@@ -150,16 +173,17 @@ export async function getCashTakenOn(
 ): Promise<{ cash: number; cheque: number }> {
   const { startIso, endIso } = londonDayBoundsUtc(date);
 
-  const { data, error } = await supabase
-    .from('payments')
-    .select('amount, method')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .in('method', ['cash', 'cheque'])
-    .gte('received_at', startIso)
-    .lt('received_at', endIso);
-
-  if (error) {
+  // "Cash taken" is money the OWNER has: cash a team member still holds is not in it until it is handed over.
+  let data: Array<Record<string, unknown>>;
+  try {
+    data = await readMoneyInPayments(supabase, {
+      tenantId,
+      columns: 'amount, method',
+      fromIso: startIso,
+      toIso: endIso,
+      refine: (q) => q.in('method', ['cash', 'cheque']),
+    });
+  } catch (error) {
     console.error('getCashTakenOn failed', error);
     return { cash: 0, cheque: 0 };
   }
@@ -271,14 +295,11 @@ export async function getEarningsOverview(
   const to = londonDayBoundsUtc(today).endIso;
 
   const [paymentsResult, visitsResult, allocResult] = await Promise.all([
-    supabase
-      .from('payments')
-      .select('amount, received_at')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .gte('received_at', from)
-      .lt('received_at', to)
-      .limit(5000),
+    // Income is money the owner has received; held team cash joins it on the day it is handed over.
+    readMoneyInPayments(supabase, { tenantId, columns: 'amount', fromIso: from, toIso: to }).then(
+      (rows) => ({ data: rows.map((r) => ({ amount: r.amount, received_at: r.book_at })), error: null as { message: string } | null }),
+      (error: unknown) => ({ data: null, error: { message: error instanceof Error ? error.message : 'Could not load payments' } }),
+    ),
     supabase
       .from('jobs')
       .select('id, scheduled_date, scheduled_time, completed_at, status, quoted_amount, final_amount, payment_status')

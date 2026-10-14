@@ -31,6 +31,13 @@ export type RoundEditorProps = {
   onSave: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  /** "Usually done by": only when the business has a team and the round already exists. Saves as soon as it changes. */
+  usualLead?: {
+    /** 'me' for the owner, otherwise a workers.id. */
+    value: string;
+    options: Array<{ value: string; label: string }>;
+    onChange: (value: string) => void;
+  };
 };
 
 function ModeButton({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -156,6 +163,28 @@ export function RoundEditor(p: RoundEditorProps) {
           ))}
         </div>
       </div>
+
+      {p.editing && p.usualLead ? (
+        <div className="space-y-2">
+          <label htmlFor="round-usual-lead" className="text-sm font-medium">
+            Usually done by
+          </label>
+          <select
+            id="round-usual-lead"
+            value={p.usualLead.value}
+            onChange={(e) => p.usualLead?.onChange(e.target.value)}
+            disabled={p.saving}
+            className="h-9 w-full rounded-[10px] border border-input bg-card px-3 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60"
+          >
+            {p.usualLead.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">New and upcoming visits go to them. You can still give any day to someone else.</p>
+        </div>
+      ) : null}
 
       {p.error ? (
         <p role="alert" className="text-sm text-destructive">

@@ -1,6 +1,7 @@
 import { format } from 'date-fns';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { getTenantSkills } from '@/lib/actions/skills';
+import { getFieldGroupsForTenant } from '@/lib/data/field-groups';
 import { getWorkersForTenant } from '@/lib/data/workers';
 import {
   getJobsForTenant,
@@ -31,6 +32,7 @@ import { getTenantProducts } from '@/lib/data/tenant-products';
 import { getTenantLook } from '@/lib/data/tenant-look';
 import { getDeclinedJobs } from '@/lib/data/dashboard';
 import { getProNeeds } from '@/lib/data/pro-home';
+import { ungroupedHeaders } from '@/lib/jobs/field-groups';
 import { ProNeedsCard } from '@/components/jobs/overview/pro-needs-card';
 
 interface JobsPageProps {
@@ -186,6 +188,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       sourceKeysResult,
       visibleColumns,
       { workers },
+      fieldGroups,
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
@@ -197,6 +200,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         : Promise.resolve({ keys: [], error: null }),
       getJobsListColumnsForTenant(tenantId),
       getWorkersForTenant(tenantId),
+      getFieldGroupsForTenant(tenantId),
     ]);
 
     const newLook = (await getTenantLook(await getTenantProducts())) === 'new';
@@ -210,7 +214,8 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         label: f.label,
         group: 'System',
       })),
-      ...(scopedCustomerId ? sourceKeysResult.keys ?? [] : []).map((key) => ({
+      // Headers already inside a named field are offered once, as that field.
+      ...(scopedCustomerId ? ungroupedHeaders(sourceKeysResult.keys ?? [], fieldGroups) : []).map((key) => ({
         value: encodeSourceFieldFilter(key),
         label: key,
         group: 'Stored fields',
@@ -286,6 +291,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           fieldFilterOptions={fieldFilterOptions}
           fieldFilterValuesByField={fieldFilterValuesByField}
           initialVisibleColumns={visibleColumns}
+          fieldGroups={fieldGroups}
           workers={workers.map((w) => ({ id: w.id, full_name: w.full_name }))}
         />
       </div>

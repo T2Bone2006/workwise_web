@@ -10,7 +10,7 @@ import { parseInviteKind } from '@/lib/invites/worker-invite';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { findAuthUserIdByEmail } from '@/lib/supabase/find-auth-user';
 import { reconcileExtraWorkersAfterChange } from '@/lib/billing/extra-workers';
 import { createWorkerCore, inviteWorkerCore } from '@/lib/workers/worker-create-core';
@@ -209,7 +209,7 @@ export async function updateWorker(workerId: string, formData: FormData) {
 }
 
 export async function updateWorkerAutoAssign(workerId: string, exclude: boolean) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'No tenant found' };
   }
@@ -280,7 +280,7 @@ async function hardDeleteWorkerRecords(
 }
 
 async function revokeWorkerInviteImpl(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -344,7 +344,7 @@ async function revokeWorkerInviteImpl(inviteId: string) {
 }
 
 export async function resendWorkerInvite(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -459,7 +459,7 @@ export async function resendWorkerInvite(inviteId: string) {
 }
 
 async function deactivateWorkerImpl(workerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -636,7 +636,7 @@ async function deactivateWorkerImpl(workerId: string) {
 }
 
 async function reactivateWorkerImpl(workerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -915,7 +915,7 @@ export async function bulkUpdateWorkerStatus(
 
 export async function revokeWorkerInvite(inviteId: string) {
   const result = await revokeWorkerInviteImpl(inviteId);
-  if (result.success) reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  if (result.success) reconcileExtraWorkersAfterChange(await getOwnerTenantId());
   return result;
 }
 
@@ -923,7 +923,7 @@ export async function deactivateWorker(workerId: string) {
   const result = await deactivateWorkerImpl(workerId);
   if (result.success) {
     await reconcileForWorker(workerId);
-    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+    reconcileExtraWorkersAfterChange(await getOwnerTenantId());
   }
   return result;
 }
@@ -932,7 +932,7 @@ export async function reactivateWorker(workerId: string) {
   const result = await reactivateWorkerImpl(workerId);
   if (result.success) {
     await reconcileForWorker(workerId);
-    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+    reconcileExtraWorkersAfterChange(await getOwnerTenantId());
   }
   return result;
 }
@@ -941,7 +941,7 @@ export async function deleteWorker(workerId: string) {
   const result = await deleteWorkerImpl(workerId);
   if (result.success) {
     await reconcileForWorker(workerId);
-    reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+    reconcileExtraWorkersAfterChange(await getOwnerTenantId());
   }
   return result;
 }
@@ -949,6 +949,6 @@ export async function deleteWorker(workerId: string) {
 export async function bulkDeleteWorkers(workerIds: string[]) {
   const result = await bulkDeleteWorkersImpl(workerIds);
   for (const id of workerIds) await reconcileForWorker(id);
-  reconcileExtraWorkersAfterChange(await getTenantIdForCurrentUser());
+  reconcileExtraWorkersAfterChange(await getOwnerTenantId());
   return result;
 }

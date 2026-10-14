@@ -1,25 +1,20 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+  AuthAlert,
+  AuthShell,
+  authButtonClassName,
+} from '@/components/auth/auth-shell';
+import { PortalPasswordInput } from '@/components/portal/portal-password-input';
 
 const DEFAULT_ERROR_MESSAGE =
   'Your invite link is invalid or has expired. Please contact your service provider for a new invite.';
 
-const PORTAL_URL = 'https://portal.joinworkwise.com';
+const PORTAL_URL = '/portal';
 
 type PagePhase = 'interstitial' | 'loading' | 'form' | 'success' | 'error';
 
@@ -146,155 +141,107 @@ function AcceptInviteContent() {
   }
 
   const title =
-    phase === 'interstitial'
-      ? "You've been invited to the WorkWise Portal"
-      : phase === 'success'
-        ? "You're all set!"
-        : phase === 'error'
-          ? 'Invite link problem'
-          : 'Welcome to WorkWise';
-
-  const description =
-    phase === 'interstitial'
-      ? 'View your jobs and track progress in real time.'
-      : phase === 'loading'
-        ? 'Setting up your account…'
+    phase === 'success'
+      ? "You're all set"
+      : phase === 'error'
+        ? 'Invite link problem'
         : phase === 'form'
-          ? 'Create a password to finish setting up your account'
-          : phase === 'success'
-            ? "You're all set! Visit portal.joinworkwise.com to sign in any time."
-            : phase === 'error'
-              ? errorMessage ?? DEFAULT_ERROR_MESSAGE
-              : null;
+          ? 'Create your password'
+          : "You've been invited";
+
+  const subtitle =
+    phase === 'interstitial' || phase === 'loading'
+      ? 'See the jobs raised for you, and follow each one as it moves.'
+      : phase === 'form'
+        ? 'Choose a password to finish setting up the customer portal. At least 8 characters.'
+        : phase === 'success'
+          ? 'Taking you to the portal.'
+          : errorMessage ?? DEFAULT_ERROR_MESSAGE;
 
   return (
-    <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-      <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-6">
-          <Image
-            src="/workwise_logo.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
+    <AuthShell title={title} subtitle={subtitle} side="neutral">
+      {phase === 'interstitial' ? (
+        <button type="button" className={authButtonClassName} onClick={() => void handleGetStarted()}>
+          Get started
+        </button>
+      ) : phase === 'loading' ? (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-[#5E5A54] dark:text-[#A9B6C8]">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Setting up your account…
         </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        {phase === 'interstitial' ? (
-          <Button variant="gradient" className="w-full" onClick={() => void handleGetStarted()}>
-            Get Started
-          </Button>
-        ) : phase === 'loading' ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
-            <p className="text-sm text-muted-foreground">Setting up your account…</p>
-          </div>
-        ) : phase === 'form' ? (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                autoComplete="new-password"
-                disabled={isSubmitting}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setPasswordError(null);
-                  setSubmitError(null);
-                }}
-              />
-              {passwordError ? (
-                <p className="text-sm text-destructive">{passwordError}</p>
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm-password">Confirm password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                placeholder="••••••••"
-                autoComplete="new-password"
-                disabled={isSubmitting}
-                value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  setConfirmError(null);
-                  setSubmitError(null);
-                }}
-              />
-              {confirmError ? (
-                <p className="text-sm text-destructive">{confirmError}</p>
-              ) : null}
-            </div>
-            {submitError ? (
-              <p className="text-sm text-destructive">{submitError}</p>
-            ) : null}
-            <Button
-              type="submit"
-              variant="gradient"
-              className="w-full"
-              disabled={isSubmitting}
-            >
+      ) : phase === 'form' ? (
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {submitError ? <AuthAlert>{submitError}</AuthAlert> : null}
+          <PortalPasswordInput
+            id="password"
+            label="Password"
+            value={password}
+            onChange={(value) => {
+              setPassword(value);
+              setPasswordError(null);
+              setSubmitError(null);
+            }}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            error={passwordError}
+          />
+          <PortalPasswordInput
+            id="confirm-password"
+            label="Confirm password"
+            value={confirmPassword}
+            onChange={(value) => {
+              setConfirmPassword(value);
+              setConfirmError(null);
+              setSubmitError(null);
+            }}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            error={confirmError}
+          />
+          <div className="pt-1">
+            <button type="submit" className={authButtonClassName} disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" aria-hidden />
                   Setting password…
                 </>
               ) : (
-                'Set Password & Sign In'
+                'Set password and sign in'
               )}
-            </Button>
-          </form>
-        ) : phase === 'error' ? (
-          <p className="text-sm text-muted-foreground text-center">
-            Please contact your service provider for a new invitation.
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
+            </button>
+          </div>
+        </form>
+      ) : phase === 'success' ? (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-[#5E5A54] dark:text-[#A9B6C8]">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Opening the portal…
+        </div>
+      ) : (
+        <p className="text-sm leading-relaxed text-[#5E5A54] dark:text-[#A9B6C8]">
+          Please contact your service provider for a new invitation.
+        </p>
+      )}
+    </AuthShell>
   );
 }
 
-function AcceptInviteLoadingCard() {
+function AcceptInviteFallback() {
   return (
-    <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
-      <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-6">
-          <Image
-            src="/workwise_logo.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
-        </div>
-        <CardTitle className="text-2xl font-semibold tracking-tight">
-          You&apos;ve been invited to the WorkWise Portal
-        </CardTitle>
-        <CardDescription>
-          View your jobs and track progress in real time.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button variant="gradient" className="w-full" disabled>
-          Get Started
-        </Button>
-      </CardContent>
-    </Card>
+    <AuthShell
+      title="You've been invited"
+      subtitle="See the jobs raised for you, and follow each one as it moves."
+      side="neutral"
+    >
+      <button type="button" className={authButtonClassName} disabled>
+        Get started
+      </button>
+    </AuthShell>
   );
 }
 
 export default function PortalAcceptInvitePage() {
   return (
-    <Suspense fallback={<AcceptInviteLoadingCard />}>
+    <Suspense fallback={<AcceptInviteFallback />}>
       <AcceptInviteContent />
     </Suspense>
   );

@@ -12,6 +12,11 @@ export type SendTextInput = {
   to: string; // E.164 UK mobile
   body: string; // already GSM-7 and fitted
   clientReference: string; // our messages.id
+  /**
+   * Name shown as the sender, such as WorkWise. Only a short name is accepted.
+   * Leave unset for customer texts, which use PURESMS_SENDER (the reply number).
+   */
+  sender?: string;
 };
 export type SendTextResult =
   | {

@@ -1,9 +1,12 @@
 import type { WorkerJob, WorkerJobPriority, WorkerJobStatus } from '@/lib/worker/types';
 import { WORKER_JOB_STATUSES } from '@/lib/worker/types';
 
-/** The columns the worker area reads. Never money, never another worker. */
+/**
+ * The columns the worker area reads. Never another worker. The visit's price is read for every worker but only passed on
+ * (see mapJobRow's showPrice) when the employer is a Rounds business, so a Pro employee sees exactly what they did before.
+ */
 export const WORKER_JOB_COLUMNS =
-  'id, reference_number, job_description, status, priority, scheduled_date, scheduled_time, address, postcode, completed_at, created_at';
+  'id, reference_number, job_description, status, priority, scheduled_date, scheduled_time, address, postcode, completed_at, created_at, quoted_amount';
 
 export type JobRowForWorker = {
   id: string;
@@ -16,6 +19,7 @@ export type JobRowForWorker = {
   address: string | null;
   postcode: string | null;
   completed_at: string | null;
+  quoted_amount?: number | string | null;
   customers?: { name?: string | null } | { name?: string | null }[] | null;
 };
 
@@ -53,7 +57,12 @@ function customerName(customers: JobRowForWorker['customers']): string | null {
 }
 
 /** Maps a database row to what the worker area shows; a row with an unknown status is dropped (null). */
-export function mapJobRow(row: JobRowForWorker, notBecause: string | null = null): WorkerJob | null {
+/** `rounds: true` marks a lead of a Rounds business: the visit shows its price and is "Planned", not "Waiting for you". */
+export function mapJobRow(
+  row: JobRowForWorker,
+  notBecause: string | null = null,
+  options: { rounds?: boolean } = {},
+): WorkerJob | null {
   const status = asStatus(row.status);
   if (!status) return null;
   return {
@@ -69,7 +78,15 @@ export function mapJobRow(row: JobRowForWorker, notBecause: string | null = null
     customerName: customerName(row.customers),
     completedAt: row.completed_at,
     notBecause,
+    ...(options.rounds ? { rounds: true as const, price: roundsPrice(row.quoted_amount) } : {}),
   };
+}
+
+/** A visit's price, or null when it has none: never 0, never NaN. */
+export function roundsPrice(value: number | string | null | undefined): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /**

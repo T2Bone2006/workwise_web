@@ -3,6 +3,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildTrend, lastMonthToDate, trendMonthKeys, type TrendMonth } from '@/lib/books/trend';
 import { readAllPages } from '@/lib/data/read-all-pages';
+import { readMoneyInPayments } from '@/lib/books/money-in';
 import { getPaymentHistory } from '@/lib/data/payments/history';
 import { getVisitsForRange } from '@/lib/data/rounds/visits';
 import { addDays, isoWeekday, londonDayBoundsUtc, todayInLondon, type Ymd } from '@/lib/rounds/dates';
@@ -44,19 +45,11 @@ export async function loadMoneyTrend(db: SupabaseClient, p: { tenantId: string; 
   const from = `${keys[0]}-01`;
   try {
     const [payments, expenses] = await Promise.all([
-      readAllPages(
-        (a, z) =>
-          db
-            .from('payments')
-            .select('id, amount, refunded_amount, received_at')
-            .eq('tenant_id', p.tenantId)
-            .eq('status', 'active')
-            .gte('received_at', londonDayBoundsUtc(from).startIso)
-            .order('received_at', { ascending: true })
-            .order('id', { ascending: true })
-            .range(a, z),
-        'Could not load payments',
-      ),
+      readMoneyInPayments(db, {
+        tenantId: p.tenantId,
+        columns: 'id, amount, refunded_amount',
+        fromIso: londonDayBoundsUtc(from).startIso,
+      }),
       readAllPages(
         (a, z) =>
           db
@@ -72,7 +65,7 @@ export async function loadMoneyTrend(db: SupabaseClient, p: { tenantId: string; 
       ),
     ]);
     const paid = payments.map((r) => ({
-      date: todayInLondon(new Date(String(r.received_at))),
+      date: todayInLondon(new Date(r.book_at)),
       amount: Number(r.amount) || 0,
       refunded: Number(r.refunded_amount) || 0,
     }));

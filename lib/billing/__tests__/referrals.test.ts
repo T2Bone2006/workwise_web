@@ -19,6 +19,8 @@ const ENV: Record<string, string> = {
   STRIPE_PRICE_PRO: 'price_pro_m',
   STRIPE_PRICE_PRO_YEARLY: 'price_pro_y',
   STRIPE_PRICE_EXTRA_WORKER_STARTER: 'price_extra_starter_m',
+  STRIPE_PRICE_ROUNDS_TEAM_MONTHLY: 'price_team_m',
+  STRIPE_PRICE_ROUNDS_TEAM_YEARLY: 'price_team_y',
 };
 
 type Row = Record<string, unknown>;
@@ -300,6 +302,50 @@ describe('paidValuePence', () => {
     expect(paidValuePence({ subtotal: 3500, total_discount_amounts: [{ amount: 1750, discount: 'd' }] })).toBe(1750);
     expect(paidValuePence({ subtotal: 3500, total_discount_amounts: null })).toBe(3500);
     expect(invoiceQualifies(invoice({ subtotal: 0, price: 'price_rounds_m', status: 'open' }), 'rounds')).toBe(false);
+  });
+});
+
+/** A Rounds invoice with the plan line and a team line (£12 a lead), each with its own discount. */
+function teamInvoice(opts: { planDiscount?: number; teamDiscount?: number; leads: number }): Stripe.Invoice {
+  const team = opts.leads * 1200;
+  const planOff = opts.planDiscount ?? 0;
+  const teamOff = opts.teamDiscount ?? 0;
+  const line = (price: string, amount: number, off: number) => ({
+    amount,
+    subscription: 'sub_1',
+    parent: { type: 'subscription_item_details' },
+    pricing: { type: 'price_details', price_details: { price } },
+    discount_amounts: off ? [{ amount: off, discount: 'd' }] : [],
+  });
+  return {
+    id: 'in_team',
+    status: 'paid',
+    customer: 'cus_referred',
+    subtotal: 3500 + team,
+    total_discount_amounts: planOff + teamOff ? [{ amount: planOff + teamOff }] : null,
+    lines: { data: [line('price_rounds_m', 3500, planOff), line('price_team_m', team, teamOff)] },
+  } as unknown as Stripe.Invoice;
+}
+
+describe('invoiceQualifies with a Rounds team line', () => {
+  it('does not let team lines lift a half-price month to a full bill', () => {
+    // Old maths: (3500 + 2400) - 1750 = 4150 >= 3500, so a half-price month looked "full". Plan only: 1750.
+    const half = teamInvoice({ leads: 2, planDiscount: 1750 });
+    expect(paidValuePence(half)).toBe(4150);
+    expect(invoiceQualifies(half, 'rounds')).toBe(false);
+  });
+
+  it('does not count a free first month with a team line either', () => {
+    expect(invoiceQualifies(teamInvoice({ leads: 3, planDiscount: 3500 }), 'rounds')).toBe(false);
+  });
+
+  it('still qualifies a full-price plan line with a team line', () => {
+    expect(invoiceQualifies(teamInvoice({ leads: 1 }), 'rounds')).toBe(true);
+  });
+
+  it('reads only the plan line even when a coupon also took money off the team line', () => {
+    // Old (unrestricted) coupons halved everything: plan 1750 paid, team 600 paid.
+    expect(invoiceQualifies(teamInvoice({ leads: 1, planDiscount: 1750, teamDiscount: 600 }), 'rounds')).toBe(false);
   });
 });
 

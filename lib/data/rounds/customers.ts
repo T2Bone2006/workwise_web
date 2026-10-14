@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { A_TEAM_MEMBER, loadAdderNames } from '@/lib/data/rounds/added-by';
 import type { CustomerDetailRow } from '@/lib/data/customers';
 import { getRoundsSettings } from '@/lib/data/rounds/settings';
 import { compareYmd, todayInLondon, type Ymd } from '@/lib/rounds/dates';
@@ -37,7 +39,16 @@ export type RoundsCustomerListRow = {
   owed_amount: number;
   /** The named rounds their active places are in. */
   rounds: RoundRow[];
+  /** Added by a member of staff and not yet checked by the owner: their name. Null for everyone else. */
+  added_by_unchecked: string | null;
 };
+
+/** The adder's name while the owner hasn't checked the customer; null when added by the owner or already checked. */
+function addedByUnchecked(row: Record<string, unknown>, names: Map<string, string>): string | null {
+  const worker = asString(row.added_by_worker_id);
+  if (!worker || asString(row.added_checked_at)) return null;
+  return names.get(worker) ?? A_TEAM_MEMBER;
+}
 
 export type RoundsCustomerDetail = CustomerDetailRow & {
   phone_e164: string | null;
@@ -199,7 +210,7 @@ export async function getRoundsCustomers(
     let query = supabase
       .from('customers')
       .select(
-        'id, name, phone, phone_e164, email, billing_address, payment_terms, is_active, service_agreements(id, title, status, postcode, frequency_days, next_due_date, preferred_weekday, schedule_mode)',
+        'id, name, phone, phone_e164, email, billing_address, payment_terms, is_active, added_by_worker_id, added_checked_at, service_agreements(id, title, status, postcode, frequency_days, next_due_date, preferred_weekday, schedule_mode)',
       )
       .eq('tenant_id', tenantId)
       .order('name');
@@ -253,6 +264,15 @@ export async function getRoundsCustomers(
       }
     }
 
+    // Only customers a member of staff added and the owner hasn't checked need a name.
+    const adderIds: string[] = [];
+    for (const r of rows) {
+      const rec = r as Record<string, unknown>;
+      const worker = asString(rec.added_by_worker_id);
+      if (worker && !asString(rec.added_checked_at)) adderIds.push(worker);
+    }
+    const adderNames = adderIds.length > 0 ? await loadAdderNames(createAdminClient(), tenantId, adderIds) : new Map<string, string>();
+
     const customers: RoundsCustomerListRow[] = [];
     for (const raw of rows) {
       const row = raw as Record<string, unknown>;
@@ -288,6 +308,7 @@ export async function getRoundsCustomers(
         postcodes: bits.postcodes,
         owed_amount: owedById.get(id) ?? 0,
         rounds: membership?.roundsByCustomer.get(id) ?? [],
+        added_by_unchecked: addedByUnchecked(row, adderNames),
       });
     }
 

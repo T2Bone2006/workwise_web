@@ -60,8 +60,13 @@ export async function recordPaymentCore(
     invoiceId?: string | null;
     clientMutationId?: string | null;
     userId: string | null;
+    /** A member of staff took this cash/cheque. The payment is saved as held by them until the owner ticks it handed over. */
+    collectedBy?: { workerId: string; name: string } | null;
   },
 ): Promise<MoneyResult<{ paymentId: string; duplicate: boolean }>> {
+  if (p.collectedBy && p.method !== 'cash' && p.method !== 'cheque') {
+    return { success: false, error: 'Only cash and cheques can be held.' };
+  }
   const { data: customer, error: customerError } = await supabase
     .from('customers')
     .select('id')
@@ -114,6 +119,12 @@ export async function recordPaymentCore(
     invoice_id: p.invoiceId ?? null,
     recorded_by_user_id: p.userId,
     client_mutation_id: p.clientMutationId ?? null,
+    ...(p.collectedBy
+      ? {
+          collected_by_worker_id: p.collectedBy.workerId,
+          collected_by_name: p.collectedBy.name.trim().slice(0, 80) || null,
+        }
+      : {}),
   };
 
   const { data, error } = await supabase

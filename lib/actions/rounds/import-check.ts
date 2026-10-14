@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 
 /**
@@ -13,7 +13,7 @@ export async function checkImportFile(
 ): Promise<{ importedAt: string | null }> {
   if (!/^[0-9a-f]{64}$/.test(sha256)) return { importedAt: null };
 
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { importedAt: null };
   const products = await getTenantProducts();
   if (!products.hasRounds) return { importedAt: null };

@@ -37,6 +37,7 @@ import { toast } from 'sonner';
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   assigned: 'Assigned',
+  accepted: 'Accepted',
   in_progress: 'In progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
@@ -45,6 +46,7 @@ const STATUS_LABELS: Record<string, string> = {
 const statusBadgeClass: Record<string, string> = {
   pending: 'border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-400',
   assigned: 'border-blue-400/60 bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  accepted: 'border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-400',
   in_progress: 'border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-400',
   completed: 'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
   cancelled: 'border-red-300/50 bg-red-500/5 text-red-600 dark:text-red-400/90',

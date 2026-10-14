@@ -27,6 +27,7 @@ import {
   type CustomerFilterField,
 } from '@/components/rounds/rounds-customers-table';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { AddedByBanner } from '@/components/team/added-by-banner';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -124,6 +125,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
             </div>
           }
         />
+        <AddedByBanner count={customers.filter((c) => c.added_by_unchecked !== null).length} />
         <RoundsCustomersTable
           key={`${status}:${search ?? ''}`}
           customers={customers}

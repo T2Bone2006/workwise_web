@@ -19,6 +19,7 @@ import { createClient } from '@/lib/supabase/server';
 import { SettingsBillingTab } from '@/components/settings/settings-billing-tab';
 import { ProPlanTab } from '@/components/settings/plan-billing/pro-plan-tab';
 import { SettingsView } from '@/components/settings/settings-view';
+import { getTeamBilling } from '@/lib/data/team-billing';
 import {
   PlanBillingLoadError,
   PlanBillingOwnerNotice,
@@ -185,5 +186,13 @@ async function SelfServeBilling({ tenantId, billing }: { tenantId: string; billi
   if (!summary) return <PlanBillingLoadError />;
   if (summary.kind === 'managed') return <SettingsBillingTab billing={billing} />;
   const referral = summary.kind === 'stripe' ? await getReferralData(tenantId, summary.choice.plan) : null;
-  return <PlanBillingTab summary={summary} referral={referral} />;
+  // The team's line is an explanation only: if it can't be read the page loads without it.
+  const teamBilling =
+    summary.kind === 'stripe'
+      ? await getTeamBilling(tenantId).catch((err) => {
+          console.error('[billing] team line', err instanceof Error ? err.message : 'failed');
+          return null;
+        })
+      : null;
+  return <PlanBillingTab summary={summary} referral={referral} teamBilling={teamBilling} />;
 }

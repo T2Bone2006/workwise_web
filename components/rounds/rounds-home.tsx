@@ -6,6 +6,7 @@ import type { TrendMonth } from '@/lib/books/trend';
 import type { RoundsHomeData } from '@/lib/data/rounds/home';
 import type { NeedsYou } from '@/lib/data/rounds/needs-you';
 import type { LatestPayment, RoundValue } from '@/lib/data/rounds/overview';
+import type { TeamToday } from '@/lib/data/rounds/team-today-core';
 import type { ComingUp } from '@/lib/rounds/coming-up';
 import { listTodayStops, summariseToday } from '@/lib/rounds/today-strip';
 import type { WeekGlance } from '@/lib/rounds/week-glance';
@@ -21,6 +22,7 @@ import { NeedsYouCard } from '@/components/rounds/overview/needs-you-card';
 import { RoomCard } from '@/components/rounds/overview/room-card';
 import { TodayCard } from '@/components/rounds/overview/today-card';
 import { WeekStrip } from '@/components/rounds/overview/week-strip';
+import { TeamTodayCard } from '@/components/team/team-today-card';
 
 function greeting(firstName: string | null): string {
   const hour = Number(
@@ -49,6 +51,7 @@ export function RoundsHome({
   workingDays,
   roundValue,
   weather,
+  teamToday = null,
 }: {
   tenantName: string;
   /** First name of the person signed in, when we have one. */
@@ -67,6 +70,8 @@ export function RoundsHome({
   roundValue: RoundValue | null;
   /** Forecast for the next 9 days; null when there isn't one. */
   weather: WeatherByDay | null;
+  /** The team's day; null when there is no team and no held cash, or it couldn't be worked out. */
+  teamToday?: TeamToday | null;
 }) {
   const round = summariseToday(data.todayVisits);
   const todayWeather = weather?.[data.today] ?? null;
@@ -146,6 +151,8 @@ export function RoundsHome({
             <NeedsYouCard needs={needs} owed={owed} />
           </div>
         </div>
+
+        {teamToday ? <TeamTodayCard team={teamToday} /> : null}
 
         <WeekStrip week={week} weather={weather} />
 

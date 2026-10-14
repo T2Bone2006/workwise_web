@@ -8,6 +8,10 @@ import { PRO_PLANS } from '@/lib/billing/pro-plans';
 import { extrasToBill, paidForWorkers } from '@/lib/billing/extra-workers-core';
 import { extraWorkerPriceIdFor, isExtraWorkerPrice, proChoiceForPriceId } from '@/lib/billing/pro-plan-prices';
 
+export { chargeNowFromPreviewLines, isProrationLine, stripeNowUnix } from '@/lib/billing/stripe-preview-lines';
+export type { PreviewLine } from '@/lib/billing/stripe-preview-lines';
+import { chargeNowFromPreviewLines, isProrationLine, stripeNowUnix, type PreviewLine } from '@/lib/billing/stripe-preview-lines';
+
 export type ExtraWorkerPreview =
   | {
       ok: true;
@@ -22,32 +26,6 @@ export type ExtraWorkerPreview =
       renewalExtrasPence: number | null;
     }
   | { ok: false };
-
-/** Pure: sums the lines Stripe marks as proration (the next period's lines are not part of "now"). */
-export function chargeNowFromPreviewLines(lines: ReadonlyArray<{ amount: number; proration: boolean }>): number {
-  return lines.reduce((sum, line) => (line.proration ? sum + line.amount : sum), 0);
-}
-
-type PreviewLine = {
-  amount?: number;
-  proration?: boolean;
-  parent?: { subscription_item_details?: { proration?: boolean } | null } | null;
-};
-
-function isProrationLine(line: PreviewLine): boolean {
-  return Boolean(line.parent?.subscription_item_details?.proration ?? line.proration);
-}
-
-/** "Now" as Stripe sees it for this subscription: the test clock's time in test mode, the real time otherwise. */
-async function stripeNowUnix(stripe: ReturnType<typeof getStripe>, subscription: { test_clock?: unknown }): Promise<number> {
-  const ref = subscription.test_clock;
-  const clockId = typeof ref === 'string' ? ref : (ref as { id?: string } | null | undefined)?.id;
-  if (clockId) {
-    const clock = await stripe.testHelpers.testClocks.retrieve(clockId);
-    return clock.frozen_time;
-  }
-  return Math.floor(Date.now() / 1000);
-}
 
 /**
  * What adding `workersToAdd` workers to this business's team would cost, from Stripe's own preview.

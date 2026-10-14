@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { updateCustomerFieldCore } from '@/lib/rounds/customer-field';
 import {
@@ -19,7 +19,7 @@ export async function updateCustomerField(
   customerId: string,
   change: CustomerFieldInput,
 ): Promise<{ success: true; value: unknown } | { success: false; error: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const products = await getTenantProducts();

@@ -8,6 +8,7 @@ import {
 } from '@/lib/rounds/generate-visits';
 import { nextDueAfter, planNextAfterCompletion } from '@/lib/rounds/recurrence';
 import { getSoloWorkerForTenant } from '@/lib/rounds/rounds-worker';
+import { loadRoundLeads } from '@/lib/team/round-leads';
 import type { SkipReason } from '@/lib/rounds/skip-reasons';
 import { afterVisitCompleted } from '@/lib/payments/after-complete';
 import { recordPaymentCore } from '@/lib/payments/money-core';
@@ -172,9 +173,10 @@ async function generateAfterCompletion(
   agreement: AgreementRow,
   today: Ymd,
 ): Promise<void> {
-  const [settings, solo] = await Promise.all([
+  const [settings, solo, roundLeads] = await Promise.all([
     getRoundsSettings(supabase, tenantId),
     getSoloWorkerForTenant(supabase, tenantId),
+    loadRoundLeads(supabase, tenantId),
   ]);
   try {
     await generateVisitsForAgreement(supabase, {
@@ -182,6 +184,7 @@ async function generateAfterCompletion(
       agreement,
       settings,
       workerId: agreement.assigned_worker_id ?? solo?.id ?? null,
+      roundLeadWorkerId: agreement.round_id ? (roundLeads.get(agreement.round_id) ?? null) : null,
       today,
     });
   } catch (err) {
@@ -211,6 +214,8 @@ async function recordOptionalPayment(
     payment: CompleteVisitPayment | null | undefined;
     clientMutationId?: string | null;
     userId: string | null;
+    /** A member of staff took this cash/cheque: it is held by them until the owner ticks it handed over. */
+    collectedBy?: { workerId: string; name: string } | null;
   },
 ): Promise<
   | { ok: true; paymentId: string | null; paymentDuplicate: boolean }
@@ -230,6 +235,7 @@ async function recordOptionalPayment(
     appliesToJobId: params.jobId,
     clientMutationId: params.clientMutationId ?? null,
     userId: params.userId,
+    collectedBy: params.collectedBy ?? null,
   });
   if (!result.success) {
     return { ok: false, error: result.error, retryable: result.retryable === true };
@@ -261,6 +267,8 @@ type CompleteVisitParams = {
    * to use Mark as paid instead).
    */
   alreadyDonePayment?: 'record' | 'ignore';
+  /** Set by the staff API: the payment is held by this member of staff (Phase 9, D10). Owners leave it out. */
+  collectedBy?: { workerId: string; name: string } | null;
 };
 
 /** Done arrived for a visit that is already skipped: keep any cash as credit against this job id. */
@@ -276,6 +284,7 @@ async function completeWhenSkipped(
     payment: params.alreadyDonePayment === 'ignore' ? null : params.payment,
     clientMutationId: params.clientMutationId,
     userId: params.actor.userId ?? null,
+    collectedBy: params.collectedBy ?? null,
   });
   if (!payment.ok) {
     return { success: false, error: payment.error, retryable: payment.retryable };
@@ -302,6 +311,7 @@ async function completeWhenAlreadyDone(
     payment: params.alreadyDonePayment === 'ignore' ? null : params.payment,
     clientMutationId: params.clientMutationId,
     userId: params.actor.userId ?? null,
+    collectedBy: params.collectedBy ?? null,
   });
   if (!payment.ok) {
     return { success: false, error: payment.error, retryable: payment.retryable };
@@ -424,6 +434,7 @@ export async function completeVisitCore(
     payment: params.payment,
     clientMutationId: params.clientMutationId,
     userId,
+    collectedBy: params.collectedBy ?? null,
   });
   if (!payment.ok) {
     return {
@@ -631,6 +642,8 @@ export async function moveRemainingCore(
     toDate: Ymd;
     scheduledTime?: string | null;
     actor: Actor;
+    /** Move exactly these visits (the ones already snapshotted). Omitted = every open visit on fromDate, as before. */
+    jobIds?: string[];
   },
 ): Promise<{ success: true; moved: number } | { success: false; error: string }> {
   if (!isValidYmd(params.fromDate) || !isValidYmd(params.toDate)) {
@@ -640,7 +653,7 @@ export async function moveRemainingCore(
     return { success: true, moved: 0 };
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('jobs')
     .select(
       'id, status, scheduled_date, scheduled_time, service_agreement_id, route_position, customer_id',
@@ -648,6 +661,8 @@ export async function moveRemainingCore(
     .eq('tenant_id', params.tenantId)
     .eq('scheduled_date', params.fromDate)
     .in('status', [...RESCHEDULE_STATUSES]);
+  if (params.jobIds) query = query.in('id', params.jobIds);
+  const { data, error } = await query;
 
   if (error) {
     return { success: false, error: error.message ?? 'Failed to load leftover stops.' };

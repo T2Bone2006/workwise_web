@@ -2,12 +2,15 @@ import Link from 'next/link';
 import { format, parseISO } from 'date-fns';
 import { CalendarClock, CircleCheck, TriangleAlert } from 'lucide-react';
 import { Notice, StatTile } from '@/components/look';
+import { CashHeldCard } from '@/components/worker/cash-held-card';
 import { DayCard } from '@/components/worker/day-card';
 import { LiteOfferSlot } from '@/components/worker/lite-offer-slot';
 import { PhoneNote } from '@/components/worker/phone-note';
 import { WeekGlance } from '@/components/worker/week-glance';
 import { getWorkerLink } from '@/lib/auth/worker-link';
-import { getMyJobsInRangeResult, getMyWaitingJobs } from '@/lib/data/worker/jobs';
+import { getMyJob, getMyJobsInRangeResult, getMyWaitingJobs } from '@/lib/data/worker/jobs';
+import { getWorkerRoundsExtras } from '@/lib/data/worker/rounds-extras';
+import { RoundsVisitCard } from '@/components/worker/rounds-visit-card';
 import { getMyFirstName } from '@/lib/data/worker/profile';
 import { todayInLondon } from '@/lib/rounds/dates';
 import { buildDashboard, dashboardWindow, greetingFor, londonHour } from '@/lib/worker/dashboard';
@@ -17,13 +20,16 @@ export default async function WorkerDashboardPage() {
   const today = todayInLondon();
   const window = dashboardWindow(today);
 
-  const [range, waiting, firstName] = await Promise.all([
+  const [range, waiting, firstName, extras] = await Promise.all([
     getMyJobsInRangeResult(window.from, window.to),
     getMyWaitingJobs(),
     getMyFirstName(),
+    getWorkerRoundsExtras(),
   ]);
   const data = buildDashboard(range.jobs, today);
   const n = data.numbers;
+  // A lead's next stop, with the customer's number to ring. Read through the same checks as the visit page.
+  const nextStop = extras.employerIsRounds && data.today.next ? await getMyJob(data.today.next.id) : null;
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -64,9 +70,15 @@ export default async function WorkerDashboardPage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start sm:gap-5">
         <div className="space-y-4 sm:space-y-5">
           <DayCard plan={data.today} today={today} nextJobDate={n.nextJobDate} />
+          {nextStop && nextStop.customerPhone ? (
+            <RoundsVisitCard price={nextStop.price ?? null} phone={nextStop.customerPhone} accessNotes={nextStop.accessNotes ?? null} />
+          ) : null}
           <PhoneNote>Accept, start and finish jobs in the WorkWise app. This page shows where you are up to.</PhoneNote>
         </div>
         <div className="space-y-4 sm:space-y-5">
+          {extras.heldCash ? (
+            <CashHeldCard total={extras.heldCash.total} count={extras.heldCash.count} handTo={extras.handToName} />
+          ) : null}
           <WeekGlance week={data.week} />
           <div className="grid grid-cols-2 gap-3">
             <StatTile

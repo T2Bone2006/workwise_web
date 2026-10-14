@@ -17,6 +17,7 @@ import {
   Wrench,
   Map,
   UserRound,
+  UsersRound,
 } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { litePaths } from '@/lib/navigation/lite-paths';
@@ -65,21 +66,25 @@ export function workerSectionTitle(employer: string | null): string {
   return name && name.length <= 22 ? `Work for ${name}` : 'Work';
 }
 
-const WORKER_ITEMS: NavItem[] = [
-  { href: '/worker', label: 'Dashboard', icon: LayoutDashboard, show: true },
-  { href: '/worker/calendar', label: 'Calendar', icon: CalendarDays, show: true },
-  { href: '/worker/jobs', label: 'Jobs', icon: Briefcase, show: true },
-  { href: '/worker/profile', label: 'Profile', icon: UserRound, show: true },
-];
+/** The worker area's four tabs. A Rounds employer's third tab says Visits (a round is visits, not jobs). */
+function workerItems(employerIsRounds: boolean | undefined): NavItem[] {
+  return [
+    { href: '/worker', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { href: '/worker/calendar', label: 'Calendar', icon: CalendarDays, show: true },
+    { href: '/worker/jobs', label: employerIsRounds ? 'Visits' : 'Jobs', icon: Briefcase, show: true },
+    { href: '/worker/profile', label: 'Profile', icon: UserRound, show: true },
+  ];
+}
 
 export function buildNavSections(features: TenantFeatures): NavSection[] {
   // An employee gets the worker area and nothing else: no office links, no Settings.
   if (features.workerOnly) {
-    return [{ product: 'worker', items: WORKER_ITEMS }];
+    return [{ product: 'worker', items: workerItems(features.workerEmployerIsRounds) }];
   }
 
   const pro: NavItem[] = [
     { href: '/jobs', label: 'Jobs', icon: Briefcase, show: true },
+    { href: '/jobs/calendar', label: 'Calendar', icon: CalendarDays, show: true },
     { href: '/workers', label: 'Workers', icon: Users, show: true },
     { href: '/network', label: 'Network', icon: Share2, show: true },
     { href: '/monitor', label: 'Monitor', icon: Activity, show: true },
@@ -90,6 +95,7 @@ export function buildNavSections(features: TenantFeatures): NavSection[] {
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     { href: '/customers', label: 'Customers', icon: Users, show: true },
     { href: '/calendar', label: 'Calendar', icon: CalendarDays, show: true },
+    { href: '/team', label: 'Team', icon: UsersRound, show: true },
     { href: '/map', label: 'Map', icon: Map, show: true },
     { href: '/services', label: 'Services', icon: Wrench, show: true },
     { href: '/payments', label: 'Payments', icon: Wallet, show: true },
@@ -104,7 +110,7 @@ export function buildNavSections(features: TenantFeatures): NavSection[] {
 
   const productSections: NavSection[] = [];
   if (features.worker) {
-    productSections.push({ title: workerSectionTitle(features.workerEmployer), product: 'worker', items: WORKER_ITEMS });
+    productSections.push({ title: workerSectionTitle(features.workerEmployer), product: 'worker', items: workerItems(features.workerEmployerIsRounds) });
   }
   if (features.pro) productSections.push({ title: 'Pro', product: 'pro', items: pro });
   if (features.rounds) productSections.push({ title: 'Rounds', product: 'rounds', items: rounds });

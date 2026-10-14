@@ -25,6 +25,11 @@ interface SearchableSelectProps {
   id?: string
   /** Fired when the dropdown opens or closes. */
   onOpenChange?: (open: boolean) => void
+  /**
+   * Groups tucked away until the person searches: they show as one heading
+   * with a count instead of a long list.
+   */
+  collapsedGroups?: string[]
 }
 
 function normalize(input: string): string {
@@ -42,6 +47,7 @@ export function SearchableSelect({
   disabled,
   id,
   onOpenChange,
+  collapsedGroups,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -73,6 +79,8 @@ export function SearchableSelect({
       )
     })
   }, [options, search])
+
+  const searching = normalize(search) !== ""
 
   const groupedOptions = React.useMemo(() => {
     const grouped = new Map<string, SearchableSelectOption[]>()
@@ -125,13 +133,21 @@ export function SearchableSelect({
             <CommandPrimitive.Empty className="text-muted-foreground py-6 text-center text-sm">
               {emptyText}
             </CommandPrimitive.Empty>
-            {groupedOptions.map(([group, groupItems]) => (
+            {groupedOptions.map(([group, groupItems]) => {
+              const collapsed = !searching && collapsedGroups?.includes(group)
+              return (
               <CommandPrimitive.Group
                 key={group}
-                heading={group === "__ungrouped__" ? undefined : group}
+                heading={
+                  group === "__ungrouped__"
+                    ? undefined
+                    : collapsed
+                      ? `${group} (${groupItems.length}) — type to search`
+                      : group
+                }
                 className="text-foreground [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs"
               >
-                {groupItems.map((option) => (
+                {(collapsed ? [] : groupItems).map((option) => (
                   <CommandPrimitive.Item
                     key={option.value}
                     value={option.value}
@@ -151,7 +167,8 @@ export function SearchableSelect({
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>
-            ))}
+              )
+            })}
           </CommandPrimitive.List>
         </CommandPrimitive>
       </PopoverContent>

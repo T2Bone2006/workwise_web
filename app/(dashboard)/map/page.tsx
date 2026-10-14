@@ -53,5 +53,14 @@ export default async function MapPage() {
     );
   }
 
-  return <RoundsMapView places={data.places} rounds={data.rounds} unmappedCustomers={data.unmappedCustomers} notes={data.notes} />;
+  return (
+    <RoundsMapView
+      places={data.places}
+      rounds={data.rounds}
+      usualLeads={data.usualLeads}
+      leadOptions={data.leadOptions}
+      unmappedCustomers={data.unmappedCustomers}
+      notes={data.notes}
+    />
+  );
 }

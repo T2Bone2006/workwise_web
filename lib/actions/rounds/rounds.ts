@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { cleanRoundName, isRoundColour, membershipChanges } from '@/lib/rounds/rounds';
+import { releaseVisitsToOwner, repointAgreementVisits, repointRoundVisits, validAssignees } from '@/lib/team/assign';
 
 export type SaveRoundResult = { success: true; id: string } | { success: false; error: string };
 export type DeleteRoundResult = { success: true } | { success: false; error: string };
@@ -45,7 +46,7 @@ export async function saveRound(input: SaveRoundInput): Promise<SaveRoundResult>
   if (!name.ok) return { success: false, error: name.error };
   if (!isRoundColour(colour)) return { success: false, error: 'Pick a colour from the list.' };
 
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Your account is not linked to a business.' };
   const db = await createClient();
   const wanted = [...new Set(placeIds)];
@@ -116,6 +117,19 @@ export async function saveRound(input: SaveRoundInput): Promise<SaveRoundResult>
     if (error) return { success: false, error: 'The round was saved but some customers couldn’t be removed. Try again.' };
   }
 
+  // Places that joined a round follow its usual lead; places that left follow the owner again. Best effort: the round is saved either way.
+  if (add.length > 0) {
+    await repointRoundVisits(db, { tenantId, roundId, previousLeadWorkerId: null }).catch(() => 0);
+  }
+  if (remove.length > 0) {
+    const { data: lead } = await db.from('rounds').select('usual_lead_worker_id').eq('id', roundId).eq('tenant_id', tenantId).maybeSingle();
+    await releaseVisitsToOwner(db, {
+      tenantId,
+      agreementIds: remove,
+      leadWorkerId: (lead as { usual_lead_worker_id?: string | null } | null)?.usual_lead_worker_id ?? null,
+    }).catch(() => 0);
+  }
+
   refresh();
   return { success: true, id: roundId };
 }
@@ -123,12 +137,78 @@ export async function saveRound(input: SaveRoundInput): Promise<SaveRoundResult>
 /** Deletes the round only. The customers in it stay, and are simply not in a round any more. */
 export async function deleteRound(id: string): Promise<DeleteRoundResult> {
   if (!z.string().uuid().safeParse(id).success) return { success: false, error: 'That round doesn’t exist.' };
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Your account is not linked to a business.' };
   const db = await createClient();
+  // Remember who led it and which places were in it, so their upcoming visits can go back to the owner.
+  const { data: before } = await db.from('rounds').select('usual_lead_worker_id').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+  const { data: places } = await db.from('service_agreements').select('id').eq('tenant_id', tenantId).eq('round_id', id);
   const { data, error } = await db.from('rounds').delete().eq('id', id).eq('tenant_id', tenantId).select('id');
   if (error) return { success: false, error: 'Couldn’t delete the round. Try again.' };
   if (!data || data.length === 0) return { success: false, error: NOT_OWNER };
+  await releaseVisitsToOwner(db, {
+    tenantId,
+    agreementIds: (places ?? []).map((r) => String((r as { id: unknown }).id)),
+    leadWorkerId: (before as { usual_lead_worker_id?: string | null } | null)?.usual_lead_worker_id ?? null,
+  }).catch(() => 0);
   refresh();
   return { success: true };
+}
+
+export type SetAgreementRoundResult =
+  | { success: true; roundName: string | null; leadName: string | null }
+  | { success: false; error: string };
+
+/**
+ * Put one house in a round (or take it out). Its upcoming visits follow the round's usual lead, as they do when a house
+ * is added to a round on the map. Visits the owner gave to someone else for a day are left alone.
+ */
+export async function setAgreementRound(agreementId: string, roundId: string | null): Promise<SetAgreementRoundResult> {
+  if (!z.string().uuid().safeParse(agreementId).success) return { success: false, error: 'That customer doesn’t exist.' };
+  if (roundId !== null && !z.string().uuid().safeParse(roundId).success) return { success: false, error: 'That round doesn’t exist.' };
+  const tenantId = await getOwnerTenantId();
+  if (!tenantId) return { success: false, error: NOT_OWNER };
+  const db = await createClient();
+
+  const { data: agreement, error: agreementError } = await db
+    .from('service_agreements')
+    .select('id, round_id')
+    .eq('id', agreementId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+  if (agreementError || !agreement) return { success: false, error: 'That customer doesn’t exist.' };
+  const previousRoundId = (agreement as { round_id: string | null }).round_id ?? null;
+  if (previousRoundId === roundId) return { success: true, roundName: null, leadName: null };
+
+  const readRound = async (id: string | null) => {
+    if (!id) return null;
+    const { data } = await db
+      .from('rounds')
+      .select('id, name, usual_lead_worker_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    return (data as { id: string; name: string; usual_lead_worker_id: string | null } | null) ?? null;
+  };
+  const [previous, next] = await Promise.all([readRound(previousRoundId), readRound(roundId)]);
+  if (roundId && !next) return { success: false, error: 'That round doesn’t exist.' };
+
+  const { error } = await db.from('service_agreements').update({ round_id: roundId }).eq('id', agreementId).eq('tenant_id', tenantId);
+  if (error) return { success: false, error: 'Couldn’t save that. Try again.' };
+
+  await repointAgreementVisits(db, {
+    tenantId,
+    agreementId,
+    fromLeadWorkerId: previous?.usual_lead_worker_id ?? null,
+    toLeadWorkerId: next?.usual_lead_worker_id ?? null,
+  }).catch(() => 0);
+
+  let leadName: string | null = null;
+  if (next?.usual_lead_worker_id) {
+    const assignees = await validAssignees(db, tenantId).catch(() => []);
+    leadName = assignees.find((a) => a.workerId === next.usual_lead_worker_id)?.name ?? null;
+  }
+  refresh();
+  revalidatePath('/calendar');
+  return { success: true, roundName: next?.name ?? null, leadName };
 }

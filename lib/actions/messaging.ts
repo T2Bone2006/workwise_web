@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { actOnReplyCore, markThreadRead } from '@/lib/messaging/replies';
@@ -35,7 +35,7 @@ async function requireRounds(): Promise<
     }
   | { success: false; error: string }
 > {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const products = await getTenantProducts();

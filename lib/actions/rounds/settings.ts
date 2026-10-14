@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { parseRoundsSettings, withRoundsSettings } from '@/lib/rounds/settings';
 import {
   roundsSettingsSchema,
@@ -23,7 +23,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export async function updateRoundsSettings(
   input: RoundsSettingsInput,
 ): Promise<ActionResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'Not authenticated' };
 
   const parsed = roundsSettingsSchema.safeParse(input);

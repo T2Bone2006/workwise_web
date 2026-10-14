@@ -303,6 +303,38 @@ describe('generateVisitsForAgreement', () => {
     expect(db.jobs).toHaveLength(0);
   });
 
+  it('gives the visits to the round’s usual lead, ahead of the agreement’s own assignee and the owner', async () => {
+    const LEAD = '55555555-5555-5555-5555-555555555555';
+    const db = emptyDb();
+    const agr = agreement({ assigned_worker_id: WORKER });
+    db.agreements = [{ ...agr }];
+    await generateVisitsForAgreement(createFakeSupabase(db), {
+      tenantId: TENANT,
+      agreement: agr,
+      settings: SETTINGS,
+      workerId: WORKER,
+      roundLeadWorkerId: LEAD,
+      today: TODAY,
+    });
+    expect(db.jobs).toHaveLength(3);
+    expect(db.jobs.every((job) => job.assigned_worker_id === LEAD)).toBe(true);
+  });
+
+  it('keeps the agreement’s own assignee when its round has no lead', async () => {
+    const db = emptyDb();
+    const agr = agreement({ assigned_worker_id: WORKER });
+    db.agreements = [{ ...agr }];
+    await generateVisitsForAgreement(createFakeSupabase(db), {
+      tenantId: TENANT,
+      agreement: agr,
+      settings: SETTINGS,
+      workerId: null,
+      roundLeadWorkerId: null,
+      today: TODAY,
+    });
+    expect(db.jobs.every((job) => job.assigned_worker_id === WORKER)).toBe(true);
+  });
+
   it('inserts the fixed horizon, writes history, and advances the cursor', async () => {
     const db = emptyDb();
     const agr = agreement();
