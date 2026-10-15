@@ -8,6 +8,7 @@ import { Loader2, ArrowLeft, Building2, MapPin, User, Wallet } from 'lucide-reac
 import { PinPickerDialog } from '@/components/rounds/pin-picker-dialog';
 import { LookCard } from '@/components/look';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import {
   CONTACT_CHOICE_LABELS,
@@ -203,16 +204,17 @@ export function CustomerForm({
             params.set('lat', String(pin.lat));
             params.set('lng', String(pin.lng));
           }
-          router.push(`/customers/${result.id}/agreements/new?${params.toString()}`);
+          await leaveTo(`/customers/${result.id}/agreements/new?${params.toString()}`);
         } else if (customer?.id) {
-          leaveViaHistory(router, `/customers/${customer.id}`);
+          await leaveTo(`/customers/${customer.id}`);
         } else {
-          leaveViaHistory(router, '/customers');
+          await leaveTo('/customers');
         }
+      } else if (mode === 'create' && 'id' in result && typeof result.id === 'string') {
+        await leaveTo(`/customers/${result.id}`);
       } else {
-        leaveViaHistory(router, '/customers');
+        await leaveTo('/customers');
       }
-      router.refresh();
     } finally {
       setIsSubmitting(false);
     }
@@ -226,8 +228,7 @@ export function CustomerForm({
     setDeleteDialogOpen(false);
     if (result.success) {
       toast.success('Customer deleted');
-      leaveViaHistory(router, '/customers');
-      router.refresh();
+      await leaveTo('/customers');
     } else {
       toast.error(result.error ?? 'Failed to delete customer');
     }

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Trash2, Loader2 } from 'lucide-react';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,7 +28,6 @@ interface JobDetailDeleteButtonProps {
 }
 
 export function JobDetailDeleteButton({ jobId, status }: JobDetailDeleteButtonProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -41,8 +40,7 @@ export function JobDetailDeleteButton({ jobId, status }: JobDetailDeleteButtonPr
     setOpen(false);
     if (result.success) {
       toast.success('Job deleted');
-      router.push('/jobs');
-      router.refresh();
+      await leaveTo('/jobs');
     } else {
       toast.error(result.error ?? 'Failed to delete job');
     }

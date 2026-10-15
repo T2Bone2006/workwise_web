@@ -31,6 +31,7 @@ import {
   unhookChromeAddressFill,
 } from '@/components/ui/address-autocomplete-input';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { PinPickerDialog } from '@/components/rounds/pin-picker-dialog';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -271,8 +272,7 @@ export function AgreementForm({
         return;
       }
       toast.success('Agreement updated');
-      leaveViaHistory(router, cancelHref);
-      router.refresh();
+      await leaveTo(cancelHref);
     } finally {
       setIsSubmitting(false);
       setPriceDialogOpen(false);
@@ -943,8 +943,7 @@ export function AgreementForm({
               variant="outline"
               onClick={() => {
                 setAfterCreateOpen(false);
-                leaveViaHistory(router, cancelHref);
-                router.refresh();
+                void leaveTo(cancelHref);
               }}
             >
               Done
@@ -952,10 +951,7 @@ export function AgreementForm({
             <Button
               onClick={() => {
                 setAfterCreateOpen(false);
-                router.push(
-                  `/customers/${customerId}/agreements/new`,
-                );
-                router.refresh();
+                void leaveTo(`/customers/${customerId}/agreements/new?another=${Date.now()}`);
               }}
             >
               Add another service

@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, CalendarIcon, Brain, X } from 'lucide-react';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -191,8 +192,7 @@ export function JobForm({
         toast.success('Job created successfully');
       }
 
-      leaveViaHistory(router, '/jobs');
-      router.refresh();
+      await leaveTo('/jobs');
     } catch {
       toast.error('Unable to create job. Please try again.');
     } finally {

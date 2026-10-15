@@ -3,7 +3,8 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { useTheme } from 'next-themes';
 import { Briefcase, ChevronsUpDown, LogOut, Menu, Moon, Sun } from 'lucide-react';
 import { PortalProCard } from '@/components/portal/portal-pro-card';
@@ -52,7 +53,6 @@ function PortalAccountMenu({
   children: ReactNode;
 }) {
   const hydrated = useHydrated();
-  const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -61,8 +61,7 @@ function PortalAccountMenu({
     setIsSigningOut(true);
     const supabase = createBrowserClient();
     await supabase.auth.signOut();
-    router.push('/login');
-    router.refresh();
+    await leaveTo('/login');
   }
 
   const triggerClass = cn(

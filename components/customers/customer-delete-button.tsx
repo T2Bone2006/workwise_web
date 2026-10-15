@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Loader2, Trash2, UserMinus } from 'lucide-react';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,7 +36,6 @@ export function CustomerDeleteButton({
   size = 'sm',
   redirectTo = '/customers',
 }: CustomerDeleteButtonProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
@@ -49,8 +48,7 @@ export function CustomerDeleteButton({
     setOpen(false);
     if (result.success) {
       toast.success(useDeactivate ? 'Customer deactivated' : 'Customer deleted');
-      router.push(redirectTo);
-      router.refresh();
+      await leaveTo(redirectTo);
     } else {
       toast.error(
         result.error ??

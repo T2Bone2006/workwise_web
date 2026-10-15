@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import { startInterviewAction } from '@/lib/actions/lite/interview';
 import { Button } from '@/components/ui/button';
 import { litePaths } from '@/lib/navigation/lite-paths';
 
 export function ComingSoonCard({ redoInProgress }: { redoInProgress: boolean }) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
 
   async function redo() {
@@ -21,8 +20,7 @@ export function ComingSoonCard({ redoInProgress }: { redoInProgress: boolean }) 
       toast(result.error);
       return;
     }
-    router.push(litePaths.setup);
-    router.refresh();
+    await leaveTo(litePaths.setup);
   }
 
   return (

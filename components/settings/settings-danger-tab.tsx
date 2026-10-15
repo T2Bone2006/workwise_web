@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,8 +107,7 @@ export function SettingsDangerTab({ data, selfServe = false, hasRounds = false }
     if (result.success) {
       toast.success('Account deleted');
       setDeleteTenantOpen(false);
-      router.push('/login');
-      router.refresh();
+      await leaveTo('/login');
     } else {
       toast.error(result.error ?? 'Failed to delete account');
     }
@@ -142,7 +142,7 @@ export function SettingsDangerTab({ data, selfServe = false, hasRounds = false }
     setCloseSaving(false);
     if (result.ok) {
       setCloseOpen(false);
-      router.push('/login?closed=1');
+      await leaveTo('/login?closed=1');
       return;
     }
     setCloseError(result.error);

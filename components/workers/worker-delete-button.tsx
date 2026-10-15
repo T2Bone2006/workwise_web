@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { UserMinus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -50,8 +51,7 @@ export function WorkerDeactivateButton({
       if (fullWidth) {
         router.refresh();
       } else {
-        router.push('/workers');
-        router.refresh();
+        await leaveTo('/workers');
       }
     } else {
       toast.error(result.error ?? 'Failed to deactivate worker');

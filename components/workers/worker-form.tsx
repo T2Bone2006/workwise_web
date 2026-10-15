@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, X, ChevronDown } from 'lucide-react';
 import { leaveViaHistory } from '@/components/layout/history-back-button';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import { workerSchema, type WorkerFormInput } from '@/lib/validations/worker';
 import { createWorker, updateWorker } from '@/lib/actions/workers';
@@ -187,12 +188,7 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
     setExtraNotice(null);
     setPendingForm(null);
     toast.success(mode === 'create' ? 'Worker created' : 'Worker updated');
-    if (mode === 'edit') {
-      router.replace('/workers');
-    } else {
-      leaveViaHistory(router, '/workers');
-    }
-    router.refresh();
+    await leaveTo('/workers');
   }
 
   async function confirmExtraWorker() {

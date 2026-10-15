@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { leaveTo } from '@/lib/navigation/leave-to';
 import { toast } from 'sonner';
 import { createInvoice } from '@/lib/actions/payments';
 import { Button } from '@/components/ui/button';
@@ -47,7 +47,6 @@ export function SendInvoiceDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const router = useRouter();
   const owed = unpaidVisits.reduce((sum, visit) => sum + visit.outstanding, 0);
   const nothingOwed = unpaidVisits.length === 0 || owed <= 0;
   const visits = useMemo(() => {
@@ -95,8 +94,7 @@ export function SendInvoiceDialog({
       toast.success(`Invoice ${result.number} created`);
     }
     onOpenChange(false);
-    router.push(`/payments/invoices/${result.invoiceId}`);
-    router.refresh();
+    await leaveTo(`/payments/invoices/${result.invoiceId}`, 'push');
   };
 
   return (
