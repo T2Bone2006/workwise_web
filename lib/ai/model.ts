@@ -13,7 +13,7 @@ export const DEFAULT_AI_MODEL =
  * hard case — fused date+time cells, postcode buried in the address, priority
  * implied by wording ("URGENT"), "16 Sept 2026", "2.30pm", half-day wording,
  * and correctly returning empty rather than inventing a missing address — at
- * roughly a third of Sonnet's cost. Raise to 'claude-sonnet-5' or
+ * roughly a third of Sonnet's cost. Raise to 'claude-sonnet-5-5' or
  * 'claude-opus-5' via ANTHROPIC_EXTRACTION_MODEL if a future sheet defeats it.
  */
 export const EXTRACTION_AI_MODEL =
@@ -31,17 +31,70 @@ export const GROUPING_AI_MODEL =
   process.env.ANTHROPIC_GROUPING_MODEL?.trim() || 'claude-haiku-4-5';
 
 /**
+ * Phase 5 receipt reading. Owner decision (2026-10-02, before any real-receipt
+ * test): Sonnet reads every receipt. It costs about 1p a receipt against 0.3p on
+ * Haiku, and a confidently-wrong total is the error the "unsure" re-read cannot
+ * catch and that ends up in the accountant's numbers. When the escalation model
+ * is the same as the first (the default now) there is no second read; set
+ * RECEIPT_AI_MODEL=claude-haiku-4-5 to go back to "Haiku first, Sonnet when
+ * unsure" (see `needsEscalation`).
+ */
+export const RECEIPT_AI_MODEL = process.env.RECEIPT_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+export const RECEIPT_ESCALATION_MODEL =
+  process.env.RECEIPT_ESCALATION_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/**
+ * Phase 5 round-book reading (T14): photos of a handwritten round book or a
+ * typed list. Sonnet, not Haiku, because handwriting defeats Haiku more often.
+ */
+export const ROUND_BOOK_AI_MODEL = process.env.ROUND_BOOK_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/**
+ * Rounds customer import (spreadsheets). Haiku for now, same as Pro's job import
+ * (text rows, not photos; it read a deliberately messy 28-row sheet well). Its
+ * own setting so it can be raised to 'claude-sonnet-5-5' without touching Pro.
+ */
+export const CUSTOMER_IMPORT_AI_MODEL =
+  process.env.CUSTOMER_IMPORT_AI_MODEL?.trim() || 'claude-haiku-4-5';
+
+/** Phase 6: the website assistant. Sonnet, one business's prices, a low effort. */
+export const WIDGET_AI_MODEL = process.env.WIDGET_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: the set-up interview that learns how the tradie prices. */
+export const INTERVIEW_AI_MODEL = process.env.INTERVIEW_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: follow-up texts drafted in the tradie's voice. */
+export const LITE_TEXT_AI_MODEL = process.env.LITE_TEXT_AI_MODEL?.trim() || 'claude-sonnet-5-5';
+
+/** Phase 6: a one-line summary of a finished website chat. Haiku is enough. */
+export const CONVERSATION_SUMMARY_AI_MODEL =
+  process.env.CONVERSATION_SUMMARY_AI_MODEL?.trim() || 'claude-haiku-4-5';
+
+/**
+ * Your assistant (Lily in the app, dashboard and phone). Haiku 5.5 since 2026-10-09: the eval
+ * (scripts/assistant-eval/report-haiku-5-5.md, report-pro-haiku-5-5.md) ran 74 questions at about
+ * 0.04p each against 0.5-0.7p on Sonnet, with only wording nits. Set ASSISTANT_AI_MODEL=claude-sonnet-5-5
+ * to go back.
+ */
+export const ASSISTANT_AI_MODEL = process.env.ASSISTANT_AI_MODEL?.trim() || 'claude-haiku-5-5';
+
+/**
  * `output_config.effort` is rejected with a 400 on older models (Haiku 4.5
  * among them), so it can only be sent when the configured model supports it.
+ * Haiku 5.5 is the first Haiku that accepts it.
  */
 export function supportsEffort(model: string): boolean {
-  return /^claude-(opus-(5|4-[5-9])|sonnet-5|fable-5|mythos-5)/.test(model);
+  return /^claude-(opus-(5|4-[5-9])|sonnet-5|haiku-5|fable-5|mythos-5)/.test(model);
 }
 
 /** Per-million-token USD rates for cost logging. Falls back to Sonnet rates. */
 const MODEL_RATES: Record<string, { input: number; output: number }> = {
+  'claude-opus-5-5': { input: 4, output: 20 },
   'claude-opus-5': { input: 5, output: 25 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
   'claude-sonnet-5': { input: 2, output: 10 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5 }, // up to 100k-token prompts; $0.5 / $2.5 above that
+  'claude-haiku-5': { input: 0.1, output: 0.5 },
   'claude-haiku-4-5': { input: 1, output: 5 },
 };
 
@@ -52,4 +105,23 @@ export function estimateAiCostUsd(
 ): number {
   const rate = MODEL_RATES[model] ?? { input: 3, output: 15 };
   return (tokensInput / 1_000_000) * rate.input + (tokensOutput / 1_000_000) * rate.output;
+}
+
+/**
+ * Cost with prompt caching: cache writes are billed at 1.25x the input rate
+ * (5-minute cache) or 2x (1-hour cache, `cacheWrite1h`, which is part of
+ * `cacheWrite`), cache reads at 0.1x. `uncachedInput` is the API's
+ * input_tokens (the part that was neither read from nor written to the cache).
+ */
+export function estimateCachedAiCostUsd(
+  model: string,
+  t: { uncachedInput: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number },
+): number {
+  const rate = MODEL_RATES[model] ?? { input: 3, output: 15 };
+  const write1h = Math.min(t.cacheWrite1h ?? 0, t.cacheWrite);
+  const write5m = t.cacheWrite - write1h;
+  return (
+    (t.uncachedInput * rate.input + write5m * rate.input * 1.25 + write1h * rate.input * 2 + t.cacheRead * rate.input * 0.1 + t.output * rate.output) /
+    1_000_000
+  );
 }

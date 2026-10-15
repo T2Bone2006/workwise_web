@@ -26,15 +26,21 @@ import {
   dangerDeleteAllJobs,
   dangerResetWorkerData,
   dangerDeleteTenant,
+  closeAccountAction,
 } from '@/lib/actions/settings';
+import { downloadZip } from '@/lib/downloads/client';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import { cn } from '@/lib/utils';
 
 interface SettingsDangerTabProps {
   data: SettingsPageData;
+  /** Self-serve Rounds or Lite. Pro and managed businesses keep Delete tenant account. */
+  selfServe?: boolean;
+  /** Rounds businesses (including a plan that has ended) are offered a data download first. */
+  hasRounds?: boolean;
 }
 
-export function SettingsDangerTab({ data }: SettingsDangerTabProps) {
+export function SettingsDangerTab({ data, selfServe = false, hasRounds = false }: SettingsDangerTabProps) {
   const router = useRouter();
   const tenant = data.tenant;
   const tenantName = tenant?.name ?? '';
@@ -51,6 +57,14 @@ export function SettingsDangerTab({ data }: SettingsDangerTabProps) {
   const [deleteTenantName, setDeleteTenantName] = useState('');
   const [deleteTenantPassword, setDeleteTenantPassword] = useState('');
   const [deleteTenantSaving, setDeleteTenantSaving] = useState(false);
+
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeStep, setCloseStep] = useState<'download' | 'confirm'>('confirm');
+  const [closeName, setCloseName] = useState('');
+  const [closePassword, setClosePassword] = useState('');
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closeSaving, setCloseSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   async function handleDeleteAllJobs() {
     setDeleteJobsSaving(true);
@@ -97,6 +111,41 @@ export function SettingsDangerTab({ data }: SettingsDangerTabProps) {
     } else {
       toast.error(result.error ?? 'Failed to delete account');
     }
+  }
+
+  function openClose() {
+    setCloseError(null);
+    setCloseName('');
+    setClosePassword('');
+    setCloseStep(hasRounds ? 'download' : 'confirm');
+    setCloseOpen(true);
+  }
+
+  async function handleDownloadAll() {
+    if (downloading) return;
+    setDownloading(true);
+    setCloseError(null);
+    const result = await downloadZip('/api/downloads/all-data');
+    setDownloading(false);
+    if (!result.ok) setCloseError(result.error);
+    else toast.success('Download ready');
+  }
+
+  async function handleCloseAccount() {
+    if (closeName.trim() !== tenantName.trim()) {
+      setCloseError('Company name does not match');
+      return;
+    }
+    setCloseSaving(true);
+    setCloseError(null);
+    const result = await closeAccountAction(closeName.trim(), closePassword);
+    setCloseSaving(false);
+    if (result.ok) {
+      setCloseOpen(false);
+      router.push('/login?closed=1');
+      return;
+    }
+    setCloseError(result.error);
   }
 
   return (
@@ -149,21 +198,32 @@ export function SettingsDangerTab({ data }: SettingsDangerTabProps) {
             </Button>
           </div>
 
-          {/* Delete tenant */}
-          <div className="rounded-lg border border-destructive/30 bg-background/50 p-4">
-            <h4 className="font-medium text-foreground">Delete tenant account</h4>
-            <p className="text-sm text-muted-foreground mt-1">
-              Permanently delete this company account and all associated data. You will need to sign in again.
-            </p>
-            <Button
-              type="button"
-              variant="destructive"
-              className="mt-3"
-              onClick={() => setDeleteTenantOpen(true)}
-            >
-              Delete tenant account
-            </Button>
-          </div>
+          {selfServe ? (
+            <div className="rounded-lg border border-destructive/30 bg-background/50 p-4">
+              <h4 className="font-medium text-foreground">Close my account</h4>
+              <p className="text-sm text-muted-foreground mt-1">
+                Stops your plan straight away (no refund for the rest of this period), stops all texts, reminders and Direct Debit collections, and locks every login. Everything is deleted for good 30 days later.
+              </p>
+              <Button type="button" variant="destructive" className="mt-3" onClick={openClose}>
+                Close my account…
+              </Button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-destructive/30 bg-background/50 p-4">
+              <h4 className="font-medium text-foreground">Delete tenant account</h4>
+              <p className="text-sm text-muted-foreground mt-1">
+                Permanently delete this company account and all associated data. You will need to sign in again.
+              </p>
+              <Button
+                type="button"
+                variant="destructive"
+                className="mt-3"
+                onClick={() => setDeleteTenantOpen(true)}
+              >
+                Delete tenant account
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -281,6 +341,93 @@ export function SettingsDangerTab({ data }: SettingsDangerTabProps) {
               Delete account
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
+        <DialogContent>
+          {closeStep === 'download' ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Before you go: download your data</DialogTitle>
+                <DialogDescription>
+                  Customers, schedules, visits, payments, invoices and expenses, as spreadsheets in one file.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-2">
+                <Button type="button" variant="outline" disabled={downloading} onClick={handleDownloadAll}>
+                  {downloading && <Loader2 className="size-4 animate-spin" />}
+                  Download all my data
+                </Button>
+                {closeError ? (
+                  <p className="mt-3 text-sm text-destructive" role="alert">
+                    {closeError}
+                  </p>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCloseOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setCloseError(null);
+                    setCloseStep('confirm');
+                  }}
+                >
+                  Continue
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Close my account</DialogTitle>
+                <DialogDescription>Type the business name and your password.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="close-account-name">Business name</Label>
+                  <Input
+                    id="close-account-name"
+                    value={closeName}
+                    onChange={(e) => setCloseName(e.target.value)}
+                    placeholder={tenantName || 'Business name'}
+                  />
+                  <p className="text-xs text-muted-foreground">Type exactly: {tenantName}</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="close-account-password">Your password</Label>
+                  <Input
+                    id="close-account-password"
+                    type="password"
+                    value={closePassword}
+                    onChange={(e) => setClosePassword(e.target.value)}
+                    placeholder="Password"
+                  />
+                </div>
+                {closeError ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {closeError}
+                  </p>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCloseOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleCloseAccount}
+                  disabled={closeName.trim() !== tenantName.trim() || !closePassword || closeSaving}
+                >
+                  {closeSaving && <Loader2 className="size-4 animate-spin" />}
+                  Close my account
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

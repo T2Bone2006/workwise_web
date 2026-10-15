@@ -19,21 +19,32 @@ import {
 import { cn } from '@/lib/utils';
 import { updateJobCompletionRecord } from '@/lib/actions/jobs';
 import { JobAttachmentPhotoGrids } from '@/components/jobs/job-detail-photos-card';
+import { JobReportRows } from '@/components/jobs/job-report-rows';
+import { visibleJobReportRows } from '@/lib/jobs/job-report-display';
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import {
   formatIndustryDateTime,
-  formatIndustryYesNo,
   nonEmptyString,
   parseJobIndustryData,
   triStateYesNo,
-  walkedAwayFromIndustry,
   type JobIndustryData,
 } from '@/lib/utils/job-industry-data';
+
+/** Questions the edit form on this card already covers. */
+const EDITED_REPORT_IDS = new Set([
+  'lock_changed',
+  'walk_away',
+  'walked_away',
+  'walk_away_reason',
+  'walk_away_detail',
+]);
 
 interface JobDetailCompletionSectionProps {
   jobId: string;
   completedAt: string | null;
   industryData: unknown;
+  /** This business's `settings.job_report_fields`. */
+  reportFields?: unknown;
   completionNotes?: string;
   jobPhotos?: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
 }
@@ -44,19 +55,11 @@ function toTriState(v: 'Yes' | 'No' | null): TriState {
   return v === 'Yes' ? 'yes' : v === 'No' ? 'no' : 'unset';
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-      <dt className="shrink-0 text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm text-foreground">{value}</dd>
-    </div>
-  );
-}
-
 export function JobDetailCompletionSection({
   jobId,
   completedAt,
   industryData,
+  reportFields,
   completionNotes,
   jobPhotos,
 }: JobDetailCompletionSectionProps) {
@@ -114,7 +117,7 @@ export function JobDetailCompletionSection({
     }
   }
 
-  const walkedAway = walkedAwayFromIndustry(displayed.data);
+  const reportRows = visibleJobReportRows(displayed.data, reportFields);
   const before = jobPhotos?.before ?? [];
   const after = jobPhotos?.after ?? [];
   const hasPhotos = before.length > 0 || after.length > 0;
@@ -221,6 +224,7 @@ export function JobDetailCompletionSection({
                 disabled={isSaving}
               />
             </div>
+            <JobReportRows rows={reportRows.filter((row) => !EDITED_REPORT_IDS.has(row.id))} />
             <div className="flex justify-end gap-2 border-t border-border/60 pt-3">
               <Button
                 type="button"
@@ -250,33 +254,7 @@ export function JobDetailCompletionSection({
               )}
             </div>
 
-            <dl className="space-y-3">
-              <Row label="Lock changed" value={formatIndustryYesNo(displayed.data.lock_changed)} />
-              <Row
-                label="Walked away"
-                value={formatIndustryYesNo(displayed.data.walked_away ?? displayed.data.walk_away)}
-              />
-              {walkedAway === true && (
-                <>
-                  {nonEmptyString(displayed.data.walk_away_reason) != null && (
-                    <Row
-                      label="Walk-away reason"
-                      value={nonEmptyString(displayed.data.walk_away_reason)!}
-                    />
-                  )}
-                  {nonEmptyString(displayed.data.walk_away_detail) != null && (
-                    <div className="flex flex-col gap-0.5">
-                      <dt className="text-xs font-medium text-muted-foreground">
-                        Walk-away detail
-                      </dt>
-                      <dd className="whitespace-pre-wrap text-sm text-foreground">
-                        {nonEmptyString(displayed.data.walk_away_detail)}
-                      </dd>
-                    </div>
-                  )}
-                </>
-              )}
-            </dl>
+            <JobReportRows rows={reportRows} />
 
             <div>
               <h3 className="mb-2 text-sm font-medium text-foreground">Before and after photos</h3>

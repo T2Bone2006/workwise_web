@@ -7,6 +7,7 @@ import {
 import { isAdmin } from '@/lib/utils/admin';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/supabase/auth-user';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -57,10 +58,7 @@ export async function recoverAbandonedViewAsIfNeeded(): Promise<void> {
     // Intentional view-as session — leave tenant_id alone.
     if (activeViewAs) return;
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { user } = await getAuthUser();
     if (!user?.id) return;
 
     const adminClient = createAdminClient();

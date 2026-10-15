@@ -1,0 +1,61 @@
+import { PageHeader } from '@/components/accountant/page-header';
+import { PaymentsList } from '@/components/accountant/payments-list';
+import { PeriodPicker } from '@/components/books/period-picker';
+import { Card, CardContent } from '@/components/ui/card';
+import { requireAccountantPage } from '@/lib/accountant/context';
+import { accountantPeriod } from '@/lib/accountant/period';
+import { periodRange } from '@/lib/books/periods';
+import { accountantEarliestTaxYear, accountantPayments, type AccountantPayment } from '@/lib/data/accountant';
+import { todayInLondon } from '@/lib/rounds/dates';
+import { createAdminClient } from '@/lib/supabase/admin';
+
+export const dynamic = 'force-dynamic';
+
+export default async function AccountantPaymentsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ period?: string; filter?: string }>;
+}) {
+  const { token } = await params;
+  const ctx = await requireAccountantPage(token);
+  const raw = await searchParams;
+  const today = todayInLondon();
+  const period = accountantPeriod(raw.period, today);
+  const range = periodRange(period);
+  const admin = createAdminClient();
+
+  let payments: AccountantPayment[] | null = null;
+  let earliest = 0;
+  try {
+    [payments, earliest] = await Promise.all([
+      accountantPayments(admin, ctx.tenantId, range),
+      accountantEarliestTaxYear(admin, ctx.tenantId),
+    ]);
+  } catch {
+    payments = null;
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="Payments" periodLabel={range.label} businessName={ctx.businessName} />
+      <div className="print:hidden">
+        <PeriodPicker value={period} basePath={`/accountant/${token}/payments`} earliestTaxYear={earliest} today={today} />
+      </div>
+      {payments == null ? (
+        <Card>
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            Couldn&apos;t load the payments. Refresh to try again.
+          </CardContent>
+        </Card>
+      ) : (
+        <PaymentsList
+          rows={payments}
+          initialFilter={raw.filter === 'refunded' ? 'refunded' : 'all'}
+          periodLabel={range.label}
+        />
+      )}
+    </div>
+  );
+}

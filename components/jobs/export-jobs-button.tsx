@@ -97,6 +97,11 @@ const EXPORT_COLUMNS: {
     label: 'Start Time',
     get: (j) => formatDateTimeForExport(j.started_at ?? j.arrived_at),
   },
+  {
+    key: 'completed_at',
+    label: 'Completed at',
+    get: (j) => formatDateTimeForExport(j.completed_at),
+  },
   { key: 'completion_notes', label: 'Completion Notes', get: (j) => j.completion_notes ?? '' },
 ];
 

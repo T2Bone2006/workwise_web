@@ -6,11 +6,27 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "stripe:probe": "tsx --env-file=.env.local scripts/stripe-connect-probe.ts",
+    "stripe:portal-config": "node --env-file=.env.local scripts/stripe-portal-config.mjs",
+    "stripe:pro-test-subscription": "node --env-file=.env.local scripts/stripe-pro-test-subscription.mjs",
+    "stripe:pro-restart-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-restart-check.ts",
+    "stripe:pro-yearly-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-yearly-check.ts",
+    "stripe:p9-account": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-p9-walkthrough-account.ts",
+    "stripe:p8-account": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-p8-walkthrough-account.ts",
+    "stripe:pro-manage-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-pro-manage-check.ts",
+    "stripe:extra-worker-check": "tsx --conditions=react-server --env-file=.env.local scripts/stripe-extra-worker-check.ts",
+    "stripe:pro-prices": "node --env-file=.env.local scripts/stripe-pro-prices.mjs",
+    "stripe:extra-worker-prices": "node --env-file=.env.local scripts/stripe-extra-worker-prices.mjs",
+    "stripe:coupons": "node --env-file=.env.local scripts/stripe-coupons.mjs",
+    "lite:tick": "node --env-file=.env.local scripts/lite-tick.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@dnd-kit/core": "^6.3.1",
     "@hookform/resolvers": "^5.2.2",
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
     "@tailwindcss/vite": "^4.0.0",
@@ -19,23 +35,30 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
+    "fflate": "0.8.3",
+    "heic-to": "^1.6.5",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
     "next-themes": "^0.4.6",
     "papaparse": "^5.5.3",
     "radix-ui": "^1.4.3",
-    "react": "19.2.3",
+    "react": "19.3.0",
     "react-day-picker": "^9.13.2",
-    "react-dom": "19.2.3",
+    "react-dom": "19.3.0",
     "react-hook-form": "^7.71.1",
     "react-leaflet": "^5.0.0",
     "recharts": "^3.7.0",
     "resend": "^6.12.3",
+    "server-only": "^0.0.1",
     "sonner": "^2.0.7",
+    "stripe": "^22.6.2",
     "tailwind-merge": "^3.4.0",
     "xlsx": "^0.18.5",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "@radix-ui/react-slot": "1.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -47,7 +70,9 @@
     "eslint-config-next": "16.1.6",
     "shadcn": "^3.8.4",
     "tailwindcss": "^4.0.0",
+    "tsx": "^4.23.15",
     "tw-animate-css": "^1.4.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

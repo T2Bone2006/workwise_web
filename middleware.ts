@@ -1,6 +1,9 @@
 import { updateSession } from '@/lib/supabase/middleware';
+import { mergeCookies } from '@/lib/supabase/cookie-merge';
 import {
-  WORKER_WEB_LOGIN_ERROR_PARAM,
+  WORKER_HOME,
+  employeeRouteDecision,
+  isWorkerAreaPath,
 } from '@/lib/auth/worker-web-access';
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -25,24 +28,24 @@ const UNPROTECTED_PATHS = [
   '/admin-reset-password',
   '/reset-password',
   '/download',
-] as const;
-
-/** Paths workers may visit on the web (invite / password setup). */
-const WORKER_ALLOWED_PATHS = [
-  '/accept-invite',
-  '/reset-password',
-  '/login',
-  '/download',
+  // Self-serve signup: the user has no users row until the Stripe webhook
+  // provisions them, so these must never bounce to /dashboard or /login.
+  '/signup',
+  // Referral links. They only set a cookie and redirect to the marketing site.
+  '/r',
+  // Public customer pages + Stripe return pages.
+  '/pay',
+  '/connect',
+  // Phase 5: the accountant's read-only pages. They have their own emailed-code
+  // sign-in and no Supabase user, so the dashboard session rules must not touch them.
+  '/accountant',
+  // Phase 6: one-tap Accept / Decline / Change price from the new-lead email or text.
+  // The link token is the only credential; opening it must not bounce to /login.
+  '/lead',
 ] as const;
 
 function isUnprotectedPath(pathname: string): boolean {
   return UNPROTECTED_PATHS.some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`)
-  );
-}
-
-function isWorkerAllowedPath(pathname: string): boolean {
-  return WORKER_ALLOWED_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`)
   );
 }
@@ -63,16 +66,29 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = !!user;
   const isLoginPage = pathname === '/login' || pathname.startsWith('/login');
-  const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard');
+  const isDashboard =
+    pathname === '/dashboard' || pathname.startsWith('/dashboard') || isWorkerAreaPath(pathname);
   const isPortalPage = pathname === '/portal' || pathname.startsWith('/portal');
   const isPortalAcceptInvite = pathname.startsWith('/portal/accept-invite');
-  const isPortalLogin = pathname === '/portal/login';
+  const isPortalLogin = pathname === '/portal/login' || pathname.startsWith('/portal/login/');
   const isPortalForgotPassword =
     pathname === '/portal/forgot-password' || pathname.startsWith('/portal/forgot-password/');
   const isPortalResetPassword =
     pathname === '/portal/reset-password' || pathname.startsWith('/portal/reset-password/');
-  const isPortalAuthRoute =
-    isPortalLogin || isPortalAcceptInvite || isPortalForgotPassword || isPortalResetPassword;
+  // Invite and password-reset links stay on their own pages. Sign-in is /login.
+  const isPortalAuthRoute = isPortalAcceptInvite || isPortalResetPassword;
+
+  if (isPortalLogin) {
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
+    copyCookiesToResponse(response, redirectResponse);
+    return redirectResponse;
+  }
+
+  if (isPortalForgotPassword) {
+    const redirectResponse = NextResponse.redirect(new URL('/forgot-password', request.url));
+    copyCookiesToResponse(response, redirectResponse);
+    return redirectResponse;
+  }
 
   if (!isAuthenticated && isDashboard) {
     const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
@@ -81,7 +97,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!isAuthenticated && isPortalPage && !isPortalAuthRoute) {
-    const redirectResponse = NextResponse.redirect(new URL('/portal/login', request.url));
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
     copyCookiesToResponse(response, redirectResponse);
     return redirectResponse;
   }
@@ -94,7 +110,9 @@ export async function middleware(request: NextRequest) {
       const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
         cookies: {
           getAll() {
-            return response.cookies.getAll();
+            // The browser's cookies, with any just refreshed on the response taking over. Reading the
+            // response alone left this client signed out, so the role lookup below never found anyone.
+            return mergeCookies(request.cookies.getAll(), response.cookies.getAll());
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
@@ -113,24 +131,15 @@ export async function middleware(request: NextRequest) {
       const isCustomerPortal = profile?.role === 'customer_portal';
       const isWorker = profile?.role === 'worker';
 
-      // Workers are mobile-only: clear the web session and send them to login
-      // unless they are finishing invite / password reset.
+      // Employees (workers with no business of their own) may use the worker area and
+      // the invite / reset pages only. Anything else, including /login while signed in,
+      // goes to /worker. They are not signed out for wandering.
       if (isWorker) {
-        if (!isWorkerAllowedPath(pathname)) {
-          await supabase.auth.signOut();
-          const loginUrl = new URL('/login', request.url);
-          loginUrl.searchParams.set('error', WORKER_WEB_LOGIN_ERROR_PARAM);
-          const redirectResponse = NextResponse.redirect(loginUrl);
+        if (employeeRouteDecision(pathname) === 'home') {
+          const redirectResponse = NextResponse.redirect(new URL(WORKER_HOME, request.url));
           copyCookiesToResponse(response, redirectResponse);
           return redirectResponse;
         }
-
-        // Allow invite / reset / login pages, but never leave a worker web session on /login.
-        if (isLoginPage) {
-          await supabase.auth.signOut();
-          return response;
-        }
-
         return response;
       }
 
@@ -143,12 +152,6 @@ export async function middleware(request: NextRequest) {
       if (isAuthenticated && isLoginPage) {
         const destination = isCustomerPortal ? '/portal' : '/dashboard';
         const redirectResponse = NextResponse.redirect(new URL(destination, request.url));
-        copyCookiesToResponse(response, redirectResponse);
-        return redirectResponse;
-      }
-
-      if (isAuthenticated && isPortalLogin && isCustomerPortal) {
-        const redirectResponse = NextResponse.redirect(new URL('/portal', request.url));
         copyCookiesToResponse(response, redirectResponse);
         return redirectResponse;
       }

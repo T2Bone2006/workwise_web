@@ -100,18 +100,44 @@ import { ExportJobsButton } from '@/components/jobs/export-jobs-button';
 import { JobsDateRangeFilter } from '@/components/jobs/jobs-date-range-filter';
 import { JobsColumnsPicker } from '@/components/jobs/jobs-columns-picker';
 import { updateJobsListColumns } from '@/lib/actions/jobs-columns';
-import { type JobsListColumnKey } from '@/lib/data/settings-types';
+import { type JobsListColumnId } from '@/lib/data/settings-types';
+import { fetchUngroupedHeadersAction } from '@/lib/actions/field-groups';
+import {
+  valueForFieldGroup,
+  type FieldGroup,
+} from '@/lib/jobs/field-groups';
+import { encodeSourceFieldFilter } from '@/lib/jobs/field-filter';
+import { fieldLabelFromHeader } from '@/lib/jobs/worker-visible-fields';
 import { FloatingAddButton } from '@/components/ui/floating-add-button';
 import { fetchFieldFilterValuesAction } from '@/lib/actions/jobs-field-filter';
 import { fetchPortalFieldFilterValuesAction } from '@/lib/actions/portal-jobs-field-filter';
+import { JobRowMenu } from '@/components/jobs/job-row-menu';
+import { formatCancellationStamp } from '@/lib/jobs/cancellation-time';
 
 const PAGE_SIZE = 50;
 const DEBOUNCE_MS = 300;
+const OTHER_COLUMNS_GROUP = 'Other columns';
 
-const STATUS_TOOLTIPS: Record<JobStatus, string> = {
+const STANDARD_COLUMN_KEYS = new Set<string>([
+  'customer',
+  'address',
+  'postcode',
+  'worker',
+  'scheduled',
+  'priority',
+  'status',
+  'skills',
+  'created_at',
+]);
+function isStandardColumn(id: string): boolean {
+  return STANDARD_COLUMN_KEYS.has(id);
+}
+
+const STATUS_TOOLTIPS: Record<JobStatus | 'accepted', string> = {
   pending: 'In the queue; not yet assigned to a worker.',
   pending_send: 'Worker chosen — send from jobs list to notify their app.',
   assigned: 'Worker assigned — waiting to start on site.',
+  accepted: 'Worker has accepted this job.',
   in_progress: 'Work is underway.',
   paused: 'Work paused temporarily.',
   completed: 'Finished.',
@@ -297,7 +323,19 @@ interface JobsTableProps {
   activeBatchId: string | null;
   fieldFilterOptions: SearchableSelectOption[];
   fieldFilterValuesByField: Record<string, FieldFilterValueOption[]>;
-  initialVisibleColumns: JobsListColumnKey[];
+  initialVisibleColumns: JobsListColumnId[];
+  /**
+   * The business's named fields (Pro). Each can be a filter and a column; a job's
+   * value is whichever of the group's spreadsheet headers it carries. Omitted
+   * where the feature isn't offered (portal, day view).
+   */
+  fieldGroups?: FieldGroup[];
+  /**
+   * Spreadsheet headers on this customer's imported jobs. The portal column
+   * picker offers them as extra columns. Omitted on the office list, which
+   * loads its own headers when the picker opens.
+   */
+  importHeaders?: string[];
   /** Assignable workers (invite accepted) for the inline worker column + bulk assign. */
   workers: { id: string; full_name: string }[];
   /**
@@ -326,6 +364,8 @@ export function JobsTable({
   fieldFilterOptions,
   fieldFilterValuesByField,
   initialVisibleColumns,
+  fieldGroups = [],
+  importHeaders = [],
   workers,
   basePath = '/jobs',
   variant = 'full',
@@ -333,6 +373,7 @@ export function JobsTable({
   const isDayView = variant === 'day';
   const isPortalView = variant === 'portal';
   const showOfficeTools = variant === 'full';
+  const showRowMenu = !isPortalView;
   const showDateAndFieldFilters = variant === 'full' || variant === 'portal';
   const showBatchFilter = showOfficeTools || isPortalView;
   const router = useRouter();
@@ -355,6 +396,9 @@ export function JobsTable({
   const armedSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendSelectedOpen, setSendSelectedOpen] = useState(false);
   const [isSendingSelected, setIsSendingSelected] = useState(false);
+  const [sendGroup, setSendGroup] = useState<{ label: string; jobIds: string[] } | null>(null);
+  const [sendGroupOpen, setSendGroupOpen] = useState(false);
+  const [isSendingGroup, setIsSendingGroup] = useState(false);
   const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
   const [bulkAssignWorkerId, setBulkAssignWorkerId] = useState('');
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
@@ -365,6 +409,7 @@ export function JobsTable({
   const [isUngrouping, setIsUngrouping] = useState(false);
   const [groupAssigningId, setGroupAssigningId] = useState<string | null>(null);
   const [groupDeletingId, setGroupDeletingId] = useState<string | null>(null);
+  const [justCancelled, setJustCancelled] = useState<Record<string, string>>({});
   const [filterRows, setFilterRows] = useState<FilterRowState[]>(() => {
     const fromUrl = initialFilters.field_filters ?? [];
     if (fromUrl.length === 0) return [newFilterRow()];
@@ -378,7 +423,7 @@ export function JobsTable({
   // fetched, so toggling is instant, local state. The account-wide default
   // is persisted in the background (see updateJobsListColumns) rather than
   // round-tripped through the URL like actual filters.
-  const [visibleColumns, setVisibleColumns] = useState<Set<JobsListColumnKey>>(
+  const [visibleColumns, setVisibleColumns] = useState<Set<JobsListColumnId>>(
     () => new Set(initialVisibleColumns)
   );
   const columnsDidMount = useRef(false);
@@ -395,7 +440,7 @@ export function JobsTable({
     }, 500);
     return () => clearTimeout(t);
   }, [visibleColumns, isPortalView]);
-  const toggleColumn = useCallback((key: JobsListColumnKey) => {
+  const toggleColumn = useCallback((key: JobsListColumnId) => {
     setVisibleColumns((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -403,6 +448,54 @@ export function JobsTable({
       return next;
     });
   }, []);
+
+  // Named fields and raw spreadsheet columns shown as extra table columns.
+  // A field group deleted since the choice was saved simply drops out.
+  const fieldColumns = useMemo(() => {
+    const byId = new Map<string, FieldGroup>(fieldGroups.map((g) => [`fg:${g.id}`, g]));
+    const out: Array<{ id: string; label: string; aliases: string[] }> = [];
+    for (const id of visibleColumns) {
+      if (id.startsWith('fg:')) {
+        const group = byId.get(id);
+        if (group) out.push({ id, label: group.name, aliases: group.aliases });
+      } else if (id.startsWith('sf:')) {
+        const header = id.slice(3);
+        out.push({ id, label: fieldLabelFromHeader(header) || header, aliases: [header] });
+      }
+    }
+    return out;
+  }, [visibleColumns, fieldGroups]);
+  const standardColumnCount = [...visibleColumns].filter((c) => isStandardColumn(c)).length;
+  const visibleColumnCount = standardColumnCount + fieldColumns.length;
+
+  // Spreadsheet columns not in any field yet. They sit at the bottom of the
+  // filter list and the column list, and are only fetched the first time one
+  // of those is opened, so the jobs page itself never waits for them.
+  const [otherHeaders, setOtherHeaders] = useState<string[] | null>(null);
+  const otherHeadersRequested = useRef(false);
+  const loadOtherHeaders = useCallback(() => {
+    if (!showOfficeTools || otherHeadersRequested.current) return;
+    otherHeadersRequested.current = true;
+    void fetchUngroupedHeadersAction().then(setOtherHeaders, () => {
+      otherHeadersRequested.current = false;
+    });
+  }, [showOfficeTools]);
+
+  const allFieldFilterOptions = useMemo<SearchableSelectOption[]>(() => {
+    const have = new Set(fieldFilterOptions.map((o) => o.value));
+    const groups = fieldGroups.map((g) => ({
+      value: `fg:${g.id}`,
+      label: g.name,
+      group: 'Your fields',
+    }));
+    const others = (otherHeaders ?? [])
+      .map((h) => ({ value: encodeSourceFieldFilter(h), label: h, group: OTHER_COLUMNS_GROUP }))
+      .filter((o) => !have.has(o.value));
+    // System fields first, then your fields, then everything else tucked at the bottom.
+    const system = fieldFilterOptions.filter((o) => o.group === 'System');
+    const rest = fieldFilterOptions.filter((o) => o.group !== 'System');
+    return [...system, ...groups, ...rest, ...others];
+  }, [fieldFilterOptions, fieldGroups, otherHeaders]);
 
   const deletableJobs = useMemo(
     () => initialJobs.filter((j) => j.status !== 'in_progress'),
@@ -501,6 +594,19 @@ export function JobsTable({
     () => workers.map((w) => ({ value: w.id, label: w.full_name })),
     [workers]
   );
+
+  const openJob = (jobId: string) => {
+    const committed = committedFiltersFromRows(filterRows);
+    if (isPortalView) {
+      router.push(portalJobDetailHref(jobId, searchParams.toString(), committed));
+      return;
+    }
+    if (isDayView) {
+      router.push(`/jobs/${jobId}`);
+      return;
+    }
+    router.push(jobDetailHref(jobId, searchParams.toString(), committed));
+  };
 
   const handleInlineAssign = async (jobId: string, workerId: string) => {
     setInlineAssigningId(jobId);
@@ -655,6 +761,27 @@ export function JobsTable({
       toast.error('Failed to send jobs');
     } finally {
       setIsSendingSelected(false);
+    }
+  };
+
+  const handleSendGroup = async () => {
+    if (!sendGroup || sendGroup.jobIds.length === 0) return;
+    setIsSendingGroup(true);
+    try {
+      const result = await sendPendingJobsToWorkers(sendGroup.jobIds);
+      setSendGroupOpen(false);
+      if (result.success) {
+        toast.success(
+          result.sent === 1 ? 'Job sent to worker' : `${result.sent} jobs sent to workers`
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    } catch {
+      toast.error('Failed to send jobs');
+    } finally {
+      setIsSendingGroup(false);
     }
   };
 
@@ -983,6 +1110,8 @@ export function JobsTable({
         <Card
           className={cn(
             'overflow-hidden border-border/80 transition-all duration-300',
+            // The new look sizes the card to its rows; the kit Card's own padding would leave a blank band.
+            'in-data-[look=new]:gap-0 in-data-[look=new]:py-0',
             isDayView
               ? 'border bg-card shadow-sm dark:border-white/[0.08]'
               : cn(
@@ -1121,9 +1250,11 @@ export function JobsTable({
                             placeholder="Choose field"
                             searchPlaceholder="Search fields…"
                             className="h-10 w-full"
+                            onOpenChange={(open) => open && loadOtherHeaders()}
+                            collapsedGroups={[OTHER_COLUMNS_GROUP]}
                             options={[
                               { value: '__none__', label: 'Any field' },
-                              ...fieldFilterOptions,
+                              ...allFieldFilterOptions,
                             ]}
                           />
                         </div>
@@ -1210,6 +1341,10 @@ export function JobsTable({
                     <JobsColumnsPicker
                       visibleColumns={visibleColumns}
                       onToggle={toggleColumn}
+                      fieldGroups={fieldGroups}
+                      otherHeaders={showOfficeTools ? otherHeaders : undefined}
+                      onOpen={loadOtherHeaders}
+                      importHeaders={isPortalView ? importHeaders : undefined}
                       allowedColumns={
                         isPortalView
                           ? ['address', 'postcode', 'scheduled', 'priority', 'status', 'created_at']
@@ -1250,9 +1385,11 @@ export function JobsTable({
                           placeholder="Choose field"
                           searchPlaceholder="Search fields…"
                           className="h-10 w-full"
+                          onOpenChange={(open) => open && loadOtherHeaders()}
+                          collapsedGroups={[OTHER_COLUMNS_GROUP]}
                           options={[
                             { value: '__none__', label: 'Any field' },
-                            ...fieldFilterOptions,
+                            ...allFieldFilterOptions,
                           ]}
                         />
                       </div>
@@ -1442,9 +1579,40 @@ export function JobsTable({
           </DialogContent>
         </Dialog>
 
+        <Dialog open={sendGroupOpen} onOpenChange={setSendGroupOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                Send out {sendGroup?.jobIds.length ?? 0} job
+                {(sendGroup?.jobIds.length ?? 0) === 1 ? '' : 's'} in “{sendGroup?.label}”?
+              </DialogTitle>
+              <DialogDescription>
+                Each worker will be notified in the app and the job marked as assigned. Jobs in
+                this group that aren&apos;t ready to send are left as they are.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setSendGroupOpen(false)} disabled={isSendingGroup}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSendGroup()}
+                disabled={isSendingGroup}
+                className="bg-cyan-600 text-white hover:bg-cyan-700"
+              >
+                {isSendingGroup ? <Loader2 className="size-4 animate-spin" /> : null}
+                Send out {sendGroup?.jobIds.length ?? 0} job
+                {(sendGroup?.jobIds.length ?? 0) === 1 ? '' : 's'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Card
           className={cn(
             'overflow-hidden border-border/80 transition-all duration-300',
+            // The new look sizes the card to its rows; the kit Card's own padding would leave a blank band.
+            'in-data-[look=new]:gap-0 in-data-[look=new]:py-0',
             isDayView
               ? 'border bg-card shadow-sm dark:border-white/[0.08]'
               : cn(
@@ -1769,6 +1937,16 @@ export function JobsTable({
                         {visibleColumns.has('created_at') && (
                           <TableHead className="text-muted-foreground">Created</TableHead>
                         )}
+                        {fieldColumns.map((col) => (
+                          <TableHead key={col.id} className="text-muted-foreground">
+                            {col.label}
+                          </TableHead>
+                        ))}
+                        {showRowMenu && (
+                          <TableHead className="w-14 px-2 text-right">
+                            <span className="sr-only">Actions</span>
+                          </TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1776,6 +1954,9 @@ export function JobsTable({
                         if (item.kind === 'group') {
                           const { group, jobs: members } = item;
                           const memberIds = members.map((m) => m.id);
+                          const readyToSendIds = members
+                            .filter((m) => m.status === 'pending_send')
+                            .map((m) => m.id);
                           const allMembersSelected = memberIds.every((id) => selectedIds.has(id));
                           const sharedWorkerId =
                             members.every((m) => m.assigned_worker_id === members[0].assigned_worker_id)
@@ -1785,7 +1966,7 @@ export function JobsTable({
                           return (
                             <TableRow
                               key={`group-${group.id}`}
-                              className="border-l-2 border-l-primary/60 border-border/60 bg-primary/[0.09] hover:bg-primary/[0.12] dark:bg-primary/[0.16]"
+                              className="border-l-2 border-l-primary/60 border-border/60 bg-primary/[0.09] dark:bg-primary/[0.16]"
                             >
                               {showOfficeTools && (
                               <TableCell className="w-10 align-middle">
@@ -1812,7 +1993,10 @@ export function JobsTable({
                                 </button>
                               </TableCell>
                               )}
-                              <TableCell colSpan={(showOfficeTools ? 1 : 0) + visibleColumns.size} className="py-1.5">
+                              <TableCell
+                                colSpan={1 + visibleColumnCount + (showRowMenu ? 1 : 0)}
+                                className="py-1.5"
+                              >
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                                   <button
                                     type="button"
@@ -1847,6 +2031,21 @@ export function JobsTable({
                                       )}
                                     />
                                   )}
+                                  {showOfficeTools && readyToSendIds.length > 0 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 px-2 text-cyan-700 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-300"
+                                      disabled={busy || isSendingGroup}
+                                      onClick={() => {
+                                        setSendGroup({ label: group.label, jobIds: readyToSendIds });
+                                        setSendGroupOpen(true);
+                                      }}
+                                    >
+                                      <RadioTower className="size-3.5" />
+                                      Send out ({readyToSendIds.length})
+                                    </Button>
+                                  )}
                                   {showOfficeTools && (
                                   <Button
                                     variant="ghost"
@@ -1869,52 +2068,40 @@ export function JobsTable({
                           );
                         }
                         const { job } = item;
+                        const rowStatus = justCancelled[job.id] ? 'cancelled' : job.status;
+                        const cancelledAt =
+                          rowStatus === 'cancelled'
+                            ? (justCancelled[job.id] ?? job.cancelled_at ?? null)
+                            : null;
                         const inGroup = !!job.job_group_id;
                         return (
                         <TableRow
                           key={job.id}
                           className={cn(
-                            'cursor-pointer transition-all duration-200',
-                            'hover:shadow-[0_0_20px_-8px_var(--glow-primary)]',
+                            'cursor-pointer',
                             // Members share the header's tint so the group reads as one
                             // block; the last member closes it with a firmer edge so the
                             // plain rows below are clearly outside it.
                             inGroup
                               ? cn(
                                   'border-l-2 border-l-primary/60 bg-primary/[0.035] dark:bg-primary/[0.07]',
-                                  'hover:bg-primary/[0.08] dark:hover:bg-primary/[0.14]',
                                   item.lastInGroup
                                     ? 'border-b-2 border-b-primary/30'
                                     : 'border-b border-border/40'
                                 )
                               : cn(
-                                  'border-border/60 hover:bg-primary/5 dark:hover:bg-primary/10',
+                                  'border-border/60',
                                   i % 2 === 1 && 'bg-muted/20 dark:bg-muted/10'
                                 )
                           )}
-                          onClick={() => {
-                            const committed = committedFiltersFromRows(filterRows);
-                            if (isPortalView) {
-                              router.push(
-                                portalJobDetailHref(job.id, searchParams.toString(), committed)
-                              );
-                              return;
-                            }
-                            if (isDayView) {
-                              router.push(`/jobs/${job.id}`);
-                              return;
-                            }
-                            router.push(
-                              jobDetailHref(job.id, searchParams.toString(), committed)
-                            );
-                          }}
+                          onClick={() => openJob(job.id)}
                         >
                           {showOfficeTools && (
                           <TableCell
                             className="w-10 align-middle"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {job.status === 'in_progress' ? (
+                            {rowStatus === 'in_progress' ? (
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <span className="inline-flex cursor-not-allowed rounded border border-input/50 p-0.5 opacity-50">
@@ -2006,10 +2193,10 @@ export function JobsTable({
                             <TableCell
                               onClick={(e) => {
                                 // Stop the row's navigate-to-detail click when using the picker.
-                                if (canAssignWorkerInline(job.status)) e.stopPropagation();
+                                if (canAssignWorkerInline(rowStatus)) e.stopPropagation();
                               }}
                             >
-                              {canAssignWorkerInline(job.status) && workers.length > 0 ? (
+                              {canAssignWorkerInline(rowStatus) && workers.length > 0 ? (
                                 <SearchableSelect
                                   options={workerOptions}
                                   value={job.assigned_worker_id ?? ''}
@@ -2055,8 +2242,8 @@ export function JobsTable({
                             </TableCell>
                           )}
                           {visibleColumns.has('status') && (
-                            <TableCell>
-                              {job.status === 'pending_send' && showOfficeTools ? (
+                            <TableCell className="whitespace-normal">
+                              {rowStatus === 'pending_send' && showOfficeTools ? (
                                 <SendJobBadge
                                   jobId={job.id}
                                   armed={armedSendId === job.id}
@@ -2065,7 +2252,14 @@ export function JobsTable({
                                   onConfirm={(id) => void confirmSend(id)}
                                 />
                               ) : (
-                                <StatusBadge status={job.status} />
+                                <div className="flex flex-col items-start gap-1">
+                                  <StatusBadge status={rowStatus} />
+                                  {cancelledAt ? (
+                                    <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                                      {formatCancellationStamp(cancelledAt)}
+                                    </span>
+                                  ) : null}
+                                </div>
                               )}
                             </TableCell>
                           )}
@@ -2090,6 +2284,31 @@ export function JobsTable({
                           {visibleColumns.has('created_at') && (
                             <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                               {formatDateOnly(job.created_at)}
+                            </TableCell>
+                          )}
+                          {fieldColumns.map((col) => {
+                            const value = valueForFieldGroup(col, job.source_fields);
+                            return (
+                              <TableCell key={col.id} className="max-w-[200px] truncate text-muted-foreground">
+                                {value || <span className="text-muted-foreground/70">—</span>}
+                              </TableCell>
+                            );
+                          })}
+                          {showRowMenu && (
+                            <TableCell
+                              className="w-14 px-2 text-right"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <JobRowMenu
+                                jobId={job.id}
+                                reference={job.reference_number || job.id.slice(0, 8)}
+                                status={rowStatus}
+                                onOpen={() => openJob(job.id)}
+                                onCancelled={(iso) => {
+                                  setJustCancelled((prev) => ({ ...prev, [job.id]: iso }));
+                                  router.refresh();
+                                }}
+                              />
                             </TableCell>
                           )}
                         </TableRow>

@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 
 export type TenantSkillRow = {
   id: string;
@@ -20,7 +20,7 @@ function isLowerSnakeCaseKey(key: string): boolean {
  * Returns [] if the caller is not authenticated or `tenantId` is not their tenant.
  */
 export async function getTenantSkills(tenantId: string): Promise<TenantSkillRow[]> {
-  const currentTenantId = await getTenantIdForCurrentUser();
+  const currentTenantId = await getOwnerTenantId();
   if (!currentTenantId || currentTenantId !== tenantId.trim()) {
     return [];
   }
@@ -45,7 +45,7 @@ export type MutateTenantSkillResult =
   | { success: false; error: string };
 
 export async function addTenantSkill(key: string, label: string): Promise<MutateTenantSkillResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated.' };
   }
@@ -98,7 +98,7 @@ export async function updateTenantSkill(
   id: string,
   label: string
 ): Promise<MutateTenantSkillResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated.' };
   }
@@ -133,7 +133,7 @@ export async function updateTenantSkill(
 }
 
 export async function deleteTenantSkill(id: string): Promise<MutateTenantSkillResult> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated.' };
   }

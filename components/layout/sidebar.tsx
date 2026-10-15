@@ -3,64 +3,76 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import {
-  LayoutDashboard,
-  Briefcase,
-  Users,
-  Share2,
-  Activity,
-  Building2,
-  Upload,
-  Settings,
-  ChevronLeft,
-  Brain,
-  Eye,
-} from 'lucide-react';
+import { ChevronLeft, Brain, Eye } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
+import { AddLiteCard } from './add-lite-card';
+import { buildNavSections, isNavItemActive, SIDEBAR_STORAGE_KEY, type NavItem } from './nav-sections';
+import { LookSidebar } from './look-sidebar';
+import { useLook } from '@/components/look/use-look';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
   SheetContent,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
-const SIDEBAR_STORAGE_KEY = 'workwise-sidebar-collapsed';
-
-type NavItem = {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-};
-
-interface SidebarProps {
+export interface SidebarProps {
   mobileOpen: boolean;
   onMobileClose: () => void;
   isAdmin?: boolean;
   /** When > 0, shows a dot next to Network (or on the icon when sidebar is collapsed). */
   networkBadge?: number;
+  /** When > 0, shows a dot next to Messages, the same way as Network. */
+  messagesBadge?: number;
   features: TenantFeatures;
+  /** New look only: the business name and signed-in user shown at the top and bottom of the sidebar. */
+  tenantName?: string;
+  userEmail?: string;
+  viewAsActive?: boolean;
+  /** Rounds-only self-serve admins: quiet Add Lite card above Settings. */
+  showAddLite?: boolean;
+  /** Yearly Rounds plans show +£240 a year on that card. */
+  addLiteYearly?: boolean;
+  /** Self-serve admins: green referral row at the bottom of the new-look sidebar. */
+  showReferral?: boolean;
+  /** Which referral wording the row uses: Pro never promises the friend anything. */
+  referralKind?: 'rounds_lite' | 'pro';
+  /** A self-employed worker who has not added Lite: the worker-price Add Lite card instead of the Rounds one. */
+  workerLite?: boolean;
 }
 
-export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBadge, features }: SidebarProps) {
+function ClassicSidebar({
+  mobileOpen,
+  onMobileClose,
+  isAdmin = false,
+  networkBadge,
+  messagesBadge,
+  features,
+  showAddLite = false,
+  addLiteYearly = false,
+}: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const navItems: NavItem[] = [
-    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
-    { href: '/jobs', label: 'Jobs', icon: Briefcase, show: features.pro },
-    { href: '/workers', label: 'Workers', icon: Users, show: features.pro },
-    { href: '/network', label: 'Network', icon: Share2, show: features.pro },
-    { href: '/monitor', label: 'Monitor', icon: Activity, show: features.pro },
-    { href: '/customers', label: 'Customers', icon: Building2, show: features.pro },
-    { href: '/import', label: 'Import', icon: Upload, show: features.pro },
-    { href: '/settings', label: 'Settings', icon: Settings, show: true },
-  ].filter((item) => item.show);
+  const navSections = buildNavSections(features)
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => item.show),
+    }))
+    .filter((section) => section.items.length > 0);
+  const settingsSection = navSections.find((section) =>
+    section.items.some((item) => item.href === '/settings')
+  );
+  const mainSections = navSections.filter((section) => section !== settingsSection);
+  const navHrefs = navSections.flatMap((section) => section.items.map((item) => item.href));
+  // Lite-only: /dashboard immediately redirects back to /lite. Prefetching that
+  // link follows the redirect and reloads /lite forever.
+  const liteOnly = features.lite && !features.rounds && !features.pro;
 
   useEffect(() => {
     setMounted(true);
@@ -79,23 +91,30 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
   };
 
   const linkContent = (item: NavItem, isMobile = false) => {
-    const showNetworkDot =
-      item.href === '/network' && networkBadge != null && networkBadge > 0;
+    const badgeCount =
+      item.href === '/network'
+        ? networkBadge
+        : item.href === '/messages'
+          ? messagesBadge
+          : undefined;
+    const showDot = badgeCount != null && badgeCount > 0;
     const labelVisible = !collapsed || isMobile;
-    const dotOnIcon = showNetworkDot && !labelVisible;
-    const dotAfterLabel = showNetworkDot && labelVisible;
+    const dotOnIcon = showDot && !labelVisible;
+    const dotAfterLabel = showDot && labelVisible;
     const dotStyleClass =
       'size-[8px] animate-pulse rounded-full [background-image:radial-gradient(circle_at_center,#a78bfa,#6366f1)] [box-shadow:0_0_6px_1px_rgba(139,92,246,0.7)]';
 
     return (
       <Link
         href={item.href}
+        prefetch={item.href === '/dashboard' && liteOnly ? false : undefined}
         onClick={isMobile ? onMobileClose : undefined}
+        aria-current={isNavItemActive(pathname, item.href, navHrefs) ? 'page' : undefined}
         className={cn(
           'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
           'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-          pathname === item.href
+          isNavItemActive(pathname, item.href, navHrefs)
             ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
             : 'text-sidebar-foreground/90'
         )}
@@ -150,9 +169,19 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
           WorkWise
         </span>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main navigation">
-        {navItems.map((item) => (
-          <div key={item.href}>{linkContent(item, isMobile)}</div>
+      <nav className="flex min-h-0 flex-1 flex-col p-3" aria-label="Main navigation">
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+        {mainSections.map((section, index) => (
+          <div key={section.title ?? `section-${index}`} className={cn(section.title && 'mt-2')}>
+            {section.title && (!collapsed || isMobile) && (
+              <h2 className="mb-1 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                {section.title}
+              </h2>
+            )}
+            {section.items.map((item) => (
+              <div key={item.href}>{linkContent(item, isMobile)}</div>
+            ))}
+          </div>
         ))}
         {isAdmin && (
           <>
@@ -210,6 +239,19 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
             </div>
           </>
         )}
+        </div>
+        {(showAddLite || settingsSection) && (
+          <div className="mt-auto shrink-0 space-y-2 pt-2">
+            {showAddLite ? (
+              <div className={cn('px-2', collapsed && !isMobile && 'px-1')}>
+                <AddLiteCard collapsed={Boolean(collapsed && !isMobile)} yearly={addLiteYearly} />
+              </div>
+            ) : null}
+            {settingsSection?.items.map((item) => (
+              <div key={item.href}>{linkContent(item, isMobile)}</div>
+            ))}
+          </div>
+        )}
       </nav>
       {!isMobile && (
         <div className="border-t border-sidebar-border p-2">
@@ -234,7 +276,7 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
       {/* Desktop: fixed sidebar */}
       <aside
         className={cn(
-          'hidden md:flex md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl',
+          'hidden md:flex md:h-full md:min-h-0 md:flex-col md:shrink-0 md:relative md:overflow-hidden md:rounded-r-xl',
           'transition-[width] duration-[250ms] ease-[cubic-bezier(0.32,0.72,0,1)]'
         )}
         style={{
@@ -272,4 +314,11 @@ export function Sidebar({ mobileOpen, onMobileClose, isAdmin = false, networkBad
       </Sheet>
     </>
   );
+}
+
+/** Classic for Pro logins, the new look for Rounds and Lite (Phase 7b). */
+export function Sidebar(props: SidebarProps) {
+  const look = useLook();
+  if (look === 'new') return <LookSidebar {...props} />;
+  return <ClassicSidebar {...props} />;
 }

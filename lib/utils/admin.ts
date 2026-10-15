@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/supabase/auth-user';
 
 /**
  * Admin check: user email is in whitelist.
@@ -13,12 +14,10 @@ const adminEmails: string[] = [
 ];
 
 export async function isAdmin(): Promise<boolean> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getAuthUser();
   if (!user) return false;
+
+  const supabase = await createClient();
 
   const { data: userData } = await supabase
     .from('users')

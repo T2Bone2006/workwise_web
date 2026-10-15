@@ -1,9 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -13,41 +16,60 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { updateCompanySettings } from '@/lib/actions/settings';
-import type { SettingsPageData, IndustryOption } from '@/lib/data/settings-types';
-import type { TenantSkillRow } from '@/lib/actions/skills';
-import { SettingsSkillsSection } from './settings-skills-section';
+import { INDUSTRIES, type SettingsPageData } from '@/lib/data/settings-types';
+import { CompanyLogoUpload } from './company-logo-upload';
 import { cn } from '@/lib/utils';
-
-const INDUSTRIES: IndustryOption[] = ['Locksmith', 'Plumbing', 'Electrical', 'HVAC', 'General'];
+import { Tag } from '@/components/look';
+import { useLook } from '@/components/look/use-look';
 
 interface SettingsCompanyTabProps {
   data: SettingsPageData;
-  initialTenantSkills: TenantSkillRow[];
+  companyLogoUrl?: string | null;
+  showLogo?: boolean;
   onSaved: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function SettingsCompanyTab({
   data,
-  initialTenantSkills,
+  companyLogoUrl = null,
+  showLogo = false,
   onSaved,
+  onDirtyChange,
 }: SettingsCompanyTabProps) {
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
+  const fresh = useLook() === 'new';
   const tenant = data.tenant;
   const company = tenant?.settings?.company ?? {};
 
   const [name, setName] = useState(tenant?.name ?? '');
-  const [industry, setIndustry] = useState<string>(tenant?.industry ?? company?.industry ?? '');
+  const storedIndustry = tenant?.industry ?? company?.industry ?? '';
+  const [industry, setIndustry] = useState(storedIndustry === 'Rounds' ? '' : storedIndustry);
   const [phone, setPhone] = useState(company?.phone ?? '');
-  const [email, setEmail] = useState(company?.email ?? '');
+  // Signup stores the address on the login, not in company settings, so the
+  // box is blank until they save. Show the login email until they set one.
+  const [email, setEmail] = useState(company?.email?.trim() || data.user?.email || '');
   const [address, setAddress] = useState(company?.address ?? '');
+  const [baseline, setBaseline] = useState({
+    name: tenant?.name ?? '',
+    industry: storedIndustry === 'Rounds' ? '' : storedIndustry,
+    phone: company?.phone ?? '',
+    email: company?.email?.trim() || data.user?.email || '',
+    address: company?.address ?? '',
+  });
+  const dirty =
+    name !== baseline.name ||
+    industry !== baseline.industry ||
+    phone !== baseline.phone ||
+    email !== baseline.email ||
+    address !== baseline.address;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -62,6 +84,8 @@ export function SettingsCompanyTab({
     const result = await updateCompanySettings(formData);
     setSaving(false);
     if (result.success) {
+      setBaseline({ name, industry, phone, email, address });
+      setSavedAt(Date.now());
       toast.success('Company settings saved');
       onSaved();
     } else {
@@ -79,40 +103,12 @@ export function SettingsCompanyTab({
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Read-only account overview */}
-      <Card className="rounded-xl border border-border/50 bg-muted/30">
-        <CardHeader>
-          <CardTitle className="text-base">Account overview</CardTitle>
-          <CardDescription>Read-only information about your account.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <div>
-            <span className="text-muted-foreground">Tenant ID</span>
-            <p className="font-mono text-foreground break-all">{tenant.id}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Subscription status</span>
-            <p className="text-foreground capitalize">{tenant.subscription_status ?? '—'}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Account created</span>
-            <p className="text-foreground">
-              {tenant.created_at ? new Date(tenant.created_at).toLocaleDateString() : '—'}
-            </p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Total jobs</span>
-            <p className="text-foreground">{data.totalJobsCount}</p>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Total workers</span>
-            <p className="text-foreground">{data.totalWorkersCount}</p>
-          </div>
-        </CardContent>
-      </Card>
+  const createdOn = tenant.created_at
+    ? new Date(tenant.created_at).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })
+    : '—';
 
+  return (
+    <div className="space-y-4">
     <form onSubmit={handleSubmit}>
       <Card
         className={cn(
@@ -127,32 +123,37 @@ export function SettingsCompanyTab({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="company-name">Company name</Label>
-            <Input
-              id="company-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Acme Ltd"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="industry">Industry</Label>
-            <Select value={industry || undefined} onValueChange={setIndustry}>
-              <SelectTrigger id="industry" className="w-full">
-                <SelectValue placeholder="Select industry" />
-              </SelectTrigger>
-              <SelectContent>
-                {INDUSTRIES.map((ind) => (
-                  <SelectItem key={ind} value={ind}>
-                    {ind}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {showLogo ? (
+            <CompanyLogoUpload tenantId={tenant.id} logoUrl={companyLogoUrl ?? null} />
+          ) : null}
           <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="company-name">Company name</Label>
+              <Input
+                id="company-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Acme Ltd"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="industry">Industry</Label>
+              <SearchableSelect
+                id="industry"
+                value={industry || undefined}
+                onValueChange={setIndustry}
+                placeholder="Select industry"
+                searchPlaceholder="Search industries"
+                emptyText="No industry matches."
+                options={[
+                  ...(industry && !(INDUSTRIES as readonly string[]).includes(industry)
+                    ? [{ value: industry, label: industry }]
+                    : []),
+                  ...INDUSTRIES.map((name) => ({ value: name, label: name })),
+                ]}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="company-phone">Phone</Label>
               <Input
@@ -173,31 +174,57 @@ export function SettingsCompanyTab({
                 placeholder="hello@company.com"
               />
             </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="company-line">{unhookChromeAddressFill('Address')}</Label>
+              <AddressAutocompleteInput
+                id="company-line"
+                value={address}
+                onValueChange={setAddress}
+                onAddressSelect={({ address: line, postcode }) => {
+                  setAddress([line, postcode].filter(Boolean).join(', '));
+                }}
+                placeholder="Start typing a postcode or address…"
+              />
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="company-address">Address</Label>
-            <Input
-              id="company-address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="123 High Street, London"
-            />
-          </div>
-        </CardContent>
-        <CardContent className="pt-0">
-          <Button type="submit" variant="gradient" disabled={saving}>
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            Save company settings
-          </Button>
         </CardContent>
       </Card>
+      <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
     </form>
 
-      <SettingsSkillsSection
-        tenantId={tenant.id}
-        initialSkills={initialTenantSkills}
-        onSaved={onSaved}
-      />
+      {fresh ? (
+        <section className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-(--look-card-shadow)">
+          <span className="flex items-center gap-2">
+            <span className="font-medium">Account</span>
+            <Tag tone={tenant.subscription_status === 'active' ? 'emerald' : 'slate'}>
+              {tenant.subscription_status ? tenant.subscription_status.replace(/_/g, ' ') : 'No plan'}
+            </Tag>
+          </span>
+          <span className="text-muted-foreground">Created {createdOn}</span>
+          <span className="min-w-0 text-xs text-muted-foreground">
+            ID <span className="font-mono break-all">{tenant.id}</span>
+          </span>
+        </section>
+      ) : (
+        <section className="flex flex-wrap items-center gap-x-6 gap-y-1.5 px-1 text-xs text-muted-foreground">
+          <span>
+            Account{' '}
+            <span className="font-medium capitalize text-foreground">
+              {tenant.subscription_status ? tenant.subscription_status.replace(/_/g, ' ') : 'no plan'}
+            </span>
+          </span>
+          <span>Created {createdOn}</span>
+          <span>
+            {data.totalJobsCount.toLocaleString('en-GB')} job{data.totalJobsCount === 1 ? '' : 's'}
+          </span>
+          <span>
+            {data.totalWorkersCount.toLocaleString('en-GB')} worker{data.totalWorkersCount === 1 ? '' : 's'}
+          </span>
+          <span className="min-w-0">
+            ID <span className="font-mono break-all">{tenant.id}</span>
+          </span>
+        </section>
+      )}
     </div>
   );
 }

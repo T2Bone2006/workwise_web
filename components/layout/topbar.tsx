@@ -2,7 +2,7 @@
 
 import { Menu, LogOut } from 'lucide-react';
 import { logout } from '@/lib/actions/auth';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
 import {
   DropdownMenu,
@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
+import { useLook } from '@/components/look/use-look';
+import { LookTopbar } from './look-topbar';
 
 interface TopbarProps {
   tenantName: string;
@@ -36,12 +38,24 @@ export function Topbar({
   onMenuClick,
   viewAsActive = false,
 }: TopbarProps) {
+  const look = useLook();
   const handleLogout = async () => {
     if (viewAsActive) {
       await fetch('/api/admin/view-as/stop', { method: 'POST' });
     }
     await logout();
   };
+
+  if (look === 'new') {
+    return (
+      <LookTopbar
+        tenantName={tenantName}
+        userEmail={userEmail}
+        onMenuClick={onMenuClick}
+        viewAsActive={viewAsActive}
+      />
+    );
+  }
 
   return (
     <header
@@ -70,19 +84,19 @@ export function Topbar({
       <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle className="rounded-lg" />
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-9 rounded-full focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="User menu"
-            >
-              <Avatar size="default" className="size-8">
-                <AvatarFallback className="bg-primary/20 text-primary text-xs font-medium">
-                  {getInitials(userEmail)}
-                </AvatarFallback>
-              </Avatar>
-            </Button>
+          {/* No asChild: Slot+useId can mismatch SSR vs client under Next 16 / React 19 */}
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: 'ghost', size: 'icon' }),
+              'size-9 rounded-full focus-visible:ring-2 focus-visible:ring-ring'
+            )}
+            aria-label="User menu"
+          >
+            <Avatar size="default" className="size-8">
+              <AvatarFallback className="bg-primary/20 text-primary text-xs font-medium">
+                {getInitials(userEmail)}
+              </AvatarFallback>
+            </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"

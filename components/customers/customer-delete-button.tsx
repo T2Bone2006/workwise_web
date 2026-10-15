@@ -24,6 +24,8 @@ interface CustomerDeleteButtonProps {
   useDeactivate: boolean;
   variant?: 'default' | 'outline' | 'ghost';
   size?: 'default' | 'sm' | 'lg' | 'icon';
+  /** Where to go after success. Defaults to Pro `/customers`. */
+  redirectTo?: string;
 }
 
 export function CustomerDeleteButton({
@@ -32,6 +34,7 @@ export function CustomerDeleteButton({
   useDeactivate,
   variant = 'outline',
   size = 'sm',
+  redirectTo = '/customers',
 }: CustomerDeleteButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -46,7 +49,7 @@ export function CustomerDeleteButton({
     setOpen(false);
     if (result.success) {
       toast.success(useDeactivate ? 'Customer deactivated' : 'Customer deleted');
-      router.push('/customers');
+      router.push(redirectTo);
       router.refresh();
     } else {
       toast.error(

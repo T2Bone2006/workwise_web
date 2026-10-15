@@ -116,12 +116,16 @@ export async function importJobs(params: {
 
     const { data: userRow } = await supabase
       .from('users')
-      .select('tenant_id')
+      .select('tenant_id, role')
       .eq('id', user.id)
       .single();
     const tenantId = userRow?.tenant_id;
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
+    }
+    // The office's import: not for a member of staff, who is a 'worker' in the same business.
+    if (userRow?.role !== 'admin') {
+      return { success: false, error: 'Only the account owner can do this.' };
     }
 
     const customerId = params.customerId?.trim();

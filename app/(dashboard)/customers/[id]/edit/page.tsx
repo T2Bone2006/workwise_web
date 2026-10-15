@@ -1,10 +1,11 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantProducts } from '@/lib/data/tenant-products';
 import { getCustomerById } from '@/lib/data/customers';
+import { usesProCrm, usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
 import { CustomerForm } from '@/components/customers/customer-form';
-import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
+import { HistoryBackButton } from '@/components/layout/history-back-button';
+import { SetBreadcrumbName } from '@/components/layout/page-breadcrumb';
 
 interface CustomerEditPageProps {
   params: Promise<{ id: string }>;
@@ -12,26 +13,37 @@ interface CustomerEditPageProps {
 
 export default async function CustomerEditPage({ params }: CustomerEditPageProps) {
   const { id: customerId } = await params;
-  const tenantId = await getTenantIdForCurrentUser();
+  const [tenantId, products] = await Promise.all([
+    getTenantIdForCurrentUser(),
+    getTenantProducts(),
+  ]);
 
   if (!tenantId) {
-    redirect('/customers');
+    redirect(paths.customers);
+  }
+
+  if (usesRoundsCrm(products)) {
+    redirect(paths.customer(customerId));
+  }
+
+  if (!usesProCrm(products)) {
+    redirect('/dashboard');
   }
 
   const { customer, error } = await getCustomerById(tenantId, customerId);
-
   if (error || !customer) {
-    redirect('/customers');
+    redirect(paths.customers);
   }
 
   return (
     <div className="space-y-6">
+      <SetBreadcrumbName id={customerId} name={customer.name} />
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" asChild aria-label="Back to customer">
-          <Link href={`/customers/${customerId}`}>
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
+        <HistoryBackButton
+          iconOnly
+          label="Back to customer"
+          fallbackHref={paths.customer(customerId)}
+        />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Edit customer
@@ -41,7 +53,6 @@ export default async function CustomerEditPage({ params }: CustomerEditPageProps
           </p>
         </div>
       </div>
-
       <CustomerForm
         mode="edit"
         tenantId={tenantId}

@@ -1,0 +1,935 @@
+'use client';
+
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from 'react';
+import { DndContext } from '@dnd-kit/core';
+import { giveRoundAction, reassignVisitsAction, setUsualLeadAction } from '@/lib/actions/team-assign';
+import type { LanePerson } from '@/lib/rounds/lanes';
+import { segmentByRound, type RoundTag } from '@/lib/rounds/round-groups';
+import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  moveRound,
+  moveStopToDay,
+  reorderDay,
+  swapDays,
+  tellCustomersAboutChange,
+  undoVisitChange,
+} from '@/lib/actions/rounds/visits';
+import { loadBoardWeeks, loadUntoldMoves } from '@/lib/actions/rounds/board';
+import type { VisitRow } from '@/lib/data/rounds/visits';
+import { dayMovedSms, type SmsBrand } from '@/lib/messaging/templates';
+import { formatVisitDay } from '@/lib/payments/messages';
+import { addDays, type Ymd } from '@/lib/rounds/dates';
+import type { UntoldMove } from '@/lib/rounds/visit-changes';
+import {
+  BOARD_LOAD_STEP_WEEKS,
+  applyLocalMove,
+  buildWeeks,
+  extendRange,
+  findHouseMatch,
+  formatBoardDay,
+  jobAsStop,
+  roundAsStop,
+  mondayOf,
+  orderAfterDrop,
+  rangeEnd,
+  untoldByJob,
+  type BoardDay,
+  type BoardRange,
+  type BoardStop,
+} from '@/lib/rounds/week-board';
+import { ChangePreview } from '@/components/messaging/change-preview';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { formatGbp } from '@/lib/money/pence';
+import type { WeatherByDay } from '@/lib/weather/met-norway';
+import { BoardDayColumn, type ColumnHighlight } from './board-day-column';
+import { BoardDragOverlay } from './board-drag-overlay';
+import { useBoardDnd, type DndActive, type DndTarget } from './use-board-dnd';
+import { BoardStopPanel } from './board-stop-panel';
+import { BoardToast, type BoardToastData } from './board-toast';
+import { MoveStopDialog, toldText, type BoardChangeResult } from './move-stop-dialog';
+import { SwapDaysDialog } from './swap-days-dialog';
+
+const FLASH_MS = 3000;
+/** How close (px) to either end of the board before the next weeks are loaded. */
+const EDGE_PX = 400;
+/** Most weeks one request may ask for. */
+const CHUNK_WEEKS = BOARD_LOAD_STEP_WEEKS * 2;
+
+type TellRequest = { changeId: string; fromDate: Ymd | null; toDate: Ymd | null };
+
+/** Replace the visits that fall on or between `from` and `to` with the freshly loaded ones. */
+function mergeVisits(prev: VisitRow[], fetched: VisitRow[], from: Ymd, to: Ymd): VisitRow[] {
+  const kept = prev.filter((v) => !v.scheduled_date || v.scheduled_date < from || v.scheduled_date > to);
+  return [...kept, ...fetched];
+}
+
+/** Load a run of weeks, a few at a time. */
+async function fetchWeeks(
+  from: Ymd,
+  weeks: number,
+  person?: string,
+): Promise<{ ok: true; visits: VisitRow[] } | { ok: false; error: string }> {
+  const parts: Promise<Awaited<ReturnType<typeof loadBoardWeeks>>>[] = [];
+  for (let done = 0; done < weeks; done += CHUNK_WEEKS) {
+    parts.push(
+      loadBoardWeeks({ from: addDays(from, done * 7), weeks: Math.min(CHUNK_WEEKS, weeks - done), ...(person && person !== 'all' ? { person } : {}) }),
+    );
+  }
+  const results = await Promise.all(parts);
+  const visits: VisitRow[] = [];
+  for (const result of results) {
+    if (!result.success) return { ok: false, error: result.error };
+    visits.push(...result.visits);
+  }
+  return { ok: true, visits };
+}
+
+/**
+ * Soft edge on the week scroller: days blur, then fade into the page,
+ * instead of ending on a hard cut. Shown only while that side is clipped.
+ */
+function BoardEdgeFade({ side, on }: { side: 'left' | 'right'; on: boolean }): JSX.Element {
+  const left = side === 'left';
+  return (
+    <div
+      aria-hidden
+      className={`pointer-events-none absolute inset-y-0 z-10 w-8 transition-opacity duration-200 ${
+        left ? 'left-0' : 'right-0'
+      } ${on ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <div
+        className={`absolute inset-0 backdrop-blur-sm ${
+          left
+            ? '[mask-image:linear-gradient(to_right,black,transparent)] [-webkit-mask-image:linear-gradient(to_right,black,transparent)]'
+            : '[mask-image:linear-gradient(to_left,black,transparent)] [-webkit-mask-image:linear-gradient(to_left,black,transparent)]'
+        }`}
+      />
+      <div
+        className={`absolute inset-y-0 w-5 from-background to-transparent ${
+          left ? 'left-0 bg-gradient-to-r' : 'right-0 bg-gradient-to-l'
+        }`}
+      />
+    </div>
+  );
+}
+
+/** The Week view: days side by side, a gap between weeks, scrolling left and right. */
+export function WeekBoard(props: {
+  initialVisits: VisitRow[];
+  initialRange: BoardRange;
+  today: Ymd;
+  workingDays: number[];
+  blackouts: string[];
+  brand: SmsBrand;
+  initialUntold: UntoldMove[];
+  /** Forecast by day for the next 9 days; null when there isn't one. */
+  weather?: WeatherByDay | null;
+  /** The Person filter ('mine' or a lead's worker id); left out or 'all' for Everyone. */
+  person?: string;
+  /** With a team: who a whole round can be given to. */
+  people?: ReadonlyArray<LanePerson>;
+  /** With a team: days off, so giving a round to someone who is off asks first. */
+  daysOff?: ReadonlyArray<{ workerId: string; from: string; to: string }>;
+}): JSX.Element {
+  const { today, brand } = props;
+  const [visits, setVisits] = useState(props.initialVisits);
+  const [range, setRange] = useState(props.initialRange);
+  const [untold, setUntold] = useState(props.initialUntold);
+  const [message, setMessage] = useState<BoardToastData | null>(null);
+  const [tell, setTell] = useState<TellRequest | null>(null);
+  const [tellBusy, setTellBusy] = useState(false);
+  const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(new Set());
+  /** The visits as they will be once a drop is saved, so the card stays where it landed. */
+  const [optimistic, setOptimistic] = useState<VisitRow[] | null>(null);
+  const [busyStopId, setBusyStopId] = useState<string | null>(null);
+  const shownVisits = optimistic ?? visits;
+  const [loadingEdge, setLoadingEdge] = useState<'earlier' | 'later' | null>(null);
+  /** A side is faded only while days are actually cut off there. */
+  const [clipped, setClipped] = useState({ left: false, right: false });
+
+  const [panel, setPanel] = useState<{ stopId: string; date: Ymd } | null>(null);
+  const [moving, setMoving] = useState<{ stopId: string; date: Ymd; jobId?: string; roundId?: string } | null>(null);
+  /** Giving a whole round to someone who is off that day: ask first. */
+  const [confirmGive, setConfirmGive] = useState<{ label: string; person: LanePerson; date: Ymd; run: () => void } | null>(null);
+  const [swapping, setSwapping] = useState<Ymd | null>(null);
+
+  const scroller = useRef<HTMLDivElement>(null);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
+  const loadingRef = useRef(false);
+  /** The scroll position and width before the weeks changed, to put the same column back under the mouse. */
+  const keep = useRef<{ left: number; width: number } | null>(null);
+  /** The weeks changed at the start (added or dropped), so the scroll position has to move with them. */
+  const rangeStartMoved = useRef(false);
+  const pendingReveal = useRef<Ymd | null>(null);
+  const didInitialScroll = useRef(false);
+
+  const untoldMap = useMemo(() => untoldByJob(untold, shownVisits, today), [untold, shownVisits, today]);
+  const weeks = useMemo(
+    () =>
+      buildWeeks({
+        visits: shownVisits,
+        from: range.from,
+        weeks: range.weeks,
+        today,
+        workingDays: props.workingDays,
+        blackouts: props.blackouts,
+        untold: untoldMap,
+      }),
+    [shownVisits, range, today, props.workingDays, props.blackouts, untoldMap],
+  );
+
+  // The page re-reads its first weeks after an action in the side panel: fold them in.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    setVisits((prev) =>
+      mergeVisits(prev, props.initialVisits, props.initialRange.from, rangeEnd(props.initialRange)),
+    );
+    setUntold(props.initialUntold);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.initialVisits, props.initialUntold]);
+
+  const findDay = useCallback(
+    (date: Ymd): BoardDay | null => {
+      for (const week of weeks) {
+        const found = week.days.find((d) => d.date === date);
+        if (found) return found;
+      }
+      return null;
+    },
+    [weeks],
+  );
+
+  /** The board's version of any day, even outside the weeks on screen. */
+  const resolveDay = useCallback(
+    (date: Ymd): BoardDay => {
+      const found = findDay(date);
+      if (found) return found;
+      const [week] = buildWeeks({
+        visits: shownVisits,
+        from: date,
+        weeks: 1,
+        today,
+        workingDays: props.workingDays,
+        blackouts: props.blackouts,
+        untold: untoldMap,
+      });
+      return week!.days.find((d) => d.date === date)!;
+    },
+    [findDay, shownVisits, today, props.workingDays, props.blackouts, untoldMap],
+  );
+
+  const findStop = (ref: { stopId: string; date: Ymd } | null): BoardStop | null =>
+    ref ? (findDay(ref.date)?.stops.find((s) => s.id === ref.stopId) ?? null) : null;
+  const panelStop = findStop(panel);
+  // "Move just this job…" moves one job of a combined card as a stop of its own.
+  const movingParent = findStop(moving);
+  const movingRoundStop = (() => {
+    if (!moving?.roundId) return null;
+    const segment = segmentByRound(findDay(moving.date)?.stops ?? []).find((seg) => seg.round?.id === moving.roundId);
+    return segment?.round ? roundAsStop(segment.stops, segment.round) : null;
+  })();
+  const movingStop = moving?.roundId
+    ? movingRoundStop
+    : movingParent && moving?.jobId
+      ? jobAsStop(movingParent, moving.jobId)
+      : movingParent;
+  const swappingDay = swapping ? findDay(swapping) : null;
+
+  // ---------- the floating message ----------
+
+  const seq = useRef(0);
+  const say = useCallback(
+    (text: string, opts?: Partial<Pick<BoardToastData, 'tone' | 'actions' | 'sticky' | 'durationMs'>>) => {
+      seq.current += 1;
+      setMessage({ id: String(seq.current), text, ...opts });
+    },
+    [],
+  );
+
+  /** Reload everything on the board (and the "Not told" list) after a change. */
+  const refresh = useCallback(async () => {
+    const current = rangeRef.current;
+    const [loaded, moves] = await Promise.all([
+      fetchWeeks(current.from, current.weeks, props.person),
+      loadUntoldMoves(),
+    ]);
+    if (loaded.ok) {
+      setVisits((prev) => mergeVisits(prev, loaded.visits, current.from, rangeEnd(current)));
+    } else {
+      toast.error(loaded.error);
+    }
+    setUntold(moves);
+  }, []);
+
+  const flash = useCallback((jobIds: string[]) => {
+    if (jobIds.length === 0) return;
+    const ids = new Set(jobIds);
+    setFlashIds(ids);
+    setTimeout(() => setFlashIds((current) => (current === ids ? new Set() : current)), FLASH_MS);
+  }, []);
+
+  const scrollToDay = useCallback((date: Ymd) => {
+    const el = scroller.current;
+    const column = el?.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    const week = column?.closest<HTMLElement>('[data-week-start]');
+    if (!el || !week) return;
+    const left = week.offsetLeft;
+    if (Math.abs(el.scrollLeft - left) > 2) el.scrollTo({ left, behavior: 'smooth' });
+  }, []);
+
+  /** Bring a day into view, loading the weeks around it first if it is further away than the board reaches. */
+  const revealDay = useCallback(
+    async (date: Ymd) => {
+      const current = rangeRef.current;
+      if (date >= current.from && date <= rangeEnd(current)) {
+        scrollToDay(date);
+        return;
+      }
+      const next = { from: addDays(mondayOf(date), -14), weeks: 6 };
+      const loaded = await fetchWeeks(next.from, next.weeks, props.person);
+      if (!loaded.ok) {
+        toast.error(loaded.error);
+        return;
+      }
+      pendingReveal.current = date;
+      setVisits(loaded.visits);
+      setRange(next);
+    },
+    [scrollToDay],
+  );
+
+  const afterChange = useCallback(
+    async (jobIds: string[], revealDate: Ymd | null) => {
+      await refresh();
+      if (revealDate) await revealDay(revealDate);
+      flash(jobIds);
+    },
+    [flash, refresh, revealDay],
+  );
+
+  const undoChange = useCallback(
+    async (changeId: string) => {
+      say('Putting it back…', { tone: 'working', sticky: true });
+      const result = await undoVisitChange({ changeId, notifyCustomers: false });
+      if (!result.success) {
+        say(result.error, { tone: 'danger' });
+        return;
+      }
+      say(
+        result.leftAlone > 0
+          ? `Put back ${result.restored} · ${result.leftAlone} already done, left as it is`
+          : `Put back ${result.restored}`,
+        { durationMs: 4000 },
+      );
+      await refresh();
+    },
+    [refresh, say],
+  );
+
+  /** "Moved Mrs Jones to Thu 8 Oct" with Tell them and Undo, for the next 10 seconds. */
+  const announce = useCallback(
+    (a: Pick<BoardChangeResult, 'text' | 'changeId' | 'fromDate' | 'toDate' | 'told'>) => {
+      const actions: NonNullable<BoardToastData['actions']> = [];
+      const changeId = a.changeId;
+      if (changeId && !a.told) {
+        actions.push({
+          label: 'Tell them',
+          onClick: () => setTell({ changeId, fromDate: a.fromDate, toDate: a.toDate }),
+        });
+      }
+      if (changeId) actions.push({ label: 'Undo', onClick: () => void undoChange(changeId) });
+      say(a.text, { actions });
+    },
+    [say, undoChange],
+  );
+
+  const sendTell = async () => {
+    if (!tell) return;
+    setTellBusy(true);
+    const result = await tellCustomersAboutChange({ changeId: tell.changeId });
+    setTellBusy(false);
+    setTell(null);
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+    } else {
+      say(toldText(result.notified, result.alreadyTold), { durationMs: 4000 });
+    }
+    await refresh();
+  };
+
+  const finished = (result: BoardChangeResult | null) => {
+    setMoving(null);
+    setSwapping(null);
+    if (!result) {
+      void refresh();
+      return;
+    }
+    announce(result);
+    void afterChange(result.jobIds, result.revealDate);
+  };
+
+  const untoldInfo = (changeId: string): TellRequest => {
+    const move = untold.find((m) => m.changeId === changeId);
+    return { changeId, fromDate: move?.fromDate ?? null, toDate: move?.toDate ?? null };
+  };
+
+
+  // ---------- dropping ----------
+
+  const jobsRef = useRef(shownVisits);
+  jobsRef.current = shownVisits;
+  /** Counts drops, so an older refresh can't clear a newer drop's optimistic state. */
+  const dropSeq = useRef(0);
+
+  /** A card was let go over a day: save the move or the new order. */
+  const dropCard = async (active: Extract<DndActive, { kind: 'card' }>, over: DndTarget) => {
+    // Let go outside the board, over a past day, or nowhere: it springs back, nothing is sent.
+    if (!over || !over.valid) return;
+    const day = resolveDay(over.date);
+    const sameDay = over.date === active.fromDate;
+    const joins = !sameDay && over.mergeStopId ? (day.stops.find((s) => s.id === over.mergeStopId) ?? null) : null;
+    const order = orderAfterDrop({
+      target: day,
+      dragged: active.stop,
+      index: over.index,
+      mergeInto: findHouseMatch(day, active.stop) ?? undefined,
+    });
+    const current = day.stops.flatMap((s) => s.jobIds);
+    if (sameDay && order.length === current.length && order.every((id, i) => id === current[i])) return;
+
+    // Only the save itself locks the board. Re-reading the weeks afterwards happens in the background,
+    // so you can lift the card again straight away (and a newer drop is never wiped by an older refresh).
+    dropSeq.current += 1;
+    const mine = dropSeq.current;
+    const clearOptimistic = () => {
+      if (dropSeq.current === mine) setOptimistic(null);
+    };
+    setBusyStopId(active.stop.id);
+    setOptimistic(
+      applyLocalMove(jobsRef.current, {
+        jobIds: sameDay ? [] : active.stop.jobIds,
+        toDate: over.date,
+        orderedJobIds: order,
+      }),
+    );
+
+    if (sameDay) {
+      let result: Awaited<ReturnType<typeof reorderDay>>;
+      try {
+        result = await reorderDay({ date: over.date, jobIds: order });
+      } finally {
+        setBusyStopId(null);
+      }
+      if (!result.success) {
+        clearOptimistic();
+        say(result.error, { tone: 'danger' });
+        void refresh();
+        return;
+      }
+      await refresh();
+      clearOptimistic();
+      return;
+    }
+
+    let result: Awaited<ReturnType<typeof moveStopToDay>>;
+    try {
+      result = await moveStopToDay({
+        jobIds: active.stop.jobIds,
+        toDate: over.date,
+        orderedJobIds: order,
+      });
+    } finally {
+      setBusyStopId(null);
+    }
+    if (!result.success) {
+      clearOptimistic();
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    let text = joins
+      ? `Added to ${active.stop.name}'s visit on ${formatBoardDay(over.date)}`
+      : `Moved ${active.stop.name} to ${formatBoardDay(over.date)}`;
+    if (!result.orderSaved) text += ' · not in place, drag it again';
+    announce({
+      text,
+      changeId: result.changeId,
+      fromDate: active.fromDate,
+      toDate: over.date,
+      told: false,
+    });
+    await afterChange(active.stop.jobIds, null);
+    clearOptimistic();
+  };
+
+  /** A day was let go over another day: swap them now. Undo is one tap away and nobody is texted. */
+  const dropDay = async (active: Extract<DndActive, { kind: 'day' }>, over: DndTarget) => {
+    if (!over || !over.valid) return;
+    if (props.person && props.person !== 'all') {
+      // A swap moves everyone's visits on both days, so it must not run while the board shows one person's.
+      say("Swapping days moves everyone's visits. Set the Person filter to Everyone to swap.", { tone: 'working' });
+      return;
+    }
+    const a = active.day.date;
+    const b = over.date;
+    const movedIds = [...active.day.stops, ...resolveDay(b).stops]
+      .filter((stop) => stop.movable)
+      .flatMap((stop) => stop.jobIds);
+    say(`Swapping ${formatBoardDay(a)} and ${formatBoardDay(b)}…`, { tone: 'working', sticky: true });
+    const result = await swapDays({
+      dayA: a,
+      dayB: b,
+      clientKey: crypto.randomUUID(),
+      notifyCustomers: false,
+    });
+    if (!result.success) {
+      const changeId = result.changeId;
+      say(result.error, {
+        tone: 'danger',
+        actions: changeId ? [{ label: 'Undo', onClick: () => void undoChange(changeId) }] : undefined,
+      });
+      void refresh();
+      return;
+    }
+    announce({
+      text: `Swapped ${formatBoardDay(a)} and ${formatBoardDay(b)}`,
+      changeId: result.changeId,
+      fromDate: a,
+      toDate: b,
+      told: false,
+    });
+    await afterChange(movedIds, null);
+  };
+
+  /** A whole round was let go over a day: move all its houses there now. Undo is one tap away; nobody is texted. */
+  const dropRound = async (active: Extract<DndActive, { kind: 'round' }>, over: DndTarget) => {
+    if (!over || !over.valid) return;
+    const jobIds = active.stops.flatMap((s) => s.jobs.filter((j) => j.movable).map((j) => j.id));
+    if (jobIds.length === 0) return;
+    dropSeq.current += 1;
+    const mine = dropSeq.current;
+    setBusyStopId(`round:${active.round.id}`);
+    setOptimistic(applyLocalMove(jobsRef.current, { jobIds, toDate: over.date, orderedJobIds: [] }));
+    let result: Awaited<ReturnType<typeof moveRound>>;
+    try {
+      result = await moveRound({ jobIds, toDate: over.date });
+    } finally {
+      setBusyStopId(null);
+    }
+    if (!result.success) {
+      if (dropSeq.current === mine) setOptimistic(null);
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    announce({
+      text: `Moved ${active.round.name} (${active.stops.length} ${active.stops.length === 1 ? 'house' : 'houses'}) to ${formatBoardDay(over.date)}`,
+      changeId: result.changeId,
+      fromDate: active.fromDate,
+      toDate: over.date,
+      told: false,
+    });
+    await afterChange(jobIds, over.date);
+    if (dropSeq.current === mine) setOptimistic(null);
+  };
+
+  const isOff = (workerId: string, date: Ymd) =>
+    (props.daysOff ?? []).some((d) => d.workerId === workerId && d.from <= date && date <= d.to);
+
+  /** Give a whole round (that day's houses of it) to a person, as one undoable change. */
+  const giveStops = async (stops: BoardStop[], label: string, person: LanePerson) => {
+    const jobIds = stops.flatMap((s) => s.jobs.filter((j) => j.movable).map((j) => j.id));
+    if (jobIds.length === 0) return;
+    const result = await reassignVisitsAction({ jobIds, toWorkerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    if (result.moved === 0) {
+      say('Those visits were already done or moved, so nothing changed.', { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    const changeId = result.changeId;
+    say(`Gave ${label} to ${person.isOwner ? 'you' : person.name}`, {
+      actions: changeId ? [{ label: 'Undo', onClick: () => void undoChange(changeId) }] : undefined,
+    });
+    await afterChange(jobIds, null);
+  };
+
+  /** Giving to someone who is off that day asks first; everyone else is immediate. */
+  const askThenRun = (label: string, person: LanePerson, date: Ymd, run: () => void) => {
+    if (!person.isOwner && isOff(person.workerId, date)) setConfirmGive({ label, person, date, run });
+    else run();
+  };
+
+  const requestGive = (stops: BoardStop[], label: string, person: LanePerson, date: Ymd) =>
+    askThenRun(label, person, date, () => void giveStops(stops, label, person));
+
+  /** Everything one person has on a day goes to someone else, as one undoable change. */
+  const giveDay = async (date: Ymd, fromWorkerId: string, person: LanePerson) => {
+    const result = await giveRoundAction({ date, fromWorkerId, toWorkerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    if (result.moved === 0) {
+      say('Nothing to give: those visits were already done or moved.', { tone: 'danger' });
+      void refresh();
+      return;
+    }
+    const changeId = result.changeId;
+    say(`Gave ${formatBoardDay(date)} to ${person.isOwner ? 'you' : person.name} (${result.moved} ${result.moved === 1 ? 'stop' : 'stops'})`, {
+      actions: changeId ? [{ label: 'Undo', onClick: () => void undoChange(changeId) }] : undefined,
+    });
+    await afterChange([], null);
+  };
+
+  /** Make someone a round's usual person: its upcoming visits follow them. Not an Undo, but easy to change back. */
+  const setUsual = async (round: RoundTag, person: LanePerson) => {
+    const result = await setUsualLeadAction({ roundId: round.id, workerId: person.workerId });
+    if (!result.success) {
+      say(result.error, { tone: 'danger' });
+      return;
+    }
+    say(`${person.isOwner ? 'You do' : `${person.name} now does`} ${round.name} every time`, { durationMs: 4500 });
+    await afterChange([], null);
+  };
+
+  const dnd = useBoardDnd({
+    weeks,
+    busy: busyStopId !== null,
+    scroller,
+    onDropCard: (a, t) => void dropCard(a, t),
+    onDropDay: (a, t) => void dropDay(a, t),
+    onDropRound: (a, t) => void dropRound(a, t),
+  });
+  const dragging = dnd.active;
+  const over = dnd.target;
+  const locked = busyStopId !== null || dnd.landing;
+
+  function columnState(day: BoardDay): {
+    liftedStopId: string | null;
+    liftedJobId: string | null;
+    liftedRoundId: string | null;
+    gapIndex: number | null;
+    originIndex: number | null;
+    joinStopId: string | null;
+    highlight: ColumnHighlight;
+  } {
+    const none = {
+      liftedStopId: null,
+      liftedJobId: null,
+      liftedRoundId: null,
+      gapIndex: null,
+      originIndex: null,
+      joinStopId: null,
+      highlight: null,
+    };
+    if (!dragging) return none;
+    if (dragging.kind === 'round') {
+      const here = over?.date === day.date;
+      return {
+        ...none,
+        liftedRoundId: dragging.fromDate === day.date ? dragging.round.id : null,
+        highlight: here ? (over?.valid ? 'drop' : 'denied') : null,
+      };
+    }
+    if (dragging.kind === 'day') {
+      if (dragging.day.date === day.date) return { ...none, highlight: 'swap-source' };
+      return { ...none, highlight: over?.date === day.date && over.valid ? 'swap' : null };
+    }
+    const fromHere = dragging.fromDate === day.date;
+    const here = over?.date === day.date;
+    const joins = here && over?.valid ? over.mergeStopId : null;
+    return {
+      liftedStopId: fromHere && !dragging.single ? dragging.stop.id : null,
+      liftedJobId: fromHere && dragging.single ? dragging.single.jobId : null,
+      liftedRoundId: null,
+      gapIndex: here && over?.valid && !over.mergeStopId ? over.index : null,
+      // Where it came from, shown while it isn't over a valid place (so it can glide back).
+      originIndex: fromHere && !dragging.single && !(over?.valid) ? day.stops.findIndex((s) => s.id === dragging.stop.id) : null,
+      joinStopId: joins,
+      highlight: here ? (over?.valid ? 'drop' : 'denied') : null,
+    };
+  }
+
+  const joinName =
+    dragging?.kind === 'card' && over?.valid && over.mergeStopId ? dragging.stop.name : null;
+
+  // ---------- scrolling ----------
+
+  /** Fade a side only when a day is cut off there (a fully on-screen day stays sharp). */
+  const syncEdges = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const left = el.scrollLeft > 24;
+    const right = el.scrollWidth - el.clientWidth - el.scrollLeft > 24;
+    setClipped((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  // Open on this week's Monday.
+  useLayoutEffect(() => {
+    if (!didInitialScroll.current) {
+      const el = scroller.current;
+      const week = el?.querySelector<HTMLElement>(`[data-week-start="${mondayOf(today)}"]`);
+      if (el && week) {
+        el.scrollLeft = week.offsetLeft;
+        didInitialScroll.current = true;
+      }
+    }
+    syncEdges();
+  }, [today, weeks, syncEdges]);
+
+  // After the weeks change: keep the same column where it was, or bring a far-away day into view.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (keep.current) {
+      el.scrollLeft = keep.current.left + (el.scrollWidth - keep.current.width) * (rangeStartMoved.current ? 1 : 0);
+      keep.current = null;
+      rangeStartMoved.current = false;
+    }
+    if (pendingReveal.current) {
+      const date = pendingReveal.current;
+      pendingReveal.current = null;
+      scrollToDay(date);
+    }
+    syncEdges();
+  }, [range, scrollToDay, syncEdges]);
+  const loadMore = useCallback(
+    async (dir: 'earlier' | 'later') => {
+      if (loadingRef.current) return;
+      loadingRef.current = true;
+      setLoadingEdge(dir);
+      try {
+        const current = rangeRef.current;
+        const next = extendRange(current, dir);
+        const fromDate = dir === 'earlier' ? next.from : addDays(rangeEnd(current), 1);
+        const loaded = await fetchWeeks(fromDate, BOARD_LOAD_STEP_WEEKS, props.person);
+        if (!loaded.ok) {
+          toast.error(loaded.error);
+          return;
+        }
+        const el = scroller.current;
+        if (el) keep.current = { left: el.scrollLeft, width: el.scrollWidth };
+        // Weeks added before, or dropped from the start, move everything: keep the column in place.
+        rangeStartMoved.current = next.from !== current.from;
+        setVisits((prev) => mergeVisits(prev, loaded.visits, fromDate, rangeEnd({ from: fromDate, weeks: BOARD_LOAD_STEP_WEEKS })));
+        setRange(next);
+      } finally {
+        loadingRef.current = false;
+        setLoadingEdge(null);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    syncEdges();
+    const observer = new ResizeObserver(() => syncEdges());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [syncEdges, weeks]);
+
+  const onScroll = () => {
+    syncEdges();
+    const el = scroller.current;
+    if (!el || loadingRef.current) return;
+    if (el.scrollLeft < EDGE_PX) void loadMore('earlier');
+    else if (el.scrollWidth - (el.scrollLeft + el.clientWidth) < EDGE_PX) void loadMore('later');
+  };
+
+  return (
+    <>
+      <DndContext
+        // A fixed id keeps the server and browser HTML the same (dnd-kit otherwise counts up its own).
+        id="week-board-dnd"
+        sensors={dnd.sensors}
+        accessibility={{ announcements: dnd.announcements }}
+        // The board scrolls itself. dnd-kit's own scroll, and its one-off "layout
+        // shift" scroll, both get added back onto the drag and throw the card off the cursor.
+        autoScroll={{ enabled: false, layoutShiftCompensation: false }}
+        {...dnd.handlers}
+      >
+      <div className="@container/board relative">
+        <div
+          ref={scroller}
+          onScroll={onScroll}
+          className="relative flex gap-4 overflow-x-auto overscroll-x-contain pb-3"
+        >
+          {weeks.map((week) => {
+            const days = week.days.filter((day) => day.weekday <= 5);
+            const stops = days.reduce((sum, day) => sum + day.total, 0);
+            const amount = days.reduce((sum, day) => sum + day.plannedAmount, 0);
+            return (
+            <div key={week.weekStart} data-week-start={week.weekStart} className="w-max shrink-0 @min-[960px]/board:w-full @min-[960px]/board:min-w-0">
+              <p className="mb-2 px-1 text-xs text-muted-foreground">
+                {week.label} · {stops} {stops === 1 ? 'stop' : 'stops'} · {formatGbp(amount)}
+              </p>
+              <div className="flex gap-2 @min-[960px]/board:w-full @min-[960px]/board:min-w-0">
+                {days.map((day) => (
+                  <BoardDayColumn
+                    key={day.date}
+                    day={day}
+                    weather={props.weather?.[day.date]}
+                    flashIds={flashIds}
+                    locked={locked}
+                    gapHeight={dragging?.kind === 'card' ? dragging.height : 0}
+                    {...columnState(day)}
+                    onOpen={(stop, date) => setPanel({ stopId: stop.id, date })}
+                    onMove={(stop, date) => setMoving({ stopId: stop.id, date })}
+                    onMoveJob={(stop, date, jobId) => setMoving({ stopId: stop.id, date, jobId })}
+                    onTell={(changeId) => setTell(untoldInfo(changeId))}
+                    people={props.people}
+                    off={new Set((props.people ?? []).filter((p) => isOff(p.workerId, day.date)).map((p) => p.workerId))}
+                    onMoveRound={(_stops, round, date) => setMoving({ stopId: `round:${round.id}`, date, roundId: round.id })}
+                    onGiveRound={(stops, round, person, date) => requestGive(stops, round.name, person, date)}
+                    onGiveStop={(stop, person, date) => requestGive([stop], stop.name, person, date)}
+                    onUsualRound={(round, person) => void setUsual(round, person)}
+                    onGiveDay={(date, from, person) => askThenRun(formatBoardDay(date), person, date, () => void giveDay(date, from, person))}
+                    onSwap={(d) => {
+                      if (props.person && props.person !== 'all') {
+                        say("Swapping days moves everyone's visits. Set the Person filter to Everyone to swap.", { tone: 'working' });
+                        return;
+                      }
+                      setSwapping(d.date);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            );
+          })}
+        </div>
+        {loadingEdge ? (
+          <div
+            className={
+              loadingEdge === 'earlier'
+                ? 'pointer-events-none absolute left-2 top-1/2 z-20'
+                : 'pointer-events-none absolute right-2 top-1/2 z-20'
+            }
+          >
+            <Loader2 className="size-5 animate-spin text-muted-foreground" aria-label="Loading more weeks" />
+          </div>
+        ) : null}
+        <BoardEdgeFade side="left" on={clipped.left} />
+        <BoardEdgeFade side="right" on={clipped.right} />
+      </div>
+
+      <BoardDragOverlay
+        active={dragging}
+        target={over}
+        joinName={joinName}
+        attach={dnd.setOverlay}
+      />
+      </DndContext>
+
+      <BoardStopPanel stop={panelStop} brand={brand} onOpenChange={(open) => !open && setPanel(null)} />
+
+      <MoveStopDialog
+        stop={movingStop}
+        fromDate={moving?.date ?? today}
+        today={today}
+        brand={brand}
+        open={moving !== null && movingStop !== null}
+        resolveDay={resolveDay}
+        onOpenChange={(open) => !open && setMoving(null)}
+        onFinished={finished}
+      />
+      <SwapDaysDialog
+        day={swappingDay}
+        today={today}
+        brand={brand}
+        open={swapping !== null && swappingDay !== null}
+        resolveDay={resolveDay}
+        onOpenChange={(open) => !open && setSwapping(null)}
+        onFinished={finished}
+      />
+
+      <Dialog open={tell !== null} onOpenChange={(open) => !open && !tellBusy && setTell(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tell the customers?</DialogTitle>
+          </DialogHeader>
+          {tell?.toDate ? (
+            <ChangePreview
+              text={dayMovedSms({
+                brand,
+                fromDay: tell.fromDate ? formatVisitDay(tell.fromDate) : formatVisitDay(tell.toDate),
+                toDay: formatVisitDay(tell.toDate),
+              })}
+            />
+          ) : null}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setTell(null)} disabled={tellBusy}>
+              Cancel
+            </Button>
+            <Button onClick={() => void sendTell()} disabled={tellBusy}>
+              {tellBusy ? <Loader2 className="size-4 animate-spin" /> : null}
+              Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmGive !== null} onOpenChange={(open) => !open && setConfirmGive(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmGive ? `${confirmGive.person.name} is off ${formatBoardDay(confirmGive.date)}` : 'Give round'}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {confirmGive ? `Give ${confirmGive.label} to ${confirmGive.person.name} anyway?` : null}
+          </p>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setConfirmGive(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const c = confirmGive;
+                setConfirmGive(null);
+                c?.run();
+              }}
+            >
+              Give anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <BoardToast
+        message={message}
+        paused={tell !== null || moving !== null || swapping !== null}
+        onDismiss={(id) => setMessage((current) => (current?.id === id ? null : current))}
+      />
+    </>
+  );
+}

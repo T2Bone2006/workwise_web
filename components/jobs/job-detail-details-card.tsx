@@ -7,6 +7,10 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { Card, CardAction, CardContent, CardHeader } from '@/components/ui/card';
 import { CopyButton } from '@/components/jobs/copy-button';
+import {
+  AddressAutocompleteInput,
+  unhookChromeAddressFill,
+} from '@/components/ui/address-autocomplete-input';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -194,18 +198,28 @@ export function JobDetailDetailsCard({
         {isEditing ? (
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="job-edit-address">Address</Label>
-              <Input
-                id="job-edit-address"
+              <Label htmlFor="job-edit-line">{unhookChromeAddressFill('Address')}</Label>
+              <AddressAutocompleteInput
+                id="job-edit-line"
                 value={draft.address}
-                onChange={(e) => setDraft((d) => ({ ...d, address: e.target.value }))}
+                onValueChange={(address) => setDraft((d) => ({ ...d, address }))}
+                onAddressSelect={({ address, postcode }) =>
+                  setDraft((d) => ({
+                    ...d,
+                    address,
+                    postcode: postcode || d.postcode,
+                  }))
+                }
+                placeholder="Start typing a postcode or address…"
                 disabled={isSaving}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="job-edit-postcode">Postcode</Label>
+              <Label htmlFor="job-edit-outward">{unhookChromeAddressFill('Postcode')}</Label>
               <Input
-                id="job-edit-postcode"
+                id="job-edit-outward"
+                name="outward"
+                autoComplete="off"
                 className="uppercase"
                 value={draft.postcode}
                 onChange={(e) => setDraft((d) => ({ ...d, postcode: e.target.value }))}

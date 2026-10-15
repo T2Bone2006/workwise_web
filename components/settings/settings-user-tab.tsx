@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { UnsavedSaveBar } from '@/components/settings/unsaved-save-bar';
 import { updateUserProfile, changePassword } from '@/lib/actions/settings';
 import type { SettingsPageData } from '@/lib/data/settings-types';
 import { cn } from '@/lib/utils';
@@ -28,10 +29,12 @@ import { cn } from '@/lib/utils';
 interface SettingsUserTabProps {
   data: SettingsPageData;
   onSaved: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
+export function SettingsUserTab({ data, onSaved, onDirtyChange }: SettingsUserTabProps) {
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(0);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -44,6 +47,12 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
 
   const [name, setName] = useState(user?.full_name ?? '');
   const [phone, setPhone] = useState(userPhone);
+  const [baseline, setBaseline] = useState({ name: user?.full_name ?? '', phone: userPhone });
+  const dirty = name !== baseline.name || phone !== baseline.phone;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,6 +64,8 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
     const result = await updateUserProfile(formData);
     setSaving(false);
     if (result.success) {
+      setBaseline({ name, phone });
+      setSavedAt(Date.now());
       toast.success('Profile updated');
       onSaved();
     } else {
@@ -141,12 +152,7 @@ export function SettingsUserTab({ data, onSaved }: SettingsUserTabProps) {
               />
             </div>
           </CardContent>
-          <CardContent className="pt-4">
-            <Button type="submit" variant="gradient" disabled={saving}>
-              {saving && <Loader2 className="size-4 animate-spin" />}
-              Save profile
-            </Button>
-          </CardContent>
+          <UnsavedSaveBar dirty={dirty} saving={saving} savedAt={savedAt} />
         </form>
       </Card>
 

@@ -1,8 +1,12 @@
 import { Suspense } from 'react';
+import { Lock } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { PortalProHeaderLink } from '@/components/portal/portal-pro-card';
 import { TenantSelector, type PortalTenantOption } from '@/components/portal/tenant-selector';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { EmptyState } from '@/components/look/empty-state';
+import { JobsTableBlock } from '@/components/layout/page-skeletons';
 import { JobsTable } from '@/components/jobs/jobs-table';
 import {
   getJobsForCustomer,
@@ -147,7 +151,7 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect('/portal/login');
+    redirect('/login');
   }
 
   const { data: portalRows, error: portalError } = await supabase
@@ -191,13 +195,11 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
           title="Your jobs"
           subtitle="Track the status of work raised with your service provider."
         />
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-muted/20 px-6 py-16 text-center">
-          <h2 className="text-lg font-semibold text-foreground">No access</h2>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Your account is not linked to any customer portal. Contact your service provider if you
-            believe this is an error.
-          </p>
-        </div>
+        <EmptyState
+          icon={Lock}
+          title="No access"
+          body="Your account is not linked to any customer portal. Contact your service provider if you believe this is an error."
+        />
       </div>
     );
   }
@@ -289,24 +291,18 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
         title="Your jobs"
         subtitle="Search, filter, and track work raised with your service provider."
         actions={
-          tenantOptions.length > 1 ? (
-            <TenantSelector options={tenantOptions} selectedCustomerId={selectedCustomerId} />
-          ) : undefined
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            {tenantOptions.length > 1 ? (
+              <TenantSelector options={tenantOptions} selectedCustomerId={selectedCustomerId} />
+            ) : null}
+            <PortalProHeaderLink />
+          </div>
         }
       />
 
-      {tenantOptions.length === 1 ? (
-        <p className="text-sm text-muted-foreground">
-          Viewing jobs for <span className="font-medium text-foreground">{selectedTenantName}</span>
-        </p>
-      ) : null}
-
-      <Suspense
-        fallback={
-          <div className="h-[28rem] animate-pulse rounded-xl border border-border/70 bg-muted/25" />
-        }
-      >
+      <Suspense fallback={<JobsTableBlock filters={2} labelled />}>
         <JobsTable
+          key={selectedCustomerId}
           variant="portal"
           basePath="/portal"
           initialJobs={Array.isArray(jobs) ? jobs : []}
@@ -319,6 +315,7 @@ export default async function PortalPage({ searchParams }: PortalPageProps) {
           fieldFilterOptions={fieldFilterOptions}
           fieldFilterValuesByField={fieldFilterValuesByField}
           initialVisibleColumns={PORTAL_COLUMNS}
+          importHeaders={sourceKeysResult.keys ?? []}
           workers={[]}
         />
       </Suspense>

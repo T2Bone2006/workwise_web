@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
+import { assertCancellationInstant } from '@/lib/jobs/cancellation-time';
 import {
   getJobsForExport,
   type ExportJobRow,
@@ -21,7 +22,8 @@ import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geoco
 import { detectSkills } from '@/lib/detect-skills';
 import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
-import { sendJobAssignedPushToWorker } from '@/lib/services/worker-push';
+import { notifyWorkersOfSentJobs } from '@/lib/jobs/notify-sent-jobs';
+import { toSentJob, type SentJob } from '@/lib/jobs/worker-job-alert';
 import { getConnectionsForTenant } from '@/lib/data/network';
 import { getAssignableWorkers } from '@/lib/actions/workers';
 import { dispatchJobToNetwork, handleNetworkJobDeclined } from '@/lib/actions/network';
@@ -101,7 +103,7 @@ export async function createJob(payload: CreateJobPayload): Promise<CreateJobRes
       return { success: false, error: message ?? 'Validation failed' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned. Please contact your administrator.' };
     }
@@ -302,7 +304,7 @@ export async function updateJobCustomer(payload: {
       };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -447,7 +449,7 @@ export async function updateJobDetails(payload: {
       return { success: false, error: message };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -566,7 +568,7 @@ export async function updateJobCompletionRecord(payload: {
       return { success: false, error: 'Validation failed' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -658,18 +660,20 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   pending_send: ['assigned', 'cancelled', 'declined'],
   assigned: ['in_progress', 'cancelled', 'declined'],
   in_progress: ['completed', 'cancelled', 'paused'],
-  paused: ['in_progress'],
+  paused: ['in_progress', 'cancelled'],
+  incomplete: ['cancelled'],
   completed: ['assigned'],
-  declined: ['pending', 'assigned'],
+  declined: ['pending', 'assigned', 'cancelled'],
   cancelled: [],
 };
 
 export async function updateJobStatus(
   jobId: string,
-  newStatus: string
+  newStatus: string,
+  options?: { cancelledAt?: string }
 ): Promise<UpdateJobStatusResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -692,10 +696,21 @@ export async function updateJobStatus(
       return { success: false, error: `Cannot change status from ${currentStatus} to ${newStatus}.` };
     }
 
+    let cancelledAt: string | null = null;
+    if (newStatus === 'cancelled') {
+      const checked = assertCancellationInstant(options?.cancelledAt ?? '');
+      if (!checked.ok) return { success: false, error: checked.error };
+      cancelledAt = checked.iso;
+    }
+
     const updates: Record<string, unknown> = {
       status: newStatus,
       updated_at: new Date().toISOString(),
     };
+    if (newStatus === 'cancelled') {
+      // Drop it off an active round. Regular jobs already have a null position.
+      updates.route_position = null;
+    }
     if (newStatus === 'completed') {
       updates.completed_at = new Date().toISOString();
     }
@@ -737,17 +752,19 @@ export async function updateJobStatus(
     }
 
     const { data: { user } } = await supabase.auth.getUser();
+    const recordedAt = new Date().toISOString();
     const { error: historyError } = await supabase
       .from('job_status_history')
       .insert({
         job_id: jobId,
         from_status: currentStatus,
         to_status: newStatus,
-        created_at: new Date().toISOString(),
+        // A cancellation keeps the time the office chose, not the moment they clicked.
+        created_at: cancelledAt ?? recordedAt,
         changed_by_user_id: user?.id ?? null,
         changed_by_worker_id: null,
-        notes: null,
-        metadata: {},
+        notes: cancelledAt ? 'Cancelled' : null,
+        metadata: cancelledAt ? { cancelled_at: cancelledAt, recorded_at: recordedAt } : {},
       });
 
     if (historyError) {
@@ -756,6 +773,7 @@ export async function updateJobStatus(
     }
 
     revalidatePath('/jobs');
+    revalidatePath('/dashboard');
     revalidatePath(`/jobs/${jobId}`);
     return { success: true };
   } catch (err) {
@@ -769,7 +787,7 @@ export async function updateJobStatus(
 
 export async function handleRegularJobDeclined(jobId: string): Promise<UpdateJobStatusResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -840,7 +858,7 @@ export async function assignJob(
   options?: AssignJobOptions
 ): Promise<AssignJobResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -933,7 +951,7 @@ export async function bulkAssignJobs(
   workerId: string
 ): Promise<BulkAssignJobsResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -1602,7 +1620,7 @@ export async function autoAllocateJobGroup(
   }
 
   const supabase = await createClient();
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   const { data: rows, error } = await supabase
     .from('jobs')
     .select('id, required_skills')
@@ -1688,7 +1706,8 @@ export type SendPendingJobsResult =
   | { success: false; error: string };
 
 /**
- * Confirms jobs in `pending_send`: sets status to `assigned` and sends Expo push per worker token.
+ * Confirms jobs in `pending_send`: sets status to `assigned` and tells each worker once
+ * (one email, one app notification, and a text only if they turned texts on).
  * Pass `jobIds` to send only those (badge click, selected rows); omit to send everything
  * ready — the "Send out jobs" banner action. `jobIds` comes from on-page selection, so it's
  * always small — safe to filter with `.in('id', ...)` without the URL-length issue a
@@ -1702,7 +1721,7 @@ export async function sendPendingJobsToWorkers(
       return { success: false, error: 'No jobs selected.' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -1710,7 +1729,9 @@ export async function sendPendingJobsToWorkers(
     const supabase = await createClient();
     let query = supabase
       .from('jobs')
-      .select('id, reference_number, assigned_worker_id')
+      .select(
+        'id, reference_number, assigned_worker_id, postcode, scheduled_date, scheduled_time, customers(name)',
+      )
       .eq('tenant_id', tenantId)
       .eq('status', 'pending_send')
       .not('assigned_worker_id', 'is', null);
@@ -1735,9 +1756,9 @@ export async function sendPendingJobsToWorkers(
     const userId = user?.id ?? null;
     const now = new Date().toISOString();
     let sent = 0;
+    const sentJobs: SentJob[] = [];
 
     for (const job of list) {
-      const workerId = job.assigned_worker_id as string;
       const { error: upErr } = await supabase
         .from('jobs')
         .update({ status: 'assigned', updated_at: now })
@@ -1765,15 +1786,12 @@ export async function sendPendingJobsToWorkers(
         console.error('[sendPendingJobsToWorkers] history', histErr);
       }
 
-      await sendJobAssignedPushToWorker({
-        supabase,
-        tenantId,
-        workerId,
-        jobId: job.id,
-        referenceNumber: (job.reference_number as string) ?? job.id.slice(0, 8),
-      });
+      const sentJob = toSentJob(job as Parameters<typeof toSentJob>[0]);
+      if (sentJob) sentJobs.push(sentJob);
       sent += 1;
     }
+
+    await notifyWorkersOfSentJobs({ tenantId, jobs: sentJobs });
 
     revalidatePath('/jobs');
     for (const job of list) {
@@ -1793,7 +1811,7 @@ export type SendJobToWorkerResult = { success: true } | { success: false; error:
 
 export async function sendJobToWorker(jobId: string): Promise<SendJobToWorkerResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -1801,7 +1819,9 @@ export async function sendJobToWorker(jobId: string): Promise<SendJobToWorkerRes
     const supabase = await createClient();
     const { data: job, error: fetchError } = await supabase
       .from('jobs')
-      .select('id, reference_number, assigned_worker_id, status')
+      .select(
+        'id, reference_number, assigned_worker_id, status, postcode, scheduled_date, scheduled_time, customers(name)',
+      )
       .eq('id', jobId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -1846,13 +1866,8 @@ export async function sendJobToWorker(jobId: string): Promise<SendJobToWorkerRes
       console.error('[sendJobToWorker] history', histErr);
     }
 
-    await sendJobAssignedPushToWorker({
-      supabase,
-      tenantId,
-      workerId: job.assigned_worker_id as string,
-      jobId,
-      referenceNumber: (job.reference_number as string) ?? jobId.slice(0, 8),
-    });
+    const sentJob = toSentJob(job as Parameters<typeof toSentJob>[0]);
+    await notifyWorkersOfSentJobs({ tenantId, jobs: sentJob ? [sentJob] : [] });
 
     revalidatePath('/jobs');
     revalidatePath(`/jobs/${jobId}`);
@@ -1878,6 +1893,17 @@ async function deleteJobRelatedRows(
   jobIds: string[]
 ) {
   if (jobIds.length === 0) return { error: null as Error | null };
+  const { count: dispatchCount } = await supabase
+    .from('network_job_dispatches')
+    .select('id', { count: 'exact', head: true })
+    .in('canonical_job_id', jobIds);
+  if ((dispatchCount ?? 0) > 0) {
+    return {
+      error: new Error(
+        'This job has been sent to another business, so it cannot be deleted. Cancel it instead.'
+      ),
+    };
+  }
   const { error: attErr } = await supabase.from('job_attachments').delete().in('job_id', jobIds);
   if (attErr) {
     console.error('[deleteJobRelatedRows] job_attachments', attErr);
@@ -1893,7 +1919,7 @@ async function deleteJobRelatedRows(
 
 export async function deleteJob(jobId: string): Promise<DeleteJobResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -1948,7 +1974,7 @@ export async function bulkDeleteJobs(jobIds: string[]): Promise<DeleteJobResult>
       return { success: false, error: 'No jobs selected.' };
     }
 
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }
@@ -2027,7 +2053,7 @@ export async function getJobsForExportAction(
   scope: { type: 'all' } | { type: 'count'; count: number }
 ): Promise<ExportJobsResult> {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const tenantId = await getOwnerTenantId();
     if (!tenantId) {
       return { success: false, error: 'No tenant assigned.' };
     }

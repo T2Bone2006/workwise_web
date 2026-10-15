@@ -15,15 +15,8 @@ import {
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { updateJobStatus, sendJobToWorker, autoAllocateJob } from '@/lib/actions/jobs';
+import { CancelJobDialog } from '@/components/jobs/cancel-job-form';
 import { cn } from '@/lib/utils';
 import type { JobStatus } from '@/lib/data/jobs';
 
@@ -46,10 +39,14 @@ export function JobDetailActionsCard({
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
-  async function handleStatusChange(newStatus: string) {
+  async function handleStatusChange(newStatus: string, cancelledAt?: string) {
     setLoadingAction(newStatus);
     try {
-      const result = await updateJobStatus(jobId, newStatus);
+      const result = await updateJobStatus(
+        jobId,
+        newStatus,
+        cancelledAt ? { cancelledAt } : undefined
+      );
       if (result.success) {
         toast.success('Status updated');
         router.refresh();
@@ -228,6 +225,25 @@ export function JobDetailActionsCard({
             Reopen Job
           </Button>
         )}
+        {(status === 'paused' || status === 'incomplete') && (
+          <>
+            <p className="text-xs text-muted-foreground mb-2">
+              {status === 'paused'
+                ? 'Work is paused. Cancel it if it will not be finished.'
+                : 'The work was not completed. Cancel it if it will not be re-planned.'}
+            </p>
+            <Button
+              variant="destructive"
+              size="default"
+              className="w-full gap-2"
+              onClick={() => setCancelConfirmOpen(true)}
+              disabled={!!loadingAction}
+            >
+              <XCircle className="size-4" />
+              Cancel Job
+            </Button>
+          </>
+        )}
         {isDeclined && (
           <Button
             variant="destructive"
@@ -261,42 +277,29 @@ export function JobDetailActionsCard({
             Reassign
           </Button>
         )}
+        {isDeclined && (
+          <Button
+            variant="outline"
+            size="default"
+            className="w-full gap-2"
+            onClick={() => setCancelConfirmOpen(true)}
+            disabled={!!loadingAction}
+          >
+            <XCircle className="size-4" />
+            Cancel Job
+          </Button>
+        )}
         {isCancelled && (
           <p className="text-sm text-muted-foreground">This job is cancelled.</p>
         )}
       </CardContent>
 
-      <Dialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
-        <DialogContent
-          className={cn(
-            'max-w-sm border-border/80 backdrop-blur-[var(--blur-glass)]',
-            'bg-[var(--glass-bg)] shadow-[var(--shadow-glass-value)]'
-          )}
-        >
-          <DialogHeader>
-            <DialogTitle>Cancel job?</DialogTitle>
-            <DialogDescription>
-              This will mark the job as cancelled. You can reopen it later from the job list if needed.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={() => setCancelConfirmOpen(false)}>
-              Keep
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => handleStatusChange('cancelled')}
-              disabled={!!loadingAction}
-            >
-              {loadingAction === 'cancelled' ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                'Cancel job'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CancelJobDialog
+        open={cancelConfirmOpen}
+        onOpenChange={setCancelConfirmOpen}
+        busy={loadingAction === 'cancelled'}
+        onSubmit={(iso) => void handleStatusChange('cancelled', iso)}
+      />
     </Card>
   );
 }

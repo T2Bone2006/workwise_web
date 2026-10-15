@@ -1,8 +1,9 @@
 import { format, isValid, parseISO } from 'date-fns';
 import { redirect } from 'next/navigation';
 import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getTenantProducts, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 import { getTenantSkills } from '@/lib/actions/skills';
-import { getWorkersForTenant } from '@/lib/data/workers';
+import { countTeamWorkers, getWorkersForTenant } from '@/lib/data/workers';
 import {
   getJobsForTenant,
   getJobsStatusSummary,
@@ -19,13 +20,46 @@ import {
   type FieldFilterValueOption,
 } from '@/lib/jobs/field-filter';
 import { JobsTable } from '@/components/jobs/jobs-table';
+import { getFieldGroupsForTenant } from '@/lib/data/field-groups';
 import { PendingSendJobsBanner } from '@/components/jobs/pending-send-jobs-banner';
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { DashboardDayNav } from '@/components/dashboard/dashboard-day-nav';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getDeclinedJobs } from '@/lib/data/dashboard';
+import { getProHomeData } from '@/lib/data/pro-home';
+import { namesLine, summariseDay, teamForDay } from '@/lib/jobs/pro-day';
+import { LilyWelcome } from '@/components/assistant/lily-welcome';
+import { GetStartedPanel } from '@/components/jobs/overview/get-started-panel';
+import { getGetStartedState } from '@/lib/data/get-started';
+import { ProKpiTiles } from '@/components/jobs/overview/pro-kpi-tiles';
+import { ProNeedsCard } from '@/components/jobs/overview/pro-needs-card';
+import { TeamTodayCard } from '@/components/jobs/overview/team-today-card';
+import { loadBooksSummary } from '@/lib/books/summary';
+import { currentMonth } from '@/lib/books/periods';
+import { getRoundsHomeData } from '@/lib/data/rounds/home';
+import { getTeamToday } from '@/lib/data/rounds/team-today';
+import { loadComingUp } from '@/lib/data/rounds/coming-up';
+import { loadNeedsYou } from '@/lib/data/rounds/needs-you';
+import { loadWeather } from '@/lib/data/weather';
+import { getRoundsSettings } from '@/lib/data/rounds/settings';
+import { loadLatestPayments, loadMoneyTrend, loadRoundValue, loadWeekGlance } from '@/lib/data/rounds/overview';
+import { todayInLondon } from '@/lib/rounds/dates';
+import { getAuthUser } from '@/lib/supabase/auth-user';
+import { createClient } from '@/lib/supabase/server';
+import { RoundsHome } from '@/components/rounds/rounds-home';
+import { NoProducts } from '@/components/dashboard/no-products';
+import { getWorkerLink } from '@/lib/auth/worker-link';
+import { dashboardShouldGoToWorker } from '@/lib/auth/worker-link-core';
+import { WORKER_HOME } from '@/lib/auth/worker-web-access';
+import { PlanEnded } from '@/components/dashboard/plan-ended';
+import { ProPlanEnded } from '@/components/dashboard/pro-plan-ended';
+import { proRestartChoice } from '@/lib/billing/pro-restart';
+import { parsePlanChoice, type PlanChoice } from '@/lib/billing/plans';
 
 interface DashboardPageProps {
   searchParams: Promise<{
+    restarted?: string;
     date?: string;
     search?: string;
     status?: string;
@@ -62,6 +96,35 @@ const VALID_STATUS: JobStatus[] = [
   'declined',
 ];
 const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+
+/** Last self-serve plan, or null when this login should keep the old "no subscription" box (no rows, Pro, or managed). */
+async function restartChoice(tenantId: string): Promise<PlanChoice | null> {
+  try {
+    const supabase = await createClient();
+    const [{ data, error }, { data: tenant, error: tenantError }] = await Promise.all([
+      supabase
+        .from('subscriptions')
+        .select('plan, billing_interval, source, product, created_at')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false }),
+      supabase.from('tenants').select('stripe_customer_id').eq('id', tenantId).maybeSingle(),
+    ]);
+    if (error || tenantError || !data || data.length === 0 || !tenant?.stripe_customer_id) return null;
+    const pro = new Set<string>(PRO_TIER_PRODUCTS);
+    if (data.some((row) => row.source === 'manual' || (row.product != null && pro.has(row.product)))) return null;
+    const latest = data[0];
+    return parsePlanChoice({ plan: latest?.plan, interval: latest?.billing_interval });
+  } catch (err) {
+    console.error('[dashboard] restart', err instanceof Error ? err.name : 'Error');
+    return null;
+  }
+}
+
+function firstNameOf(fullName: unknown): string | null {
+  if (typeof fullName !== 'string') return null;
+  const first = fullName.trim().split(/\s+/)[0] ?? '';
+  return first.length > 0 ? first : null;
+}
 
 function todayParam(): string {
   return format(new Date(), 'yyyy-MM-dd');
@@ -132,9 +195,88 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     redirect('/login');
   }
 
+  const products = await getTenantProducts();
   const rawParams = await searchParams;
+
+  // A self-employed worker with no plan of their own (or only Lite) lands on their worker area.
+  if (products.primary === null || products.primary === 'lite') {
+    const workerLink = await getWorkerLink();
+    if (dashboardShouldGoToWorker({ primary: products.primary, hasWorkerLink: workerLink !== null })) {
+      redirect(WORKER_HOME);
+    }
+  }
+
+  // Non-Pro tenants get their product's home here; /dashboard stays the one
+  // URL every login lands on.
+  if (products.primary === 'rounds') {
+    const supabase = await createClient();
+    const { user } = await getAuthUser();
+    const today = todayInLondon();
+    // The overview is always today; other days live in the calendar. Each card's
+    // read fails on its own (that card says so) and never breaks the page.
+    const settings = await getRoundsSettings(supabase, tenantId);
+    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow, teamToday] = await Promise.all([
+      getRoundsHomeData(tenantId),
+      loadNeedsYou(supabase, { tenantId, today }),
+      loadBooksSummary(supabase, { tenantId, period: currentMonth(today) }).catch(() => null),
+      loadComingUp(supabase, { tenantId, weeks: 4 }).catch(() => null),
+      loadWeekGlance({ tenantId, today, settings }).catch(() => null),
+      loadMoneyTrend(supabase, { tenantId, today }),
+      loadLatestPayments(supabase, tenantId).catch(() => null),
+      loadRoundValue(supabase, tenantId).catch(() => null),
+      user?.id
+        ? supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .maybeSingle()
+            .then(
+              (row) => row,
+              () => ({ data: null }),
+            )
+        : Promise.resolve({ data: null }),
+      // Only the owner's Dashboard has this card; a read problem leaves the card out and nothing else.
+      getTeamToday(tenantId, today).catch(() => null),
+    ]);
+    const firstName = firstNameOf(nameRow.data?.full_name) ?? firstNameOf(user?.user_metadata?.full_name);
+    const weather = await loadWeather(supabase, { tenantId, visitPoints: data.todayVisits });
+    return (
+      <RoundsHome
+        tenantName={tenantName}
+        firstName={firstName}
+        data={data}
+        needs={needs}
+        books={books}
+        trend={trend?.months ?? null}
+        lastMonthToDate={trend?.lastMonthToDate ?? null}
+        latestPayments={latestPayments}
+        week={week}
+        comingUp={comingUp}
+        workingDays={settings.working_days}
+        roundValue={roundValue}
+        weather={weather}
+        teamToday={teamToday}
+      />
+    );
+  }
+  if (products.primary === 'lite') {
+    redirect(rawParams.restarted === '1' ? '/lite?restarted=1' : '/lite');
+  }
+  if (products.primary === null) {
+    const choice = await restartChoice(tenantId);
+    if (choice) return <PlanEnded defaultChoice={choice} />;
+    const proChoice = await proRestartChoice(tenantId);
+    if (proChoice) {
+      const team = await countTeamWorkers(tenantId, { includePending: true });
+      return <ProPlanEnded defaultChoice={proChoice} teamSize={team ?? 0} />;
+    }
+    return <NoProducts tenantName={tenantName} />;
+  }
+
   const day = parseDayParam(rawParams.date);
   const filters = parseSearchParams(rawParams, day);
+
+  const newLook = (await getTenantLook(products)) === 'new';
 
   const [
     statusSummary,
@@ -143,6 +285,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     visibleColumns,
     { workers },
     { jobs, totalCount, error },
+    proHome,
+    declinedJobs,
+    getStarted,
+    fieldGroups,
   ] = await Promise.all([
     getJobsStatusSummary(tenantId, { date_from: day, date_to: day }),
     getPendingSendJobsForTenant(tenantId),
@@ -150,6 +296,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     getJobsListColumnsForTenant(tenantId),
     getWorkersForTenant(tenantId),
     getJobsForTenant(tenantId, filters),
+    newLook ? getProHomeData(tenantId, day) : Promise.resolve(null),
+    newLook ? getDeclinedJobs(tenantId) : Promise.resolve([]),
+    newLook ? getGetStartedState(tenantId) : Promise.resolve(null),
+    getFieldGroupsForTenant(tenantId),
   ]);
 
   const fieldFilterOptions = SYSTEM_FILTER_FIELDS.map((f) => ({
@@ -182,8 +332,53 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         actions={<DashboardDayNav selectedDate={day} />}
       />
 
-      <DeclinedJobsBanner variant="red" />
-      <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+      {newLook && proHome ? (
+        <>
+          {getStarted ? <GetStartedPanel state={getStarted} /> : null}
+          <LilyWelcome pro />
+          <ProKpiTiles
+            day={day}
+            isToday={isToday}
+            counts={summariseDay(proHome.dayJobs)}
+            onJobNames={namesLine(
+              teamForDay(
+                workers.map((w) => ({ id: w.id, name: w.full_name })),
+                proHome.dayJobs,
+              )
+                .filter((m) => m.onJob)
+                .map((m) => m.name),
+            )}
+            declined={declinedJobs.length}
+            unassigned={proHome.needs.unassigned.count}
+            notCompleted={proHome.needs.notCompleted.count}
+          />
+          <div className="grid gap-4 sm:gap-5 lg:grid-cols-5">
+            <div className="min-w-0 lg:col-span-3">
+              <ProNeedsCard
+                fill
+                declined={declinedJobs}
+                pendingSend={pendingSendJobs}
+                needs={proHome.needs}
+                tenantSkills={tenantSkills}
+              />
+            </div>
+            <div className="min-w-0 lg:col-span-2">
+              <TeamTodayCard
+                team={teamForDay(
+                  workers.map((w) => ({ id: w.id, name: w.full_name })),
+                  proHome.dayJobs,
+                )}
+                isToday={isToday}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <DeclinedJobsBanner variant="red" />
+          <PendingSendJobsBanner jobs={pendingSendJobs} tenantSkills={tenantSkills} />
+        </>
+      )}
 
       <JobsTable
         initialJobs={Array.isArray(jobs) ? jobs : []}
@@ -196,6 +391,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         fieldFilterOptions={fieldFilterOptions}
         fieldFilterValuesByField={fieldFilterValuesByField}
         initialVisibleColumns={visibleColumns}
+        fieldGroups={fieldGroups}
         workers={workers.map((w) => ({ id: w.id, full_name: w.full_name }))}
         basePath="/dashboard"
         variant="day"

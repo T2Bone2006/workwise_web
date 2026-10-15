@@ -1,8 +1,10 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
+import { BUSINESS_NAME_MESSAGE, INVITE_INVALID_MESSAGE, parseInviteKind } from '@/lib/invites/worker-invite';
+import { businessSetupSchema } from '@/lib/validations/business-setup';
 
 export async function POST(req: Request) {
-  let body: { token?: string; password?: string };
+  let body: { token?: string; password?: string; business?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -50,6 +52,18 @@ export async function POST(req: Request) {
     );
   }
 
+  const kind = parseInviteKind((record as { kind?: unknown }).kind);
+
+  // A set-up invite needs the business details; check them before touching the password.
+  let business: ReturnType<typeof businessSetupSchema.parse> | null = null;
+  if (kind === 'business') {
+    const parsed = businessSetupSchema.safeParse(body.business ?? {});
+    if (!parsed.success) {
+      return NextResponse.json({ error: BUSINESS_NAME_MESSAGE }, { status: 400 });
+    }
+    business = parsed.data;
+  }
+
   const { data: worker, error: workerError } = await adminClient
     .from('workers')
     .select('user_id')
@@ -77,6 +91,26 @@ export async function POST(req: Request) {
   if (updateError) {
     console.error('[invite/confirm] updateUserById:', updateError);
     return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
+  }
+
+  if (kind === 'business' && business) {
+    // Creates their own business and moves the login to it in one step. Safe to run twice:
+    // the invite stays unused until it succeeds, so a failure here can simply be retried.
+    const { error: rpcError } = await adminClient.rpc('accept_business_worker_invite', {
+      p_token: token,
+      p_business_name: business.businessName,
+      p_trade: business.trade || null,
+      p_postcode: business.postcode || null,
+    });
+    if (rpcError) {
+      const invalid = /invite_invalid/.test(rpcError.message ?? '');
+      console.error('[invite/confirm] accept business invite:', rpcError.code ?? rpcError.message);
+      return NextResponse.json(
+        { error: invalid ? INVITE_INVALID_MESSAGE : 'Failed to set up your account' },
+        { status: invalid ? 400 : 500 },
+      );
+    }
+    return NextResponse.json({ email: record.email, password, kind });
   }
 
   const { data: updatedRows, error: workerStatusError } = await adminClient
@@ -126,5 +160,6 @@ export async function POST(req: Request) {
   return NextResponse.json({
     email: record.email,
     password,
+    kind,
   });
 }

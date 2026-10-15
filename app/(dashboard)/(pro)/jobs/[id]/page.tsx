@@ -1,0 +1,395 @@
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantSkills } from '@/lib/actions/skills';
+import { getWorkersForTenant } from '@/lib/data/workers';
+import { getCustomersForTenant } from '@/lib/data/customers';
+import { postcodeToLatLng } from '@/lib/utils/postcode';
+import { haversineDistance } from '@/lib/utils/haversine';
+import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail';
+import { JobDetailHeader } from '@/components/jobs/job-detail-header';
+import { JobDetailView } from '@/components/jobs/job-detail-view';
+import { JobOriginRealtimeView } from '@/components/jobs/job-origin-realtime-view';
+import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
+import {
+  splitJobAttachmentsForPhotos,
+  type JobAttachmentRow,
+} from '@/lib/utils/job-attachments';
+import { parseSourceFields } from '@/lib/jobs/job-search-matches';
+import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getTenantLook } from '@/lib/data/tenant-look';
+import { getJobOutcomeSummary } from '@/lib/jobs/job-outcome-summary';
+import { JobOutcomeNotice } from '@/components/jobs/job-outcome-notice';
+
+interface JobDetailPageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default async function JobDetailPage({ params }: JobDetailPageProps) {
+  const { id: jobId } = await params;
+  const tenantId = await getTenantIdForCurrentUser();
+
+  if (!tenantId) {
+    redirect('/jobs?error=no_tenant');
+  }
+
+  const supabase = await createClient();
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from('jobs')
+    .select(
+      `
+      id,
+      network_dispatch_id,
+      tenant_id,
+      reference_number,
+      address,
+      postcode,
+      job_description,
+      status,
+      priority,
+      job_length,
+      scheduled_date,
+      scheduled_time,
+      end_time,
+      created_at,
+      updated_at,
+      started_at,
+      completed_at,
+      customer_id,
+      assigned_worker_id,
+      lat,
+      lng,
+      required_skills,
+      industry_data,
+      completion_notes,
+      source_fields,
+      customer:customers!customer_id(id, name, type, email, phone),
+      worker:workers!assigned_worker_id(id, full_name, phone, skills, home_postcode, home_lat, home_lng),
+      job_group:job_groups!job_group_id(id, label)
+    `
+    )
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (jobError) {
+    console.error('[JobDetailPage] job query error:', jobError);
+    redirect('/jobs?error=load_failed');
+  }
+
+  if (!jobRow) {
+    redirect('/jobs?error=not_found');
+  }
+
+  const isLocalTenantJob = (jobRow.tenant_id as string) === tenantId;
+  let isNetworkOriginView = false;
+  let receivingBusinessName: string | null = null;
+  let networkOriginatingTenantId: string | null = null;
+  if (jobRow.network_dispatch_id) {
+    const { data: dispatchRow } = await supabase
+      .from('network_job_dispatches')
+      .select('originating_tenant_id')
+      .eq('id', jobRow.network_dispatch_id)
+      .maybeSingle();
+
+    networkOriginatingTenantId = (dispatchRow?.originating_tenant_id as string | null) ?? null;
+    isNetworkOriginView = networkOriginatingTenantId === tenantId && !isLocalTenantJob;
+
+    if (isNetworkOriginView) {
+      const { data: receivingTenant } = await supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', jobRow.tenant_id)
+        .maybeSingle();
+      receivingBusinessName = (receivingTenant?.name as string | null) ?? null;
+    }
+  }
+
+  const isNetworkDispatched =
+    Boolean(jobRow.network_dispatch_id) && networkOriginatingTenantId === tenantId;
+
+  if (!isLocalTenantJob && !isNetworkOriginView) {
+    redirect('/jobs?error=not_found');
+  }
+
+  const { data: statusHistoryRows, error: statusHistoryError } = await supabase
+    .from('job_status_history')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: false });
+
+  if (statusHistoryError) {
+    console.error('[JobDetailPage] job_status_history query error:', statusHistoryError);
+  }
+
+  type CustomerRow = {
+    id: string;
+    name: string;
+    type: string;
+    email: string | null;
+    phone: string | null;
+  };
+  type WorkerRow = {
+    id: string;
+    full_name: string;
+    phone: string | null;
+    skills?: string[] | null;
+    home_postcode?: string | null;
+    home_lat?: number | null;
+    home_lng?: number | null;
+  };
+  type JobGroupRow = { id: string; label: string };
+  const rawJobGroup = jobRow.job_group as JobGroupRow | JobGroupRow[] | null;
+  const jobGroup = Array.isArray(rawJobGroup) ? rawJobGroup[0] ?? null : rawJobGroup;
+  const rawCustomer = jobRow.customer as CustomerRow | CustomerRow[] | null;
+  const rawWorker = jobRow.worker as WorkerRow | WorkerRow[] | null;
+  const customer = Array.isArray(rawCustomer) ? rawCustomer[0] ?? null : rawCustomer;
+  const worker = Array.isArray(rawWorker) ? rawWorker[0] ?? null : rawWorker;
+
+  // Prefer the stored coordinates; only fall back to a lookup for older rows
+  // imported before geocoding worked, so a page view costs no network call.
+  const jobPostcode = jobRow.postcode ?? '';
+  let jobLat = (jobRow.lat as number | null) ?? null;
+  let jobLng = (jobRow.lng as number | null) ?? null;
+  if ((jobLat == null || jobLng == null) && jobPostcode) {
+    const coords = await postcodeToLatLng(jobPostcode);
+    if (coords) {
+      jobLat = coords.lat;
+      jobLng = coords.lng;
+    }
+  }
+
+  let distance: number | undefined;
+  if (
+    worker?.home_lat != null &&
+    worker?.home_lng != null &&
+    jobLat != null &&
+    jobLng != null
+  ) {
+    distance = haversineDistance(
+      jobLat,
+      jobLng,
+      worker.home_lat,
+      worker.home_lng
+    );
+  }
+
+  const mapData =
+    jobLat != null && jobLng != null
+      ? {
+          jobLocation: {
+            address: jobRow.address ?? '',
+            postcode: jobPostcode,
+            lat: jobLat,
+            lng: jobLng,
+          },
+          workerLocation:
+            worker?.home_lat != null && worker?.home_lng != null
+              ? {
+                  name: worker.full_name ?? '',
+                  postcode: worker.home_postcode ?? '',
+                  lat: worker.home_lat,
+                  lng: worker.home_lng,
+                }
+              : undefined,
+          distance,
+        }
+      : null;
+
+  const job: JobDetailJob = {
+    id: jobRow.id,
+    tenant_id: jobRow.tenant_id,
+    reference_number: jobRow.reference_number ?? '',
+    address: jobRow.address ?? '',
+    postcode: jobRow.postcode ?? '',
+    job_description: jobRow.job_description ?? '',
+    status: (jobRow.status as JobDetailJob['status']) ?? 'pending',
+    priority: (jobRow.priority as JobDetailJob['priority']) ?? 'normal',
+    job_length: (jobRow.job_length as JobDetailJob['job_length']) ?? null,
+    scheduled_date: jobRow.scheduled_date ?? null,
+    scheduled_time: jobRow.scheduled_time ?? null,
+    end_time: jobRow.end_time ?? null,
+    created_at: jobRow.created_at,
+    updated_at: jobRow.updated_at ?? null,
+    started_at: jobRow.started_at ?? null,
+    completed_at: jobRow.completed_at ?? null,
+    customer_id: jobRow.customer_id ?? null,
+    assigned_worker_id: jobRow.assigned_worker_id ?? null,
+    customer: customer
+      ? {
+          id: customer.id,
+          name: customer.name ?? '',
+          type: customer.type ?? 'individual',
+          email: customer.email ?? null,
+          phone: customer.phone ?? null,
+        }
+      : null,
+    worker: worker
+      ? {
+          id: worker.id,
+          full_name: worker.full_name ?? '',
+          phone: worker.phone ?? null,
+          skills: Array.isArray(worker.skills) ? worker.skills : undefined,
+        }
+      : null,
+    required_skills: Array.isArray(jobRow.required_skills) ? (jobRow.required_skills as string[]) : [],
+    source_fields: parseSourceFields(jobRow.source_fields),
+    job_group: jobGroup ? { id: jobGroup.id, label: jobGroup.label } : null,
+  };
+
+  const statusHistory: JobStatusHistoryEntry[] = (statusHistoryRows ?? []).map(
+    (row: Record<string, unknown>) => ({
+      id: row.id as string,
+      job_id: row.job_id as string,
+      from_status: (row.from_status as string) ?? null,
+      to_status: (row.to_status as string) ?? '',
+      changed_by_user_id: (row.changed_by_user_id as string) ?? null,
+      changed_by_worker_id: (row.changed_by_worker_id as string) ?? null,
+      notes: (row.notes as string) ?? null,
+      created_at: row.created_at as string,
+      metadata: (row.metadata as Record<string, unknown>) ?? null,
+    })
+  );
+
+  const { data: attachmentRows, error: attachmentsError } = await supabase
+    .from('job_attachments')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: true });
+
+  if (attachmentsError) {
+    console.error('[JobDetailPage] job_attachments query error:', attachmentsError);
+  }
+
+  const jobPhotosSplit = splitJobAttachmentsForPhotos(
+    (attachmentRows ?? []) as JobAttachmentRow[]
+  );
+
+  const { data: reportSettingsRow } = await supabase
+    .from('tenants')
+    .select('settings')
+    .eq('id', jobRow.tenant_id as string)
+    .maybeSingle();
+  const reportSettings =
+    reportSettingsRow?.settings &&
+    typeof reportSettingsRow.settings === 'object' &&
+    !Array.isArray(reportSettingsRow.settings)
+      ? (reportSettingsRow.settings as { job_report_fields?: unknown })
+      : null;
+  const reportFields = reportSettings?.job_report_fields;
+
+  const industryRaw = jobRow.industry_data;
+  const showJobReport = !isIndustryDataEmpty(industryRaw);
+  const industryDataForDetail =
+    job.status === 'completed'
+      ? industryRaw
+      : showJobReport
+        ? industryRaw
+        : undefined;
+
+  const completionNotesTrimmed = (jobRow.completion_notes ?? '').trim();
+
+  const [{ workers }, { customers }, tenantSkills] = await Promise.all([
+    getWorkersForTenant(tenantId),
+    getCustomersForTenant(tenantId),
+    getTenantSkills(tenantId),
+  ]);
+  const workerOptions = workers.map((w) => ({ id: w.id, full_name: w.full_name }));
+  const customerFromList = job.customer_id
+    ? customers.find((c) => c.id === job.customer_id) ?? null
+    : null;
+  const jobForView: JobDetailJob = {
+    ...job,
+    customer:
+      job.customer ??
+      (customerFromList
+        ? {
+            id: customerFromList.id,
+            name: customerFromList.name,
+            type: customerFromList.type,
+            email: null,
+            phone: null,
+          }
+        : null),
+    worker: job.worker
+      ? {
+          ...job.worker,
+          full_name: isNetworkOriginView
+            ? job.worker.full_name.split(' ')[0] || job.worker.full_name
+            : job.worker.full_name,
+        }
+      : null,
+  };
+
+  if (isNetworkOriginView) {
+    return (
+      <JobOriginRealtimeView
+        initialJob={jobForView}
+        initialStatusHistory={statusHistory}
+        workers={workerOptions}
+        customers={customers}
+        tenantSkills={tenantSkills}
+        mapData={mapData}
+        industryData={industryDataForDetail}
+        reportFields={reportFields}
+        completionNotes={
+          job.status === 'completed'
+            ? completionNotesTrimmed
+            : completionNotesTrimmed.length > 0
+              ? completionNotesTrimmed
+              : undefined
+        }
+        attachmentPhotos={jobPhotosSplit}
+        receivingBusinessName={receivingBusinessName}
+        isNetworkDispatched={isNetworkDispatched}
+      />
+    );
+  }
+
+  // New look: say what happened and why, up top, for a job that didn't go to plan.
+  // The job was just read through the caller's own session, so the tenant is already checked.
+  let outcomeNotice: React.ReactNode = null;
+  if (
+    (job.status === 'declined' || job.status === 'incomplete') &&
+    (await getTenantLook(await getTenantProducts())) === 'new'
+  ) {
+    const { summary } = await getJobOutcomeSummary(job.id);
+    if (summary) outcomeNotice = <JobOutcomeNotice summary={summary} />;
+  }
+
+  return (
+    <div className="min-w-0 space-y-6">
+      <JobDetailHeader
+        jobId={job.id}
+        referenceNumber={job.reference_number}
+        status={job.status}
+        priority={job.priority}
+        jobLength={job.job_length}
+        createdAt={job.created_at}
+        hideDeleteAction={isNetworkDispatched}
+      />
+      <JobDetailView
+        job={jobForView}
+        statusHistory={statusHistory}
+        workers={workerOptions}
+        customers={customers}
+        tenantSkills={tenantSkills}
+        mapData={mapData}
+        industryData={industryDataForDetail}
+        reportFields={reportFields}
+        completionNotes={
+          job.status === 'completed'
+            ? completionNotesTrimmed
+            : completionNotesTrimmed.length > 0
+              ? completionNotesTrimmed
+              : undefined
+        }
+        attachmentPhotos={jobPhotosSplit}
+        isNetworkOriginView={false}
+        receivingBusinessName={null}
+        isNetworkDispatched={isNetworkDispatched}
+        outcomeNotice={outcomeNotice}
+      />
+    </div>
+  );
+}

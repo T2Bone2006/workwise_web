@@ -74,7 +74,7 @@ export function RecentJobs({
             {rows.map((job) => (
               <TableRow
                 key={job.id}
-                className="border-[var(--glass-border)] hover:bg-muted/40"
+                className="border-[var(--glass-border)]"
               >
                 <TableCell className="font-medium">
                   <Link href={`/jobs/${job.id}`} className="text-primary hover:underline">

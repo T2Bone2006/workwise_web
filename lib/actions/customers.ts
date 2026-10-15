@@ -6,29 +6,102 @@ import {
   findAuthUserByEmail,
   isAlreadyRegisteredAuthError,
 } from '@/lib/supabase/find-auth-user';
-import { customerSchema } from '@/lib/validations/customer';
+import { customerSchema, owesFromBeforeSchema } from '@/lib/validations/customer';
+import {
+  addChargeCore,
+  STARTING_BALANCE_DESCRIPTION,
+} from '@/lib/payments/charges-core';
+import { todayInLondon } from '@/lib/rounds/dates';
 import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
-import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
+import { contactChoiceToColumn } from '@/lib/messaging/channel';
+import { normalizeUkPhoneE164 } from '@/lib/utils/phone';
+import { joinHouse } from '@/lib/rounds/house';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   canonicalFieldKey,
   fieldLabelFromHeader,
   type WorkerVisibleField,
 } from '@/lib/jobs/worker-visible-fields';
+import { linkLeadToCustomer } from '@/lib/lite/leads-core';
+
+const LEAD_LINK_WARNING = "Customer added, but it couldn't be linked to the enquiry.";
+
+async function linkFromLead(leadId: string, customerId: string): Promise<string | undefined> {
+  try {
+    const tenantId = await getOwnerTenantId();
+    if (!tenantId) return LEAD_LINK_WARNING;
+    const linked = await linkLeadToCustomer(createAdminClient(), {
+      tenantId,
+      leadId,
+      customerId,
+    });
+    if (linked === 'linked') return undefined;
+    return LEAD_LINK_WARNING;
+  } catch (error) {
+    console.error('[createRoundsCustomer] link lead', error);
+    return LEAD_LINK_WARNING;
+  }
+}
 
 const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'in_progress'] as const;
 
 function getRawFormData(formData: FormData) {
+  const optional = (key: string) => {
+    const value = formData.get(key);
+    return typeof value === 'string' ? value : undefined;
+  };
+
   return {
     name: formData.get('name'),
     type: formData.get('type'),
     email: formData.get('email') ?? '',
     phone: formData.get('phone') ?? '',
-    address: formData.get('address') ?? '',
+    address: formData.has('address') ? (optional('address') ?? '') : undefined,
+    postcode: formData.has('postcode') ? (optional('postcode') ?? '') : undefined,
     notes: formData.get('notes') ?? '',
+    payment_terms: optional('payment_terms') || undefined,
+    access_notes: formData.has('access_notes') ? (optional('access_notes') ?? '') : undefined,
+    preferred_channel: optional('preferred_channel') || undefined,
   };
+}
+
+function extraCustomerFields(validated: {
+  phone?: string;
+  address?: string;
+  postcode?: string;
+  payment_terms?: 'on_the_day' | 'invoice';
+  access_notes?: string;
+  preferred_channel?: 'default' | 'whatsapp' | 'sms' | 'email' | 'none';
+}) {
+  const extra: {
+    phone_e164: string | null;
+    billing_address?: string | null;
+    payment_terms?: 'on_the_day' | 'invoice';
+    access_notes?: string | null;
+    preferred_channel?: 'whatsapp' | 'sms' | 'email' | 'none' | null;
+  } = {
+    phone_e164: normalizeUkPhoneE164(validated.phone || null),
+  };
+  // Absent means "this form does not edit the address"; empty means clear it.
+  if (validated.address !== undefined) {
+    extra.billing_address = joinHouse(validated.address, validated.postcode ?? '');
+  }
+  if (validated.payment_terms) extra.payment_terms = validated.payment_terms;
+  if (validated.access_notes !== undefined) {
+    extra.access_notes = validated.access_notes.trim() || null;
+  }
+  if (validated.preferred_channel !== undefined) {
+    // 'default' is the form's business-default choice and stores NULL.
+    extra.preferred_channel =
+      validated.preferred_channel === 'whatsapp'
+        ? 'whatsapp'
+        : contactChoiceToColumn(validated.preferred_channel);
+  }
+  return extra;
 }
 
 export async function createCustomer(formData: FormData) {
@@ -75,6 +148,7 @@ export async function createCustomer(formData: FormData) {
       notes: validated.notes || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      ...extraCustomerFields(validated),
     })
     .select('id')
     .single();
@@ -87,6 +161,70 @@ export async function createCustomer(formData: FormData) {
   revalidatePath('/customers');
   revalidatePath('/import');
   return { success: true, id: inserted?.id as string };
+}
+
+/**
+ * Rounds dashboard create: always an individual, then on to the first agreement.
+ * An optional "Owes from before" becomes a starting-balance charge (Phase 4 D12).
+ */
+export async function createRoundsCustomer(formData: FormData): Promise<
+  | { success: false; error: string }
+  | { success: true; id: string; warning?: string }
+> {
+  formData.set('type', 'individual');
+
+  const owes = owesFromBeforeSchema.safeParse(formData.get('owesFromBefore') ?? undefined);
+  if (!owes.success) {
+    return { success: false, error: owes.error.issues[0]?.message ?? 'Invalid amount' };
+  }
+  formData.delete('owesFromBefore');
+
+  const fromLeadRaw = formData.get('fromLeadId');
+  formData.delete('fromLeadId');
+  const fromLeadId = typeof fromLeadRaw === 'string' && fromLeadRaw.trim() !== '' ? fromLeadRaw.trim() : null;
+
+  const result = await createCustomer(formData);
+  if (!result.success || !('id' in result) || typeof result.id !== 'string') {
+    return {
+      success: false,
+      error: ('error' in result ? result.error : undefined) ?? 'Failed to create customer',
+    };
+  }
+  revalidatePath('/customers');
+
+  const linkWarning = fromLeadId ? await linkFromLead(fromLeadId, result.id) : undefined;
+
+  const owesFromBefore = owes.data ?? 0;
+  if (owesFromBefore > 0) {
+    const supabase = await createClient();
+    const [tenantId, { data: { user } }] = await Promise.all([
+      getOwnerTenantId(),
+      supabase.auth.getUser(),
+    ]);
+    const charge = tenantId
+      ? await addChargeCore(supabase, {
+          tenantId,
+          customerId: result.id,
+          kind: 'starting_balance',
+          description: STARTING_BALANCE_DESCRIPTION,
+          amount: owesFromBefore,
+          chargeDate: todayInLondon(),
+          userId: user?.id ?? null,
+        })
+      : null;
+    if (!charge?.success) {
+      const owedWarning =
+        "Customer added, but the amount owed from before wasn't saved — add it on their page.";
+      return {
+        success: true,
+        id: result.id,
+        warning: linkWarning ? `${linkWarning} ${owedWarning}` : owedWarning,
+      };
+    }
+    revalidatePath('/payments');
+  }
+
+  return linkWarning ? { success: true, id: result.id, warning: linkWarning } : { success: true, id: result.id };
 }
 
 /** Minimal create for the import wizard (name + bulk_client). Returns new customer id. */
@@ -171,6 +309,7 @@ export async function updateCustomer(customerId: string, formData: FormData) {
       phone: validated.phone || null,
       notes: validated.notes || null,
       updated_at: new Date().toISOString(),
+      ...extraCustomerFields(validated),
     })
     .eq('id', customerId)
     .eq('tenant_id', userData.tenant_id);
@@ -183,6 +322,8 @@ export async function updateCustomer(customerId: string, formData: FormData) {
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
   revalidatePath(`/customers/${customerId}/edit`);
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
   return { success: true };
 }
 
@@ -258,7 +399,7 @@ export async function deleteCustomer(customerId: string) {
 }
 
 export async function deactivateCustomer(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -364,11 +505,13 @@ export async function deactivateCustomer(customerId: string) {
 
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
+  revalidatePath('/customers');
+  revalidatePath(`/customers/${customerId}`);
   return { success: true };
 }
 
 export async function reactivateCustomer(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -403,7 +546,7 @@ export async function reactivateCustomer(customerId: string) {
 }
 
 export async function getCustomerActiveJobCount(customerId: string): Promise<number> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return 0;
 
   const supabase = await createClient();
@@ -818,7 +961,7 @@ export async function inviteCustomerToPortal(customerId: string) {
 
 
 export async function revokeCustomerInvite(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -895,7 +1038,7 @@ export async function revokeCustomerInvite(inviteId: string) {
 }
 
 export async function resendCustomerInvite(inviteId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -972,7 +1115,7 @@ export async function resendCustomerInvite(inviteId: string) {
 
 
 export async function deactivateCustomerPortalAccess(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1048,7 +1191,7 @@ export async function deactivateCustomerPortalAccess(customerId: string) {
 }
 
 export async function reactivateCustomerPortalAccess(customerId: string) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
 
   const supabase = await createClient();
@@ -1108,7 +1251,7 @@ export async function updateCustomerWorkerFields(
   customerId: string,
   fields: WorkerVisibleField[]
 ): Promise<{ success: boolean; error?: string }> {
-  const tenantId = await getTenantIdForCurrentUser();
+  const tenantId = await getOwnerTenantId();
   if (!tenantId) {
     return { success: false, error: 'Not authenticated' };
   }

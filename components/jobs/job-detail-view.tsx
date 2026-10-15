@@ -19,7 +19,7 @@ import type { JobDetailJob, JobStatusHistoryEntry } from '@/lib/types/job-detail
 import type { JobAttachmentRow } from '@/lib/utils/job-attachments';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import type { CustomerRow } from '@/lib/data/customers';
-import { isIndustryDataEmpty } from '@/lib/utils/job-industry-data';
+import { visibleJobReportRows } from '@/lib/jobs/job-report-display';
 import { cn } from '@/lib/utils';
 
 const JobLocationMap = dynamic(
@@ -52,6 +52,8 @@ interface JobDetailViewProps {
   mapData?: JobDetailMapData | null;
   /** Set when the job report card should render, or when status is completed (completion section). */
   industryData?: unknown;
+  /** This business's `settings.job_report_fields`. */
+  reportFields?: unknown;
   completionNotes?: string;
   /** Before/after image attachments from `job_attachments` for this job. */
   attachmentPhotos: { before: JobAttachmentRow[]; after: JobAttachmentRow[] };
@@ -59,6 +61,8 @@ interface JobDetailViewProps {
   receivingBusinessName?: string | null;
   /** Originating tenant view of a job dispatched to the network (read-only assignment/actions). */
   isNetworkDispatched?: boolean;
+  /** New look: what happened and why, shown above the cards for declined and not-completed jobs. */
+  outcomeNotice?: React.ReactNode;
 }
 
 export function JobDetailView({
@@ -69,19 +73,23 @@ export function JobDetailView({
   tenantSkills,
   mapData,
   industryData,
+  reportFields,
   completionNotes,
   attachmentPhotos,
   isNetworkOriginView = false,
   receivingBusinessName = null,
   isNetworkDispatched = false,
+  outcomeNotice = null,
 }: JobDetailViewProps) {
   const isCompleted = job.status === 'completed';
   const hasPhotoGroups =
     attachmentPhotos.before.length > 0 || attachmentPhotos.after.length > 0;
   const showJobReportCard =
-    industryData !== undefined && !isCompleted && !isIndustryDataEmpty(industryData);
+    !isCompleted && visibleJobReportRows(industryData, reportFields).length > 0;
 
   return (
+    <div className="min-w-0 space-y-6">
+    {outcomeNotice}
     <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       {/* Left column — min-w-0 so Leaflet/map content cannot blow out the page width */}
       <div className="min-w-0 space-y-6">
@@ -111,12 +119,13 @@ export function JobDetailView({
             jobId={job.id}
             completedAt={job.completed_at}
             industryData={industryData}
+            reportFields={reportFields}
             completionNotes={completionNotes}
             jobPhotos={attachmentPhotos}
           />
         )}
         {showJobReportCard && (
-          <JobDetailJobReportCard industryData={industryData} />
+          <JobDetailJobReportCard industryData={industryData} reportFields={reportFields} />
         )}
         {!isCompleted &&
           completionNotes !== undefined &&
@@ -217,12 +226,15 @@ export function JobDetailView({
             isNetworkOriginView={isNetworkOriginView}
           />
         )}
-        <JobDetailEmailCard
-          jobId={job.id}
-          status={job.status}
-          defaultRecipient={job.customer?.email ?? null}
-        />
+        <div id="email">
+          <JobDetailEmailCard
+            jobId={job.id}
+            status={job.status}
+            defaultRecipient={job.customer?.email ?? null}
+          />
+        </div>
       </div>
+    </div>
     </div>
   );
 }

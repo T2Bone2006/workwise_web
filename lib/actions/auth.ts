@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { WORKER_WEB_LOGIN_ERROR } from '@/lib/auth/worker-web-access';
+import { WORKER_HOME } from '@/lib/auth/worker-web-access';
 import { buildPasswordResetEmail } from '@/lib/emails/password-reset';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { restoreViewAsTenantIfNeeded, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
@@ -48,9 +48,13 @@ export async function login(
     });
 
       if (error) {
+      // Supabase only says "banned" once the password was right: a closed account (Close my account).
+      const closed = (error as { code?: string }).code === 'user_banned';
       return {
         success: false,
-        error: 'Invalid email or password',
+        error: closed
+          ? 'This account has been closed. Check your email for the details.'
+          : 'Invalid email or password',
         attemptedAt: Date.now(),
       };
     }
@@ -70,12 +74,9 @@ export async function login(
         .maybeSingle<{ role: string | null }>();
 
       if (profile?.role === 'worker') {
-        await supabase.auth.signOut();
-        return {
-          success: false,
-          error: WORKER_WEB_LOGIN_ERROR,
-          attemptedAt: Date.now(),
-        };
+        // Workers use the website too: straight to their own area.
+        revalidatePath('/', 'layout');
+        redirect(WORKER_HOME);
       }
 
       revalidatePath('/', 'layout');

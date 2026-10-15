@@ -1,4 +1,11 @@
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { Plus, Upload } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { formatGbp } from '@/lib/money/pence';
+import type { RoundsCustomerListRow } from '@/lib/data/rounds/customers';
 import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getTenantProducts } from '@/lib/data/tenant-products';
 import {
   getCustomersForTenantList,
   getInactiveCustomersForTenant,
@@ -8,11 +15,20 @@ import {
   getCustomerInvitesForTenant,
   getCustomersWithPortalAccess,
 } from '@/lib/data/customer-invites';
+import { getRoundsCustomers } from '@/lib/data/rounds/customers';
+import { usesProCrm, usesRoundsCrm } from '@/lib/navigation/dashboard-paths';
 import { CustomersTable } from '@/components/customers/customers-table';
 import { CustomerInvitesTable } from '@/components/customers/customer-invites-table';
 import { CustomerPortalAccessTable } from '@/components/customers/customer-portal-access-table';
 import { InactiveCustomersTable } from '@/components/customers/inactive-customers-table';
+import {
+  RoundsCustomersTable,
+  type CustomerFieldFilter,
+  type CustomerFilterField,
+} from '@/components/rounds/rounds-customers-table';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { AddedByBanner } from '@/components/team/added-by-banner';
+import { todayInLondon } from '@/lib/rounds/dates';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface CustomersPageProps {
@@ -23,7 +39,27 @@ interface CustomersPageProps {
     sort_dir?: string;
     page?: string;
     tab?: string;
+    status?: string;
+    f0?: string;
+    v0?: string;
+    f1?: string;
+    v1?: string;
+    f2?: string;
+    v2?: string;
+    f3?: string;
+    v3?: string;
   }>;
+}
+
+/** "42 on the round · 9 owe £516.50", from the list already loaded. */
+function roundsSubtitle(customers: RoundsCustomerListRow[], search?: string): string {
+  if (search) return `${customers.length} matching “${search}”`;
+  const active = customers.filter((c) => c.is_active);
+  const owing = active.filter((c) => c.owed_amount > 0);
+  const owed = owing.reduce((sum, c) => sum + c.owed_amount, 0);
+  const parts = [`${active.length} on the round`];
+  if (owing.length > 0) parts.push(`${owing.length} owe ${formatGbp(owed)}`);
+  return parts.join(' · ');
 }
 
 function NoTenantMessage() {
@@ -38,10 +74,73 @@ function NoTenantMessage() {
 }
 
 export default async function CustomersPage({ searchParams }: CustomersPageProps) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const [tenantId, products] = await Promise.all([
+    getTenantIdForCurrentUser(),
+    getTenantProducts(),
+  ]);
 
   if (!tenantId) {
     return <NoTenantMessage />;
+  }
+
+  if (usesRoundsCrm(products)) {
+    const raw = await searchParams;
+    const search = raw.search?.trim() || undefined;
+    const status =
+      raw.status === 'inactive' || raw.status === 'all' ? raw.status : 'active';
+    const fieldKeys: CustomerFilterField[] = ['service', 'postcode', 'payment', 'frequency', 'round'];
+    const fieldFilters: CustomerFieldFilter[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const field = raw[`f${i}` as 'f0'];
+      const value = raw[`v${i}` as 'v0'];
+      if (field && value && fieldKeys.includes(field as CustomerFilterField)) {
+        fieldFilters.push({ field: field as CustomerFilterField, value });
+      }
+    }
+
+    const { customers, error } = await getRoundsCustomers(tenantId, {
+      search,
+      status,
+    });
+
+    return (
+      <div className="space-y-6">
+        <PageGradientHeader
+          title="Customers"
+          subtitle={roundsSubtitle(customers, search)}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link href="/customers/new">
+                  <Plus className="mr-1.5 size-4" />
+                  Add customer
+                </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/import">
+                  <Upload className="mr-1.5 size-4" />
+                  Import
+                </Link>
+              </Button>
+            </div>
+          }
+        />
+        <AddedByBanner count={customers.filter((c) => c.added_by_unchecked !== null).length} />
+        <RoundsCustomersTable
+          key={`${status}:${search ?? ''}`}
+          customers={customers}
+          today={todayInLondon()}
+          initialSearch={search ?? ''}
+          initialStatus={status}
+          initialFilters={fieldFilters}
+          fetchError={error?.message ?? null}
+        />
+      </div>
+    );
+  }
+
+  if (!usesProCrm(products)) {
+    redirect('/dashboard');
   }
 
   const raw = await searchParams;

@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, X, ChevronDown } from 'lucide-react';
+import { leaveViaHistory } from '@/components/layout/history-back-button';
 import { toast } from 'sonner';
 import { workerSchema, type WorkerFormInput } from '@/lib/validations/worker';
 import { createWorker, updateWorker } from '@/lib/actions/workers';
@@ -36,6 +36,8 @@ import {
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { WORKER_TYPE_FORM_OPTIONS, type WorkerRow } from '@/lib/types/worker';
+import { ExtraWorkerConfirmDialog } from '@/components/workers/extra-worker-confirm-dialog';
+import type { ExtraWorkerNotice } from '@/lib/billing/pro-allowance';
 
 const STATUS_OPTIONS = [
   { value: 'available', label: 'Available', color: 'bg-emerald-500' },
@@ -61,6 +63,8 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
   }>({ status: 'idle' });
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillSearch, setSkillSearch] = useState('');
+  const [extraNotice, setExtraNotice] = useState<ExtraWorkerNotice | null>(null);
+  const [pendingForm, setPendingForm] = useState<FormData | null>(null);
 
   const form = useForm<WorkerFormInput>({
     resolver: zodResolver(workerSchema),
@@ -157,24 +161,53 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
       formData.set('status', values.status);
       formData.set('skills', JSON.stringify(values.skills ?? []));
 
-      const result =
-        mode === 'create'
-          ? await createWorker(formData)
-          : await updateWorker(worker!.id, formData);
+      await submit(formData);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
-      if (!result.success) {
-        toast.error(result.error ?? (mode === 'create' ? 'Failed to create worker' : 'Failed to update worker'));
+  /** Saves the worker. In create mode, a worker past the plan's included number asks for agreement first. */
+  async function submit(formData: FormData) {
+    const result =
+      mode === 'create'
+        ? await createWorker(formData)
+        : await updateWorker(worker!.id, formData);
+
+    if (!result.success) {
+      const notice = (result as { needsExtraWorkerConfirm?: ExtraWorkerNotice }).needsExtraWorkerConfirm;
+      if (notice) {
+        setPendingForm(formData);
+        setExtraNotice(notice);
         return;
       }
-      toast.success(mode === 'create' ? 'Worker created' : 'Worker updated');
-      router.push('/workers');
-      router.refresh();
+      toast.error(result.error ?? (mode === 'create' ? 'Failed to create worker' : 'Failed to update worker'));
+      return;
+    }
+    setExtraNotice(null);
+    setPendingForm(null);
+    toast.success(mode === 'create' ? 'Worker created' : 'Worker updated');
+    if (mode === 'edit') {
+      router.replace('/workers');
+    } else {
+      leaveViaHistory(router, '/workers');
+    }
+    router.refresh();
+  }
+
+  async function confirmExtraWorker() {
+    if (!pendingForm) return;
+    setIsSubmitting(true);
+    try {
+      pendingForm.set('confirm_extra_worker', 'true');
+      await submit(pendingForm);
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
+    <>
     <Card
       className={cn(
         'glass-card overflow-hidden border-border/80',
@@ -424,11 +457,19 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
             />
 
             <div className="flex flex-wrap gap-3 pt-2">
-              <Button type="button" variant="ghost" asChild disabled={isSubmitting}>
-                <Link href="/workers">
-                  <ArrowLeft className="size-4" />
-                  Cancel
-                </Link>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={isSubmitting}
+                onClick={() =>
+                  leaveViaHistory(
+                    router,
+                    mode === 'edit' && worker?.id ? `/workers/${worker.id}` : '/workers',
+                  )
+                }
+              >
+                <ArrowLeft className="size-4" />
+                Cancel
               </Button>
               <Button
                 type="submit"
@@ -443,5 +484,15 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
         </Form>
       </CardContent>
     </Card>
+    <ExtraWorkerConfirmDialog
+      notice={extraNotice}
+      pending={isSubmitting}
+      onConfirm={confirmExtraWorker}
+      onCancel={() => {
+        setExtraNotice(null);
+        setPendingForm(null);
+      }}
+    />
+    </>
   );
 }

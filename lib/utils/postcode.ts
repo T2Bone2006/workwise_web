@@ -1,6 +1,29 @@
 /** Valid UK postcode without spaces (M3, BL3, WN1, SW1A, etc.). */
 const UK_POSTCODE_REGEX = /^[A-Z]{1,2}\d{1,2}[A-Z]?\d[A-Z]{2}$/;
 
+/**
+ * First part of a UK postcode (the outward code). Falls back to the text
+ * before the first space when the value is not a full postcode.
+ */
+export function ukPostcodeOutward(raw: string): string {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/\s+/g, '');
+  const full = compact.match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)(\d[A-Z]{2})$/);
+  if (full) return full[1]!;
+  const head = trimmed.split(/\s+/)[0] ?? '';
+  return head;
+}
+
+/** True when `postcode` sits in an area described by `area` (outward code or a shorter prefix such as SW). */
+export function postcodeMatchesArea(postcode: string, area: string): boolean {
+  const token = area.trim().toUpperCase().replace(/\s+/g, '');
+  if (!token) return false;
+  const outward = ukPostcodeOutward(postcode);
+  const compact = postcode.trim().toUpperCase().replace(/\s+/g, '');
+  return outward === token || outward.startsWith(token) || compact.startsWith(token);
+}
+
 /** UK postcode token inside free text (outward + inward). */
 const UK_POSTCODE_IN_TEXT =
   /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2})\b/gi;
@@ -126,4 +149,63 @@ export async function validatePostcode(
   } catch {
     return { valid: false };
   }
+}
+
+/**
+ * Many postcodes at once (postcodes.io bulk lookup, 100 per request). Returns
+ * a map from the normalised postcode ("BS7 8AA") to its centre; postcodes it
+ * can't place are simply missing. Never throws.
+ */
+export async function postcodesToLatLng(postcodes: string[]): Promise<Map<string, { lat: number; lng: number }>> {
+  const out = new Map<string, { lat: number; lng: number }>();
+  const wanted = [...new Set(postcodes.map((p) => normalizeUkPostcode(p)).filter((p): p is string => p != null))];
+  for (let i = 0; i < wanted.length; i += 100) {
+    const batch = wanted.slice(i, i + 100);
+    try {
+      const response = await fetch('https://api.postcodes.io/postcodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postcodes: batch }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!response.ok) continue;
+      const body = (await response.json()) as {
+        result?: Array<{ query?: string; result?: { latitude?: number; longitude?: number } | null }>;
+      };
+      for (const row of body.result ?? []) {
+        const lat = row.result?.latitude;
+        const lng = row.result?.longitude;
+        const key = row.query ? normalizeUkPostcode(row.query) : null;
+        if (key && typeof lat === 'number' && typeof lng === 'number') out.set(key, { lat, lng });
+      }
+    } catch (error) {
+      console.error('Bulk postcode lookup failed:', error);
+    }
+  }
+  return out;
+}
+
+/**
+ * The centre of each postcode area ("M14" from "M14 5TY"), for postcodes the
+ * full lookup can't place (new builds, typos, made-up test data). One request
+ * per area. Never throws.
+ */
+export async function outcodesToLatLng(postcodes: string[]): Promise<Map<string, { lat: number; lng: number }>> {
+  const out = new Map<string, { lat: number; lng: number }>();
+  const outcodes = [...new Set(postcodes.map((p) => normalizeUkPostcode(p)?.split(' ')[0] ?? p.trim().split(/\s+/)[0]?.toUpperCase()).filter((p): p is string => Boolean(p)))];
+  await Promise.all(
+    outcodes.slice(0, 20).map(async (code) => {
+      try {
+        const response = await fetch(`https://api.postcodes.io/outcodes/${encodeURIComponent(code)}`, { signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return;
+        const body = (await response.json()) as { result?: { latitude?: number; longitude?: number } | null };
+        const lat = body.result?.latitude;
+        const lng = body.result?.longitude;
+        if (typeof lat === 'number' && typeof lng === 'number') out.set(code, { lat, lng });
+      } catch (error) {
+        console.error('Outcode lookup failed:', error);
+      }
+    }),
+  );
+  return out;
 }

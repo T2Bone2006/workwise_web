@@ -3,12 +3,45 @@
  * Server-only data fetching is in settings.ts.
  */
 
-export type IndustryOption =
-  | 'Locksmith'
-  | 'Plumbing'
-  | 'Electrical'
-  | 'HVAC'
-  | 'General';
+import type { RoundsSettings } from '@/lib/rounds/settings';
+
+export const INDUSTRIES = [
+  'Appliance repair',
+  'Building',
+  'Carpentry',
+  'Carpet cleaning',
+  'Chimney sweep',
+  'Cleaning',
+  'Dog walking',
+  'Driveways and patios',
+  'Electrical',
+  'Fencing',
+  'Gardening',
+  'Glazing',
+  'Gutter cleaning',
+  'Handyman',
+  'Heating',
+  'HVAC',
+  'Landscaping',
+  'Locksmith',
+  'Mobile mechanic',
+  'Oven cleaning',
+  'Painting and decorating',
+  'Pest control',
+  'Plastering',
+  'Plumbing',
+  'Pressure washing',
+  'Roofing',
+  'Security and alarms',
+  'Tiling',
+  'Tree surgery',
+  'Vehicle valeting',
+  'Waste removal',
+  'Window cleaning',
+  'General',
+] as const;
+
+export type IndustryOption = (typeof INDUSTRIES)[number];
 
 export interface TenantSettingsCompany {
   industry?: IndustryOption;
@@ -16,6 +49,7 @@ export interface TenantSettingsCompany {
   email?: string;
   address?: string;
   logo_url?: string;
+  logo_path?: string;
 }
 
 export interface PricingMargins {
@@ -100,6 +134,24 @@ export const JOBS_LIST_COLUMNS: Array<{ key: JobsListColumnKey; label: string }>
 
 const JOBS_LIST_COLUMN_KEYS = new Set(JOBS_LIST_COLUMNS.map((c) => c.key));
 
+/**
+ * A jobs-list column: one of the standard fields, a named field group
+ * (`fg:<group id>`, see lib/jobs/field-groups.ts) or a raw spreadsheet column
+ * nobody has grouped (`sf:<header>`).
+ */
+export type JobsListColumnId = JobsListColumnKey | `fg:${string}` | `sf:${string}`;
+
+const MAX_COLUMN_ID_LENGTH = 140;
+
+export function isJobsListColumnId(value: string): value is JobsListColumnId {
+  if (isJobsListColumnKey(value)) return true;
+  return (
+    value.length <= MAX_COLUMN_ID_LENGTH &&
+    (value.startsWith('fg:') || value.startsWith('sf:')) &&
+    value.length > 3
+  );
+}
+
 export function isJobsListColumnKey(value: string): value is JobsListColumnKey {
   return JOBS_LIST_COLUMN_KEYS.has(value as JobsListColumnKey);
 }
@@ -123,8 +175,12 @@ export interface TenantSettings {
   notifications?: NotificationsSettings;
   user_phone?: Record<string, string>;
   jobs_list?: {
-    columns?: JobsListColumnKey[];
+    columns?: JobsListColumnId[];
   };
+  /** Pro: named fields bundling differently-named spreadsheet headers. Always read through parseFieldGroups. */
+  field_groups?: unknown;
+  /** Pro finish-job questions. Always read through parseJobReportFields. */
+  job_report_fields?: unknown;
   features?: {
     pro?: boolean;
     widget?: boolean;
@@ -132,6 +188,16 @@ export interface TenantSettings {
     voice?: boolean;
     payments?: boolean;
   };
+  rounds?: Partial<RoundsSettings>;
+  /**
+   * No longer read: every business (Pro included) gets the new look since 2026-10-10. Left in the type
+   * so old rows still parse.
+   */
+  look?: 'new' | 'classic';
+  /** Phase 3 messaging. Always read through parseMessagingSettings. */
+  messaging?: unknown;
+  /** Pro sign-up: the worker number from the pricing slider (advice for the Get started panel; never used for billing). */
+  onboarding?: { expected_workers?: number };
 }
 
 export interface TenantForSettings {
