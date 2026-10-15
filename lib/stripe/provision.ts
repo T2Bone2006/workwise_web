@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/client';
 import { choiceForPriceId } from '@/lib/billing/plans';
+import { notifyRoundsWelcome } from '@/lib/stripe/rounds-welcome';
 import { snapshotSubscription } from '@/lib/stripe/sync-subscription';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
 
@@ -77,6 +78,9 @@ export async function provisionFromCheckoutSession(session: Stripe.Checkout.Sess
   }
 
   await geocodeWorkerHome(String(tenantId));
+
+  // Rounds and Rounds + Lite only. A failed send throws so Stripe retries; the SQL above is safe to run again.
+  await notifyRoundsWelcome({ admin, stripe, intentId, customerId });
 
   return String(tenantId);
 }
