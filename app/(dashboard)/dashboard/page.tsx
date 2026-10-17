@@ -56,6 +56,7 @@ import { PlanEnded } from '@/components/dashboard/plan-ended';
 import { ProPlanEnded } from '@/components/dashboard/pro-plan-ended';
 import { proRestartChoice } from '@/lib/billing/pro-restart';
 import { parsePlanChoice, type PlanChoice } from '@/lib/billing/plans';
+import { hasPendingSignup, UNPAID_SIGNUP_PATH } from '@/lib/billing/pending-signup';
 
 interface DashboardPageProps {
   searchParams: Promise<{
@@ -192,6 +193,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const tenantName = await getTenantNameForCurrentUser();
 
   if (!tenantId) {
+    const { user } = await getAuthUser();
+    if (user && (await hasPendingSignup(user.id))) redirect(UNPAID_SIGNUP_PATH);
     redirect('/login');
   }
 

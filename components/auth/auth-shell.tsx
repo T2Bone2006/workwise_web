@@ -73,11 +73,25 @@ function Wordmark({ onDark }: { onDark?: boolean }) {
   );
 }
 
-/** Plan → Your details → Pay, as three bars. Pay happens on Stripe's page. */
+/** gap-2 is 0.5rem. The gradient covers only the steps reached so far, gaps included. */
+function segmentFill(colour: string, gradient: boolean, index: number, reachedCount: number): React.CSSProperties {
+  if (!gradient || reachedCount < 2) return { background: colour };
+  return {
+    backgroundImage: colour,
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: `calc(${reachedCount} * (100cqi - 1rem) / 3 + ${reachedCount - 1} * 0.5rem) 100%`,
+    backgroundPosition: `${index === 0 ? '0px' : `calc(${index} * (100cqi + 0.5rem) / -3)`} 0px`,
+  };
+}
+
+/** Plan → Your details → Pay, as three bars. Pay happens on Stripe's page.
+ *  A gradient (Rounds + Lite) sweeps the steps reached so far: one bar on step 1, the first two on step 2. */
 function SignupSteps({ step, side }: { step: 1 | 2; side: AuthSide }) {
   const names = ['Plan', 'Your details', 'Pay'];
+  const colour = SIDE_COLOUR[side];
+  const gradient = colour.startsWith('linear-gradient');
   return (
-    <ol aria-label={`Step ${step} of 3`} className="mb-5 grid grid-cols-3 gap-2">
+    <ol aria-label={`Step ${step} of 3`} className="@container mb-5 grid grid-cols-3 gap-2">
       {names.map((name, i) => {
         const reached = i < step;
         return (
@@ -85,7 +99,7 @@ function SignupSteps({ step, side }: { step: 1 | 2; side: AuthSide }) {
             <span
               aria-hidden
               className={cn('block h-1 rounded-full', !reached && 'bg-[#E6E5E0] dark:bg-white/10')}
-              style={reached ? { background: SIDE_COLOUR[side] } : undefined}
+              style={reached ? segmentFill(colour, gradient, i, step) : undefined}
             />
             <span
               className={cn(

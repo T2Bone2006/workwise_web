@@ -6,17 +6,16 @@ import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe, getAppUrl } from '@/lib/stripe/client';
-import { PLANS, priceIdFor, priceLabel, type PlanChoice } from '@/lib/billing/plans';
+import { type PlanChoice } from '@/lib/billing/plans';
+import { signupCheckoutBody } from '@/lib/billing/signup-checkout';
 import {
   chooseSignupOffer,
-  couponIdFor,
   fallbackAfterFoundingRefused,
   getFoundingStatus,
   isOwnReferral,
   lookupReferrer,
   normaliseReferralCode,
   REFERRAL_COOKIE,
-  type SignupOffer,
 } from '@/lib/billing/offers';
 import { signupSchema } from '@/lib/validations/signup';
 
@@ -67,41 +66,6 @@ async function maybeTestClock(stripe: Stripe, intentId: string): Promise<string 
     name: intentId,
   });
   return clock.id;
-}
-
-function checkoutBody(input: {
-  customerId: string;
-  intentId: string;
-  choice: PlanChoice;
-  offer: SignupOffer;
-  appUrl: string;
-}) {
-  const coupon = couponIdFor(input.offer);
-  const { plan, interval } = input.choice;
-  return {
-    mode: 'subscription' as const,
-    customer: input.customerId,
-    client_reference_id: input.intentId,
-    line_items: [{ price: priceIdFor(input.choice), quantity: 1 }],
-    subscription_data: {
-      metadata: {
-        signup_intent_id: input.intentId,
-        plan,
-        interval,
-        offer: input.offer.offer,
-        ...(input.offer.secondMonthHalf ? { second_month_half: '1' } : {}),
-      },
-    },
-    ...(coupon ? { discounts: [{ coupon }] } : { allow_promotion_codes: true as const }),
-    payment_method_collection: 'always' as const,
-    success_url: `${input.appUrl}/signup/complete?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${input.appUrl}/signup?plan=${plan}&interval=${interval}&canceled=1`,
-    custom_text: {
-      submit: {
-        message: input.offer.headline ?? `${PLANS[plan].label}: ${priceLabel(input.choice)}. Cancel any time.`,
-      },
-    },
-  };
 }
 
 /**
@@ -255,7 +219,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
     let session: Stripe.Checkout.Session;
     try {
       session = await stripe.checkout.sessions.create(
-        checkoutBody({ customerId, intentId, choice, offer, appUrl })
+        signupCheckoutBody({ customerId, intentId, choice, offer, appUrl })
       );
     } catch (err) {
       if (offer.offer !== 'founding' || !isFoundingRefusal(err)) throw err;
@@ -263,7 +227,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intentId);
       if (offerError) throw new Error(`signup_intents offer update failed intent=${intentId}`);
       session = await stripe.checkout.sessions.create(
-        checkoutBody({ customerId, intentId, choice, offer, appUrl })
+        signupCheckoutBody({ customerId, intentId, choice, offer, appUrl })
       );
     }
 

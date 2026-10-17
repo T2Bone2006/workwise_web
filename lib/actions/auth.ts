@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { WORKER_HOME } from '@/lib/auth/worker-web-access';
+import { hasPendingSignup, UNPAID_SIGNUP_PATH } from '@/lib/billing/pending-signup';
 import { buildPasswordResetEmail } from '@/lib/emails/password-reset';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { restoreViewAsTenantIfNeeded, recoverAbandonedViewAsIfNeeded } from '@/lib/impersonation/session';
@@ -83,6 +84,10 @@ export async function login(
 
       if (profile?.role === 'customer_portal') {
         redirect('/portal');
+      }
+
+      if (!profile && (await hasPendingSignup(user.id))) {
+        redirect(UNPAID_SIGNUP_PATH);
       }
     }
 

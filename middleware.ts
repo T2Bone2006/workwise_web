@@ -1,4 +1,5 @@
 import { updateSession } from '@/lib/supabase/middleware';
+import { hasPendingSignup, UNPAID_SIGNUP_PATH } from '@/lib/billing/pending-signup';
 import { mergeCookies } from '@/lib/supabase/cookie-merge';
 import {
   WORKER_HOME,
@@ -127,6 +128,14 @@ export async function middleware(request: NextRequest) {
         .select('role')
         .eq('id', user.id)
         .maybeSingle<{ role: string | null }>();
+
+      // Checkout creates the login before payment. Until the webhook adds a users
+      // row, /login and /dashboard would bounce off each other. Send them to finish paying.
+      if (!profile && (isLoginPage || isDashboard) && (await hasPendingSignup(user.id))) {
+        const redirectResponse = NextResponse.redirect(new URL(UNPAID_SIGNUP_PATH, request.url));
+        copyCookiesToResponse(response, redirectResponse);
+        return redirectResponse;
+      }
 
       const isCustomerPortal = profile?.role === 'customer_portal';
       const isWorker = profile?.role === 'worker';
