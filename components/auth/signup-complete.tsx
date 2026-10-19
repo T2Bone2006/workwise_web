@@ -58,11 +58,9 @@ export function SignupComplete({ canceled }: { canceled: boolean }) {
         <a href="/api/stripe/checkout" className={authButtonClassName}>
           Resume payment
         </a>
-        <form action={logout}>
-          <button type="submit" className={authSecondaryButtonClassName}>
-            Log out
-          </button>
-        </form>
+        <button type="button" className={authSecondaryButtonClassName} onClick={() => void logout()}>
+          Log out
+        </button>
         <p className="text-center text-[13px] leading-relaxed text-[#6E6A63] dark:text-[#93A3BA]">
           Your login has been created; only the card step is outstanding.
         </p>
