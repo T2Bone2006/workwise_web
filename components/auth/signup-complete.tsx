@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { authButtonClassName, authSecondaryButtonClassName } from '@/components/auth/auth-shell';
+import { logout } from '@/lib/actions/auth';
 import type { SignupStatus } from '@/app/api/signup/status/route';
 
 const POLL_MS = 2000;
@@ -57,6 +58,11 @@ export function SignupComplete({ canceled }: { canceled: boolean }) {
         <a href="/api/stripe/checkout" className={authButtonClassName}>
           Resume payment
         </a>
+        <form action={logout}>
+          <button type="submit" className={authSecondaryButtonClassName}>
+            Log out
+          </button>
+        </form>
         <p className="text-center text-[13px] leading-relaxed text-[#6E6A63] dark:text-[#93A3BA]">
           Your login has been created; only the card step is outstanding.
         </p>
