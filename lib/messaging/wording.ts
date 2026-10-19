@@ -46,13 +46,13 @@ export const WORDING_SPECS: readonly WordingSpec[] = [
   {
     key: 'reminder',
     title: 'Visit reminder',
-    required: ['business', 'address', 'date', 'job'],
-    optional: ['time', 'phone'],
+    required: ['business', 'job'],
+    optional: ['address', 'date', 'time', 'phone'],
     requiredPhrase: 'Reply NO',
     instructions: `Keep these in the message, written exactly like this:
-{business} {address} {date} {job} Reply NO
+{business} {job} Reply NO
 
-{date} is the day, such as Thu 2 Oct. {time} and {phone} can come out. {phone} is your number.
+{date} is the day, such as Thu 2 Oct. {address}, {date}, {time} and {phone} can come out. {phone} is your number.
 
 Reply NO stays, because a customer who says nothing is still expecting the visit. Do not write reply YES.
 
@@ -62,13 +62,13 @@ The first text to a customer also adds "Reply STOP to opt out." The example is t
   {
     key: 'visit_done_to_pay',
     title: 'Visit done, still to pay',
-    required: ['business', 'job', 'address', 'date', 'amount', 'pay_link', 'phone'],
-    optional: [],
+    required: ['business', 'job', 'amount', 'pay_link', 'phone'],
+    optional: ['address', 'date'],
     requiredPhrase: null,
     instructions: `Keep these in the message, written exactly like this:
-{business} {job} {address} {date} {amount} {pay_link} {phone}
+{business} {job} {amount} {pay_link} {phone}
 
-{date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
+{address} and {date} can come out. {date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
 
 {amount} is what they owe. {pay_link} is the link to pay. {phone} is your number.
 
@@ -78,13 +78,13 @@ The example is the text that is sent. A long pay link makes the standard message
   {
     key: 'visit_done_paid_now',
     title: 'Visit done, paid cash or cheque',
-    required: ['business', 'job', 'address', 'date', 'amount', 'phone'],
-    optional: ['method', 'credit'],
+    required: ['business', 'job', 'amount', 'phone'],
+    optional: ['address', 'date', 'method', 'credit'],
     requiredPhrase: null,
     instructions: `Keep these in the message, written exactly like this:
-{business} {job} {address} {date} {amount} {phone}
+{business} {job} {amount} {phone}
 
-{date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
+{address} and {date} can come out. {date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
 
 {method} is cash or cheque. {credit} is the line about money left on their account, and it is left out when there is none. Both can come out. {phone} is your number.`,
     exampleNote: '12 Elm Rd, window clean, £15 cash, £3 still on their account.',
@@ -92,13 +92,13 @@ The example is the text that is sent. A long pay link makes the standard message
   {
     key: 'visit_done_paid_credit',
     title: 'Visit done, paid from credit',
-    required: ['business', 'job', 'address', 'date', 'phone'],
-    optional: ['credit'],
+    required: ['business', 'job', 'phone'],
+    optional: ['address', 'date', 'credit'],
     requiredPhrase: null,
     instructions: `Keep these in the message, written exactly like this:
-{business} {job} {address} {date} {phone}
+{business} {job} {phone}
 
-{date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
+{address} and {date} can come out. {date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
 
 {credit} is "(£3 left)" when they still have credit, and it is left out when they do not. It can come out. {phone} is your number.`,
     exampleNote: '12 Elm Rd, window clean, paid from credit, £3 left.',
@@ -106,13 +106,13 @@ The example is the text that is sent. A long pay link makes the standard message
   {
     key: 'visit_done_invoice',
     title: 'Visit done, invoice',
-    required: ['business', 'job', 'address', 'date', 'invoice', 'amount', 'invoice_link', 'phone'],
-    optional: [],
+    required: ['business', 'job', 'invoice', 'amount', 'invoice_link', 'phone'],
+    optional: ['address', 'date'],
     requiredPhrase: null,
     instructions: `Keep these in the message, written exactly like this:
-{business} {job} {address} {date} {invoice} {amount} {invoice_link} {phone}
+{business} {job} {invoice} {amount} {invoice_link} {phone}
 
-{date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
+{address} and {date} can come out. {date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
 
 {invoice} is the invoice number. {invoice_link} is the link. {phone} is your number.`,
     exampleNote: '12 Elm Rd, window clean, invoice INV-0042 for £15.',
@@ -120,13 +120,13 @@ The example is the text that is sent. A long pay link makes the standard message
   {
     key: 'visit_done_direct_debit',
     title: 'Visit done, Direct Debit',
-    required: ['business', 'job', 'address', 'date', 'amount', 'collect_on', 'phone'],
-    optional: [],
+    required: ['business', 'job', 'amount', 'collect_on', 'phone'],
+    optional: ['address', 'date'],
     requiredPhrase: null,
     instructions: `Keep these in the message, written exactly like this:
-{business} {job} {address} {date} {amount} {collect_on} {phone}
+{business} {job} {amount} {collect_on} {phone}
 
-{date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
+{address} and {date} can come out. {date} is "today", or "on Thu 2 Oct" when the visit was another day. Write it as: done {date}
 
 {amount} is the amount, such as £15.00. {collect_on} is the day it can be taken, such as Tue 7 Oct. {phone} is your number.`,
     exampleNote: '12 Elm Rd, window clean, £15.00 by Direct Debit on or after Tue 7 Oct.',

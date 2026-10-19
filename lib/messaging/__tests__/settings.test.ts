@@ -40,9 +40,25 @@ describe('parseMessagingSettings', () => {
     expect(again.wording.reminder).toBe(reminder);
   });
 
+  it('keeps wording that leaves the address and the date out', () => {
+    const reminder = 'Hi {business}, for your {job}. Reply NO';
+    const paid =
+      '{business}: your {job} is done. {amount} to pay: {pay_link} Questions? Call {phone}';
+    const saved = parseMessagingSettings({
+      wording: { reminder, visit_done_to_pay: paid },
+    });
+    expect(saved.wording.reminder).toBe(reminder);
+    expect(saved.wording.visit_done_to_pay).toBe(paid);
+  });
+
   it('drops wording that is missing a required piece', () => {
     expect(
       parseMessagingSettings({ wording: { reminder: 'Hello there' } }).wording.reminder,
+    ).toBeNull();
+    expect(
+      parseMessagingSettings({
+        wording: { reminder: 'See you at {address} on {date}. Reply NO' },
+      }).wording.reminder,
     ).toBeNull();
   });
 

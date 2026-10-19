@@ -106,8 +106,19 @@ describe('wording pieces', () => {
     expect(list.map((item) => item.key)).toEqual([...WORDING_KEYS]);
     const reminder = list[0];
     expect(reminder?.standard).toBe(STANDARD_WORDING.reminder);
-    expect(reminder?.pieces.some((piece) => piece.token === 'date' && piece.required)).toBe(true);
-    expect(reminder?.pieces.some((piece) => piece.token === 'time' && !piece.required)).toBe(true);
+    expect(reminder?.pieces.some((piece) => piece.token === 'business' && piece.required)).toBe(
+      true,
+    );
+    expect(reminder?.pieces.some((piece) => piece.token === 'address' && !piece.required)).toBe(
+      true,
+    );
+    expect(reminder?.pieces.some((piece) => piece.token === 'date' && !piece.required)).toBe(true);
+    expect(list.every((item) => item.pieces.some((piece) => piece.token === 'address' && !piece.required))).toBe(
+      true,
+    );
+    expect(list.every((item) => item.pieces.some((piece) => piece.token === 'date' && !piece.required))).toBe(
+      true,
+    );
   });
 });
 
@@ -156,6 +167,27 @@ describe('custom wording', () => {
     expect(countSegments(text).segments).toBeLessThanOrEqual(1);
   });
 
+  it('lets the address and the date come out', () => {
+    expect(checkWordingShape('reminder', 'Hi {business}, for your {job}. Reply NO')).toBeNull();
+    expect(checkWordingShape('reminder', 'See you at {address} on {date}. Reply NO')).toMatch(
+      /\{business\}/,
+    );
+    expect(
+      messageWordingPreview(
+        'visit_done_to_pay',
+        '{business}: your {job} is done. {amount} to pay: {pay_link} Questions? Call {phone}',
+        brand,
+      ).error,
+    ).toBeNull();
+    expect(
+      messageWordingPreview(
+        'visit_done_to_pay',
+        '{business} {job} {address} {date} {amount} {phone}',
+        brand,
+      ).error,
+    ).toMatch(/pay_link/);
+  });
+
   it('refuses a reminder that drops Reply NO, invents a piece, or asks for YES', () => {
     expect(checkWordingShape('reminder', 'Hi {business} {address} {date} {job}')).toMatch(
       /Reply NO/,
@@ -166,12 +198,6 @@ describe('custom wording', () => {
     expect(
       checkWordingShape('reminder', '{business} {address} {date} {job}. Reply YES to confirm. Reply NO'),
     ).toMatch(/reply YES/i);
-    const preview = messageWordingPreview(
-      'visit_done_to_pay',
-      '{business} {job} {address} {date} {amount} {phone}',
-      brand,
-    );
-    expect(preview.error).toMatch(/pay_link/);
   });
 
   it('blocks a message that needs a third text', () => {
