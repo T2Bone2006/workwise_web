@@ -13,10 +13,9 @@ import {
   fallbackAfterFoundingRefused,
   getFoundingStatus,
   isOwnReferral,
-  lookupReferrer,
-  normaliseReferralCode,
   REFERRAL_COOKIE,
 } from '@/lib/billing/offers';
+import { referralFromSources } from '@/lib/billing/signup-referral';
 import { signupSchema } from '@/lib/validations/signup';
 
 export type SignupResult = {
@@ -27,6 +26,7 @@ export type SignupResult = {
 
 const ALREADY_EXISTS = 'An account with this email already exists. Please sign in instead.';
 const START_FAILED = 'Something went wrong starting your subscription. Please try again.';
+const CODE_UNKNOWN = "That referral code isn't recognised.";
 
 type IntentRow = {
   id: string;
@@ -95,9 +95,14 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
   const choice: PlanChoice = { plan: values.plan, interval: values.interval };
 
   const cookieStore = await cookies();
-  const code =
-    normaliseReferralCode(values.ref) ?? normaliseReferralCode(cookieStore.get(REFERRAL_COOKIE)?.value);
-  let referrer = code ? await lookupReferrer(code) : null;
+  const found = await referralFromSources({
+    typed: values.ref ?? '',
+    cookie: cookieStore.get(REFERRAL_COOKIE)?.value ?? null,
+  });
+  if ('error' in found) return failure(CODE_UNKNOWN);
+
+  let referrer = found.match?.kind === 'customer' ? found.match.referrer : null;
+  const partner = found.match?.kind === 'partner' ? found.match.partner : null;
   if (referrer) {
     try {
       if (await isOwnReferral(referrer, email)) referrer = null;
@@ -105,11 +110,12 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       referrer = null;
     }
   }
+  const referred = Boolean(referrer || partner);
 
   let offer = chooseSignupOffer({
     choice,
     founding: await getFoundingStatus(),
-    referred: Boolean(referrer),
+    referred,
   });
 
   let checkoutUrl: string;
@@ -160,6 +166,8 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       referral_code: referrer?.code ?? null,
       referrer_tenant_id: referrer?.tenantId ?? null,
       offer: offer.offer,
+      // Omitted when empty so a signup still works before the partner column is pasted.
+      ...(partner ? { partner_id: partner.id } : {}),
     };
 
     let intentId: string;
@@ -186,6 +194,13 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       if (insertError || !inserted) throw new Error('signup_intents insert failed');
       intentId = inserted.id as string;
       customerId = null;
+    }
+
+    if (!partner) {
+      const { error: clearError } = await admin.from('signup_intents').update({ partner_id: null }).eq('id', intentId);
+      const message = clearError?.message ?? '';
+      const missingColumn = clearError?.code === 'PGRST204' || message.includes('partner_id');
+      if (clearError && !missingColumn) throw new Error(`signup_intents partner clear failed intent=${intentId}`);
     }
 
     if (!customerId) {
@@ -223,7 +238,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       );
     } catch (err) {
       if (offer.offer !== 'founding' || !isFoundingRefusal(err)) throw err;
-      offer = fallbackAfterFoundingRefused({ choice, referred: Boolean(referrer) });
+      offer = fallbackAfterFoundingRefused({ choice, referred });
       const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intentId);
       if (offerError) throw new Error(`signup_intents offer update failed intent=${intentId}`);
       session = await stripe.checkout.sessions.create(

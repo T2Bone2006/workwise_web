@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/client';
 import { choiceForPriceId } from '@/lib/billing/plans';
+import { recordPartnerReferral } from '@/lib/billing/partner-referrals';
 import { notifyRoundsWelcome } from '@/lib/stripe/rounds-welcome';
 import { snapshotSubscription } from '@/lib/stripe/sync-subscription';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
@@ -69,6 +70,10 @@ export async function provisionFromCheckoutSession(session: Stripe.Checkout.Sess
   if (error || !tenantId) {
     throw new Error(`provision_tenant_from_intent failed: ${error?.message ?? 'no tenant id returned'}`);
   }
+
+  // A partner code is recorded here, not in SQL, so a customer referral (written by the
+  // function above) is never also paid as 10%. Throws so Stripe retries until the row exists.
+  await recordPartnerReferral({ admin, intentId, tenantId: String(tenantId) });
 
   // Stripe metadata so the customer is findable from the Stripe dashboard.
   if (customerId) {

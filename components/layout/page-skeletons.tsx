@@ -1227,7 +1227,7 @@ export function skeletonForPath(pathname: string): ReactNode {
   if (/^\/lite\/leads\/[^/]+$/.test(path)) return <LeadDetailSkeleton />;
   if (path === '/refer') return <ReferPageSkeleton />;
   if (path === '/add-lite') return <AddLitePageSkeleton />;
-  if (path === '/admin/view-as') return <ViewAsPageSkeleton />;
+  if (path === '/admin/view-as' || path === '/admin/referrals') return <ViewAsPageSkeleton />;
   if (path === '/admin/ai-analytics') return <AiAnalyticsSkeleton />;
   if (/^\/portal\/jobs\/[^/]+$/.test(path)) return <PortalJobDetailSkeleton />;
 

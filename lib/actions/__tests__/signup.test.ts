@@ -9,6 +9,7 @@ const createUser = vi.fn();
 const signIn = vi.fn();
 const getFoundingStatus = vi.fn();
 const lookupReferrer = vi.fn();
+const lookupPartner = vi.fn();
 const isOwnReferral = vi.fn();
 
 let cookieValue: string | undefined;
@@ -77,6 +78,10 @@ vi.mock('@/lib/supabase/admin', () => ({
   }),
 }));
 
+vi.mock('@/lib/billing/partner-referrals', () => ({
+  lookupPartner: (...args: unknown[]) => lookupPartner(...args),
+}));
+
 vi.mock('@/lib/billing/offers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/billing/offers')>('@/lib/billing/offers');
   return {
@@ -133,6 +138,7 @@ beforeEach(() => {
   signIn.mockReset();
   getFoundingStatus.mockReset();
   lookupReferrer.mockReset();
+  lookupPartner.mockReset();
   isOwnReferral.mockReset();
 
   for (const [key, value] of Object.entries(PRICE_ENV)) process.env[key] = value;
@@ -140,6 +146,7 @@ beforeEach(() => {
 
   getFoundingStatus.mockResolvedValue({ active: true, placesLeft: 200, places: 200 });
   lookupReferrer.mockResolvedValue(null);
+  lookupPartner.mockResolvedValue(null);
   isOwnReferral.mockResolvedValue(false);
   createUser.mockResolvedValue({ data: { user: { id: 'user_1' } }, error: null });
   signIn.mockResolvedValue({ error: null });
@@ -231,6 +238,61 @@ describe('startSignup', () => {
     isOwnReferral.mockResolvedValue(true);
     await run({ ref: 'ABCD2345' });
     expect(inserted).toMatchObject({ referral_code: null, referrer_tenant_id: null, offer: 'founding' });
+  });
+
+  it('uses the referral cookie when the box is left empty', async () => {
+    cookieValue = 'ABCD2345';
+    lookupReferrer.mockResolvedValue({ tenantId: 'ten_ref', businessName: 'Clearview', code: 'ABCD2345' });
+    await run({ ref: '' });
+    expect(lookupReferrer).toHaveBeenCalledWith('ABCD2345');
+    expect(inserted).toMatchObject({
+      referral_code: 'ABCD2345',
+      referrer_tenant_id: 'ten_ref',
+      offer: 'free_month',
+    });
+    expect(inserted).not.toHaveProperty('partner_id');
+  });
+
+  it('gives a partner code the free month and does not credit a WorkWise customer', async () => {
+    lookupPartner.mockResolvedValue({ id: 'par_1', name: 'Sarah', code: 'SARAH' });
+    await run({ ref: 'sarah' });
+    expect(lookupReferrer).not.toHaveBeenCalled();
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.discounts).toEqual([{ coupon: 'REFERRAL_MONTH' }]);
+    expect(body.subscription_data.metadata).toMatchObject({ offer: 'free_month', second_month_half: '1' });
+    expect(inserted).toMatchObject({
+      referral_code: null,
+      referrer_tenant_id: null,
+      partner_id: 'par_1',
+      offer: 'free_month',
+    });
+  });
+
+  it('after founding, a partner code is a free month then full price', async () => {
+    getFoundingStatus.mockResolvedValue({ active: false, placesLeft: 0, places: 200 });
+    lookupPartner.mockResolvedValue({ id: 'par_1', name: 'Sarah', code: 'SARAH' });
+    await run({ ref: 'SARAH' });
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.discounts).toEqual([{ coupon: 'REFERRAL_MONTH' }]);
+    expect(body.subscription_data.metadata.second_month_half).toBeUndefined();
+    expect(inserted).toMatchObject({ partner_id: 'par_1', offer: 'free_month' });
+  });
+
+  it('refuses a code that is not a customer or a partner, before creating an account', async () => {
+    const { startSignup } = await import('@/lib/actions/signup');
+    const result = await startSignup(null, form({ ...base, ref: 'NOBODY' }));
+    expect(result).toMatchObject({ success: false, error: "That referral code isn't recognised." });
+    expect(createUser).not.toHaveBeenCalled();
+    expect(sessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('prefers a customer code over a partner when the same characters match a customer', async () => {
+    lookupReferrer.mockResolvedValue({ tenantId: 'ten_ref', businessName: 'Clearview', code: 'ABCD2345' });
+    lookupPartner.mockResolvedValue({ id: 'par_1', name: 'Sarah', code: 'ABCD2345' });
+    await run({ ref: 'ABCD2345' });
+    expect(lookupPartner).not.toHaveBeenCalled();
+    expect(inserted).toMatchObject({ referrer_tenant_id: 'ten_ref' });
+    expect(inserted).not.toHaveProperty('partner_id');
   });
 
   it('never sends a trial', async () => {

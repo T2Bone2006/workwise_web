@@ -99,7 +99,7 @@ function TextField({
   ...input
 }: {
   control: Control<SignupFormInput>;
-  name: 'fullName' | 'businessName' | 'email' | 'phone' | 'postcode' | 'trade';
+  name: 'fullName' | 'businessName' | 'email' | 'phone' | 'postcode' | 'trade' | 'ref';
   label: string;
   disabled: boolean;
 } & Pick<React.ComponentProps<'input'>, 'type' | 'placeholder' | 'autoComplete' | 'inputMode' | 'autoCapitalize'>) {
@@ -120,17 +120,87 @@ function TextField({
   );
 }
 
+/** Puts the code on the address so the prices above update before they pay. Closed until they ask. */
+function ReferralCodeApply({ initial, error }: { initial: string; error: string | null }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [draft, setDraft] = useState(initial);
+  const [open, setOpen] = useState(Boolean(error));
+
+  useEffect(() => {
+    setDraft(initial);
+  }, [initial]);
+
+  useEffect(() => {
+    if (error) setOpen(true);
+  }, [error]);
+
+  function apply() {
+    const params = new URLSearchParams(searchParams.toString());
+    const next = draft.trim();
+    if (next) params.set('ref', next);
+    else params.delete('ref');
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className={cn(authLinkClassName, 'text-sm')}>
+        Got a referral code?
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor="referral-code" className={authLabelClassName}>
+        Referral code
+      </label>
+      <div className="flex gap-2">
+        <Input
+          id="referral-code"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value.toUpperCase())}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              apply();
+            }
+          }}
+          placeholder="SARAH"
+          autoCapitalize="characters"
+          className={cn(authInputClassName, 'font-mono tracking-wide uppercase')}
+        />
+        <button type="button" onClick={apply} className={cn(authButtonClassName, 'w-auto shrink-0 px-4')}>
+          Apply
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** Two-part sign-up: choose a plan, then your details; submits to Stripe Checkout via startSignup. */
 export function SignupForm({
   initialChoice,
   founding,
   referrer,
+  enteredCode,
+  codeError,
   canceled,
   offers,
 }: {
   initialChoice: PlanChoice;
   founding: FoundingView;
   referrer: { businessName: string; code: string } | null;
+  /** The code in the address bar, or the one the cookie resolved. Kept in the box. */
+  enteredCode: string;
+  codeError: string | null;
   canceled: boolean;
   offers: SignupOffers;
 }) {
@@ -142,6 +212,7 @@ export function SignupForm({
   const [step, setStep] = useState<Step>(canceled ? 'details' : 'plan');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [detailsCodeOpen, setDetailsCodeOpen] = useState(false);
   const stepChanged = useRef(false);
 
   const form = useForm<SignupFormInput>({
@@ -157,10 +228,11 @@ export function SignupForm({
       phone: '',
       postcode: '',
       trade: '',
-      ref: referrer?.code ?? '',
+      ref: enteredCode,
     },
   });
 
+  const refValue = form.watch('ref');
   const offer = offers[choice.plan][choice.interval];
   const includesLite = PLANS[choice.plan].products.includes('lite');
   const serverError = !state.success && state.error ? state.error : null;
@@ -171,6 +243,14 @@ export function SignupForm({
       toast.error(state.error);
     }
   }, [state.success, state.error, state.attemptedAt]);
+
+  useEffect(() => {
+    form.setValue('ref', enteredCode);
+  }, [enteredCode, form]);
+
+  useEffect(() => {
+    if (serverError?.toLowerCase().includes('referral code')) setDetailsCodeOpen(true);
+  }, [serverError]);
 
   useEffect(() => {
     if (!stepChanged.current) return;
@@ -216,6 +296,7 @@ export function SignupForm({
       <AuthShell title="Choose your plan" subtitle="Pick what you need. You can add the other one later." side={choice.plan} step={1}>
         <div className="space-y-5">
           {notes}
+          <ReferralCodeApply initial={enteredCode} error={codeError} />
           <PlanPicker choice={choice} founding={founding} referred={Boolean(referrer)} onChange={choose} />
           <div className="pt-1">
             <button type="button" className={authButtonClassName} style={{ background: SIDE_COLOUR[choice.plan] }} onClick={() => goTo('details')}>
@@ -251,7 +332,6 @@ export function SignupForm({
         >
           <input type="hidden" name="plan" value={choice.plan} />
           <input type="hidden" name="interval" value={choice.interval} />
-          <input type="hidden" name="ref" value={referrer?.code ?? ''} />
 
           {notes}
 
@@ -385,6 +465,28 @@ export function SignupForm({
               disabled={isPending}
             />
           </div>
+
+          {detailsCodeOpen ? (
+            <TextField
+              control={form.control}
+              name="ref"
+              label="Referral code"
+              placeholder="SARAH"
+              autoCapitalize="characters"
+              disabled={isPending}
+            />
+          ) : (
+            <>
+              <input type="hidden" name="ref" value={refValue ?? ''} />
+              <button
+                type="button"
+                onClick={() => setDetailsCodeOpen(true)}
+                className={cn(authLinkClassName, 'text-sm')}
+              >
+                Got a referral code?
+              </button>
+            </>
+          )}
 
           {includesLite ? (
             <TextField

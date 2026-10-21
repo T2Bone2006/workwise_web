@@ -64,7 +64,7 @@ const SECTION: Record<string, string> = {
 };
 
 function isId(segment: string): boolean {
-  return !SECTION[segment] && !['new', 'edit', 'agreements', 'invoices', 'direct-debits', 'texts-bought', 'by-customer', 'conversations', 'widget', 'review', 'view-as', 'ai-analytics', 'seed', 'dev'].includes(segment);
+  return !SECTION[segment] && !['new', 'edit', 'agreements', 'invoices', 'direct-debits', 'texts-bought', 'by-customer', 'conversations', 'widget', 'review', 'view-as', 'referrals', 'ai-analytics', 'seed', 'dev'].includes(segment);
 }
 
 /** Path through the app for the current URL. The last crumb is the page you are on. */
@@ -143,6 +143,7 @@ export function crumbsForPath(pathname: string): Crumb[] {
 
   if (root === 'admin') {
     if (a === 'view-as') return [home, { label: 'View as' }];
+    if (a === 'referrals') return [home, { label: 'Partner referrals' }];
     if (a === 'ai-analytics') return [home, { label: 'AI analytics' }];
     return [{ label: section }];
   }

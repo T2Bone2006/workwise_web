@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Brain, ChevronLeft, ChevronsUpDown, Eye } from 'lucide-react';
+import { Brain, ChevronLeft, ChevronsUpDown, Eye, Gift } from 'lucide-react';
 import { Avatar } from '@/components/look/avatar';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -195,6 +195,7 @@ export function LookSidebar({
                 <h2 className={cn('h-5 px-3 pb-0.5 text-xs font-medium text-muted-foreground', FADE(expanded))}>Admin</h2>
                 {[
                   { href: '/admin/view-as', label: 'View as tenant', icon: Eye },
+                  { href: '/admin/referrals', label: 'Partner referrals', icon: Gift },
                   { href: '/admin/ai-analytics', label: 'AI analytics', icon: Brain },
                 ].map((item) => (
                   <div key={item.href}>

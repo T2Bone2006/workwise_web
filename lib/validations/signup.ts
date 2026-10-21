@@ -22,8 +22,8 @@ export const signupSchema = z.object({
     .transform((val) => val.toUpperCase()),
   /** Lite only: what the business does, for the chatbot. Shown when the plan includes Lite. */
   trade: z.string().trim().max(80).optional().or(z.literal('')),
-  /** From ?ref=; the referral cookie is read server-side. */
-  ref: z.string().trim().max(16).optional().or(z.literal('')),
+  /** A customer code or a partner code. The referral cookie is read server-side when this is empty. */
+  ref: z.string().trim().max(16, "That referral code isn't recognised.").optional().or(z.literal('')),
 });
 
 /** Client-only check. startSignup still reads signupSchema and ignores this field. */
