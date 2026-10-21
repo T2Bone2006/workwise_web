@@ -7,7 +7,7 @@
  *
  *   npm run stripe:p8-account -- --email you+p8x@gmail.com --tier growth --interval month --workers 40 \
  *       [--business "Name"] [--ref ABCDEFGH]
- * The password is WALKTHROUGH_PASSWORD from the environment, or the test default below.
+ * The password is WALKTHROUGH_PASSWORD from the environment.
  */
 import Stripe from 'stripe';
 import { createAdminClient } from '../lib/supabase/admin';
@@ -33,7 +33,11 @@ const interval = flag('interval', 'month') as 'month' | 'year';
 const workers = Number.parseInt(flag('workers', '1') ?? '1', 10);
 const business = flag('business', `Walkthrough ${tier} ${interval}`)!;
 const refCode = normaliseReferralCode(flag('ref'));
-const password = process.env.WALKTHROUGH_PASSWORD ?? 'WorkWise-test-8!';
+const password = process.env.WALKTHROUGH_PASSWORD;
+if (!password) {
+  console.error('Set WALKTHROUGH_PASSWORD.');
+  process.exit(1);
+}
 if (!email || !isProTier(tier) || !['month', 'year'].includes(interval)) {
   console.error('Usage: --email <addr> --tier starter|growth|pro --interval month|year --workers <n> [--business <name>] [--ref <code>]');
   process.exit(1);

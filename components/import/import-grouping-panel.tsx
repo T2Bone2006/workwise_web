@@ -73,8 +73,9 @@ export function ImportGroupingPanel({
       </legend>
       <p className="text-sm text-muted-foreground">
         Rows with the same values in every ticked column become one group (e.g. same
-        officer and date, or same address), assigned to a single worker. Your choice is
-        remembered for this customer.
+        officer and date, or same address), assigned to a single worker. A date column
+        matches on the day, so different times on that day still group together. Your
+        choice is remembered for this customer.
       </p>
 
       {suggestionNote && (

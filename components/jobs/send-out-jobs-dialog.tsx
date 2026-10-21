@@ -16,11 +16,11 @@ import {
 } from '@/components/ui/dialog';
 import { sendPendingJobsToWorkers } from '@/lib/actions/jobs';
 import type { PendingSendJobRow } from '@/lib/data/jobs';
+import { sourceChipEntries } from '@/lib/jobs/send-out-chips';
 import type { TenantSkillRow } from '@/lib/actions/skills';
 import { Badge } from '@/components/ui/badge';
 
 const UNASSIGNED_KEY = '__unassigned__';
-const MAX_SOURCE_CHIPS = 4;
 
 /**
  * The "Send jobs to workers?" confirmation, shared by the classic banner and
@@ -122,11 +122,7 @@ export function SendOutJobsDialog({
                 {group.jobs.map((job) => {
                   const location = [job.address, job.postcode].filter(Boolean).join(', ');
                   const summary = job.job_description?.trim() || null;
-                  const sourceEntries = Object.entries(job.source_fields ?? {})
-                    .sort(([a], [b]) =>
-                      a.localeCompare(b, undefined, { sensitivity: 'base' })
-                    )
-                    .slice(0, MAX_SOURCE_CHIPS);
+                  const sourceEntries = sourceChipEntries(job.source_fields);
                   return (
                     <li key={job.id} className="space-y-1.5 px-3 py-2.5">
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">

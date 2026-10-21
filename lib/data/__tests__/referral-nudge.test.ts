@@ -11,7 +11,11 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('react', async (importOriginal) => ({ ...(await importOriginal<typeof import('react')>()), cache: <T,>(fn: T) => fn }));
-vi.mock('@/lib/data/tenant', () => ({ getTenantIdForCurrentUser: async () => state.tenantId }));
+vi.mock('@/lib/data/tenant', () => ({
+  getTenantIdForCurrentUser: async () => state.tenantId,
+  getCurrentUserRow: async () =>
+    state.readError ? null : { role: state.role, tenant_id: state.tenantId, email: null },
+}));
 vi.mock('@/lib/supabase/auth-user', () => ({
   getAuthUser: async () => ({ user: state.user, error: null }),
 }));

@@ -43,21 +43,34 @@ export const getTenantIdForCurrentUser = cache(async (): Promise<string | null> 
       return null;
     }
 
-    const supabase = await createClient();
-    const { data: userRow, error: userError } = await supabase
-      .from('users')
-      .select('tenant_id')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (userError) {
-      console.error('[getTenantIdForCurrentUser] Users table error:', userError);
-      return null;
-    }
-
-    return userRow?.tenant_id ?? null;
+    const row = await getCurrentUserRow();
+    return row?.tenant_id ?? null;
   } catch (err) {
     console.error('[getTenantIdForCurrentUser] Unexpected error:', err);
     return null;
   }
 });
+
+/**
+ * The signed-in user's own users row (role, tenant and email), read once per request. The layout
+ * needs the role and every page needs the tenant, and they used to ask separately.
+ */
+export const getCurrentUserRow = cache(
+  async (): Promise<{ role: string | null; tenant_id: string | null; email: string | null } | null> => {
+    const { user } = await getAuthUser();
+    if (!user?.id) return null;
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('users')
+      .select('role, tenant_id, email')
+      .eq('id', user.id)
+      .maybeSingle<{ role: string | null; tenant_id: string | null; email: string | null }>();
+
+    if (error) {
+      console.error('[getCurrentUserRow] Users table error:', error);
+      return null;
+    }
+    return data;
+  },
+);

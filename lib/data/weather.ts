@@ -38,13 +38,13 @@ async function placeFor(
   db: SupabaseClient,
   tenantId: string,
   settingsPostcode: string | null,
-  visitPoints: Point[],
+  visitPoints: Point[] | Promise<Point[]>,
 ): Promise<{ lat: number; lng: number } | null> {
   if (settingsPostcode) {
     const found = await postcodeToLatLng(settingsPostcode);
     if (found) return found;
   }
-  return middleOf(visitPoints) ?? middleOf(await recentVisitPoints(db, tenantId));
+  return middleOf(await visitPoints) ?? middleOf(await recentVisitPoints(db, tenantId));
 }
 
 /**
@@ -55,14 +55,23 @@ async function placeFor(
  */
 export async function loadWeather(
   db: SupabaseClient,
-  p: { tenantId: string; visitPoints?: Point[] },
+  p: {
+    tenantId: string;
+    /** The visits on screen. May still be loading: they are only waited for when there is no start postcode. */
+    visitPoints?: Point[] | Promise<Point[]>;
+    /** The business's start postcode, when the caller has already read its settings. */
+    startPostcode?: string | null;
+  },
 ): Promise<WeatherByDay | null> {
   const contact = process.env.SETUP_REQUEST_EMAIL;
   if (!contact) return null;
 
   try {
-    const settings = await getRoundsSettings(db, p.tenantId);
-    const place = await placeFor(db, p.tenantId, settings.start_postcode, p.visitPoints ?? []);
+    const startPostcode =
+      p.startPostcode !== undefined
+        ? p.startPostcode
+        : (await getRoundsSettings(db, p.tenantId)).start_postcode;
+    const place = await placeFor(db, p.tenantId, startPostcode, p.visitPoints ?? []);
     if (!place) return null;
 
     const url = `https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${round2(place.lat)}&lon=${round2(place.lng)}`;

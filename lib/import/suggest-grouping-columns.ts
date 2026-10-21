@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { GROUPING_AI_MODEL, supportsEffort } from '@/lib/ai/model';
 import { logStructuredAiInteraction } from '@/lib/services/ai-interaction-log';
-import { resolveGroupingColumns } from '@/lib/import/job-grouping';
+import { groupingMatchValue, resolveGroupingColumns } from '@/lib/import/job-grouping';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -97,13 +97,6 @@ function formatSample(headers: string[], rows: Record<string, string>[]): string
   return `Columns: ${headers.join(', ')}\n\n${lines.join('\n')}`;
 }
 
-function normalizeCell(value: string | undefined): string {
-  return String(value ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
 /**
  * Headers that often repeat but are job attributes, not a visit key.
  * Dropped after the model answers so lock type / notes cannot win.
@@ -138,7 +131,7 @@ function sanitizeGroupingColumns(
   const resolved = resolveGroupingColumns(proposed, headers);
   return resolved.filter((col) => {
     if (isJobSpecHeader(col)) return false;
-    const values = rows.map((r) => normalizeCell(r[col])).filter((v) => v !== '');
+    const values = rows.map((r) => groupingMatchValue(r[col])).filter((v) => v !== '');
     if (values.length === 0) return false;
     const unique = new Set(values);
     // Same value on every filled row → client name / single flag, not a visit.

@@ -94,7 +94,11 @@ export function resolvePostcodeDeterministic(
 
 // Convert UK postcode to lat/lng using free postcodes.io API
 async function lookup(postcode: string): Promise<{ lat: number; lng: number } | null> {
-  const response = await fetch(`https://api.postcodes.io/postcodes/${postcode}`);
+  // A postcode's coordinates don't move, and the overview and calendar ask on every load.
+  const response = await fetch(`https://api.postcodes.io/postcodes/${postcode}`, {
+    next: { revalidate: 60 * 60 * 24 * 30 },
+    signal: AbortSignal.timeout(3000),
+  });
   if (!response.ok) return null;
   const data = await response.json();
   if (data.status === 200 && data.result) {

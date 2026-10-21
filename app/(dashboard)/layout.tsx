@@ -2,7 +2,11 @@ import { createClient } from '@/lib/supabase/server';
 import { getAuthUser } from '@/lib/supabase/auth-user';
 import { redirect } from 'next/navigation';
 import { DashboardShell } from '@/components/layout/dashboard-shell';
-import { getTenantIdForCurrentUser, getTenantNameForCurrentUser } from '@/lib/data/tenant';
+import {
+  getCurrentUserRow,
+  getTenantIdForCurrentUser,
+  getTenantNameForCurrentUser,
+} from '@/lib/data/tenant';
 import { employeeFeatures, getTenantFeatures, withWorkerBlock } from '@/lib/data/tenant-features';
 import { getWorkerLink } from '@/lib/auth/worker-link';
 import { getWorkerLiteOffer } from '@/lib/data/worker-lite-offer';
@@ -48,11 +52,7 @@ export default async function DashboardLayout({
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
-    .from('users')
-    .select('role')
-    .eq('id', user.id)
-    .maybeSingle<{ role: string | null }>();
+  const profile = await getCurrentUserRow();
 
   if (profile?.role === 'customer_portal') {
     redirect('/portal');
@@ -77,37 +77,50 @@ export default async function DashboardLayout({
 
   await recoverAbandonedViewAsIfNeeded();
 
-  const [tenantName, admin, tenantId, baseFeatures, viewAs, products, showAddLite, referralKindNow] = await Promise.all([
+  // One batch: the badge and overdue reads only need the tenant id, so they start with
+  // everything else instead of waiting for it in later rounds.
+  const tenantIdPromise = getTenantIdForCurrentUser();
+  const productsPromise = getTenantProducts();
+  const [
+    tenantName,
+    admin,
+    baseFeatures,
+    viewAs,
+    products,
+    showAddLite,
+    referralKindNow,
+    networkCounts,
+    messagesBadge,
+    overdue,
+  ] = await Promise.all([
     getTenantNameForCurrentUser(),
     isAdmin(),
-    getTenantIdForCurrentUser(),
     getTenantFeatures(),
     getViewAsState(),
-    getTenantProducts(),
+    productsPromise,
     shouldShowAddLite(),
     referralKind(),
+    tenantIdPromise.then((id) => (id ? getNetworkNotificationCounts(id) : null)),
+    Promise.all([tenantIdPromise, productsPromise]).then(([id, p]) =>
+      id && p.hasRounds ? getUnreadThreadCount(supabase, id) : undefined,
+    ),
+    tenantIdPromise.then((id) => paymentOverdue(supabase, id)),
   ]);
   // A self-employed worker keeps their own business's blocks and gains a 'Work for …' block.
   // Only asked of logins with no Pro or Rounds plan, so offices and Rounds traders pay nothing extra.
   const workerLink = !products.isPro && !products.hasRounds ? await getWorkerLink() : null;
   const features = workerLink ? withWorkerBlock(baseFeatures, workerLink.employerName) : baseFeatures;
-  const workerLite = workerLink && !products.hasLite ? Boolean(await getWorkerLiteOffer()) : false;
-
-  const addLiteYearly = showAddLite && (await addLiteInterval()) === 'year';
+  const [workerLite, addLiteYearly, look] = await Promise.all([
+    workerLink && !products.hasLite ? getWorkerLiteOffer().then(Boolean) : false,
+    showAddLite ? addLiteInterval().then((interval) => interval === 'year') : false,
+    getTenantLook(products),
+  ]);
 
   // TODO: route protection — add per-page checks instead (layout has no pathname access in this codebase)
 
-  const [networkCounts, messagesBadge] = await Promise.all([
-    tenantId ? getNetworkNotificationCounts(tenantId) : Promise.resolve(null),
-    tenantId && products.hasRounds
-      ? getUnreadThreadCount(supabase, tenantId)
-      : Promise.resolve(undefined),
-  ]);
   const networkBadge = networkCounts
     ? networkCounts.pendingConnections + networkCounts.inboxJobs
     : undefined;
-  const overdue = await paymentOverdue(supabase, tenantId);
-  const look = await getTenantLook(products);
 
   return (
     <DashboardShell

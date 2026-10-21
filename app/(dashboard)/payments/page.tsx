@@ -60,7 +60,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
   const toBounds = to ? londonDayBoundsUtc(to) : null;
 
   const connectDone = raw.connect === 'done';
-  const [checklist, cardParts, owedAll, history, earnings, invoicesResult, ddState] = await Promise.all([
+  const [checklist, cardParts, owedAll, history, earnings, invoicesResult, ddState, customers] = await Promise.all([
     getGetPaidChecklist(supabase, tenantId),
     getCardPanelParts(supabase, tenantId, { refresh: connectDone }),
     getOwedCustomers(supabase, tenantId),
@@ -79,6 +79,13 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
       }),
     ),
     getDirectDebitState(supabase, tenantId),
+    supabase
+      .from('customers')
+      .select('id, name')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .limit(5000),
   ]);
   // Direct Debit only shows when the business has it On (D10).
   const owed =
@@ -94,13 +101,6 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
           })),
         };
 
-  const customers = await supabase
-    .from('customers')
-    .select('id, name')
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
-    .order('name', { ascending: true })
-    .limit(5000);
   const pickable = ((customers.data ?? []) as { id: string; name: string | null }[])
     .filter((c) => c.name)
     .map((c) => ({ id: c.id, name: c.name as string }));

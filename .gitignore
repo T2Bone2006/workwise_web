@@ -47,3 +47,6 @@ next-env.d.ts
 scripts/assistant-eval/report.md
 scripts/assistant-eval/session-cost.txt
 scripts/assistant-eval/size.json
+
+# Temporary design previews. Mock data only; not part of the live site.
+app/(dashboard)/dev/team-preview/

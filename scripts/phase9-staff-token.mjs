@@ -3,15 +3,15 @@
  *
  *   TEAM_TEST_PASSWORD=… node --env-file=.env.local scripts/phase9-staff-token.mjs you+teamdave@gmail.com
  *
- * The password is read from the environment (default: the Phase 9 test password), never printed. Localhost keys only.
+ * The password is read from TEAM_TEST_PASSWORD, never printed. Localhost keys only.
  */
 const email = process.argv[2];
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const password = process.env.TEAM_TEST_PASSWORD ?? 'WorkWise-test-9!';
+const password = process.env.TEAM_TEST_PASSWORD;
 
-if (!email || !url || !anon) {
-  console.error('Usage: node --env-file=.env.local scripts/phase9-staff-token.mjs <email>');
+if (!email || !url || !anon || !password) {
+  console.error('Usage: TEAM_TEST_PASSWORD=… node --env-file=.env.local scripts/phase9-staff-token.mjs <email>');
   process.exit(1);
 }
 

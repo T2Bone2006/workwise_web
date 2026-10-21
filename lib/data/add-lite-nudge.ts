@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { getAuthUser } from '@/lib/supabase/auth-user';
-import { getTenantIdForCurrentUser } from '@/lib/data/tenant';
+import { getCurrentUserRow, getTenantIdForCurrentUser } from '@/lib/data/tenant';
 import { ENTITLED_STATUSES, PRO_TIER_PRODUCTS } from '@/lib/data/tenant-products';
 
 type SubRow = {
@@ -23,24 +23,17 @@ const loadAddLite = cache(async (): Promise<Gate> => {
     const { user, error: authError } = await getAuthUser();
     if (authError || !user) return { show: false };
 
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (profileError || profile?.role !== 'admin') return { show: false };
+    const profile = await getCurrentUserRow();
+    if (profile?.role !== 'admin') return { show: false };
 
-    const { data: tenant, error: tenantError } = await supabase
-      .from('tenants')
-      .select('closed_at')
-      .eq('id', tenantId)
-      .maybeSingle();
+    const [{ data: tenant, error: tenantError }, { data, error }] = await Promise.all([
+      supabase.from('tenants').select('closed_at').eq('id', tenantId).maybeSingle(),
+      supabase
+        .from('subscriptions')
+        .select('source, product, status, cancel_at_period_end, billing_interval')
+        .eq('tenant_id', tenantId),
+    ]);
     if (tenantError || !tenant || tenant.closed_at) return { show: false };
-
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('source, product, status, cancel_at_period_end, billing_interval')
-      .eq('tenant_id', tenantId);
     if (error || !data) return { show: false };
 
     const rows = data as SubRow[];

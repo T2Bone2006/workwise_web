@@ -189,17 +189,18 @@ function parseSearchParams(
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const tenantId = await getTenantIdForCurrentUser();
-  const tenantName = await getTenantNameForCurrentUser();
+  const [tenantId, tenantName, products, rawParams] = await Promise.all([
+    getTenantIdForCurrentUser(),
+    getTenantNameForCurrentUser(),
+    getTenantProducts(),
+    searchParams,
+  ]);
 
   if (!tenantId) {
     const { user } = await getAuthUser();
     if (user && (await hasPendingSignup(user.id))) redirect(UNPAID_SIGNUP_PATH);
     redirect('/login');
   }
-
-  const products = await getTenantProducts();
-  const rawParams = await searchParams;
 
   // A self-employed worker with no plan of their own (or only Lite) lands on their worker area.
   if (products.primary === null || products.primary === 'lite') {
@@ -218,8 +219,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     // The overview is always today; other days live in the calendar. Each card's
     // read fails on its own (that card says so) and never breaks the page.
     const settings = await getRoundsSettings(supabase, tenantId);
-    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow, teamToday] = await Promise.all([
-      getRoundsHomeData(tenantId),
+    const dataPromise = getRoundsHomeData(tenantId);
+    const [data, needs, books, comingUp, week, trend, latestPayments, roundValue, nameRow, teamToday, weather] = await Promise.all([
+      dataPromise,
       loadNeedsYou(supabase, { tenantId, today }),
       loadBooksSummary(supabase, { tenantId, period: currentMonth(today) }).catch(() => null),
       loadComingUp(supabase, { tenantId, weeks: 4 }).catch(() => null),
@@ -240,9 +242,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         : Promise.resolve({ data: null }),
       // Only the owner's Dashboard has this card; a read problem leaves the card out and nothing else.
       getTeamToday(tenantId, today).catch(() => null),
+      // Starts with everything else; it only waits for today's visits when there is no start postcode.
+      loadWeather(supabase, {
+        tenantId,
+        startPostcode: settings.start_postcode,
+        visitPoints: dataPromise.then((d) => d.todayVisits),
+      }),
     ]);
     const firstName = firstNameOf(nameRow.data?.full_name) ?? firstNameOf(user?.user_metadata?.full_name);
-    const weather = await loadWeather(supabase, { tenantId, visitPoints: data.todayVisits });
     return (
       <RoundsHome
         tenantName={tenantName}

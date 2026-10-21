@@ -152,13 +152,16 @@ function JobsErrorFallback() {
 
 export default async function JobsPage({ searchParams }: JobsPageProps) {
   try {
-    const tenantId = await getTenantIdForCurrentUser();
+    const [tenantId, products, rawParams] = await Promise.all([
+      getTenantIdForCurrentUser(),
+      getTenantProducts(),
+      searchParams,
+    ]);
 
     if (!tenantId) {
       return <NoTenantMessage />;
     }
 
-    const rawParams = await searchParams;
     const activeBatchId = rawParams.batchId?.trim() || null;
     let filters: JobsFilters & { page?: number; view?: 'list' | 'batches' };
     try {
@@ -179,6 +182,18 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         ? filters.customer_id
         : null;
 
+    const newLook = (await getTenantLook(products)) === 'new';
+    // Batch is a combinable filter, not a separate mode — it must apply
+    // whichever view (list or batches) the URL currently has, so the batch
+    // and customer dropdowns can be used together. Picking one batch needs that
+    // batch's job ids first; every other case reads the jobs alongside the rest.
+    const needsBatchLookup = Boolean(activeBatchId) && activeBatchId !== 'ungrouped';
+    const baseJobsFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' } = {
+      ...filters,
+      job_ids: undefined,
+      import_source_id: activeBatchId === 'ungrouped' ? 'ungrouped' : undefined,
+    };
+
     const [
       { count: unassignedCount },
       statusSummary,
@@ -189,6 +204,9 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       visibleColumns,
       { workers },
       fieldGroups,
+      declinedJobs,
+      proNeeds,
+      earlyJobs,
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
@@ -201,12 +219,10 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       getJobsListColumnsForTenant(tenantId),
       getWorkersForTenant(tenantId),
       getFieldGroupsForTenant(tenantId),
+      newLook ? getDeclinedJobs(tenantId) : Promise.resolve([]),
+      newLook ? getProNeeds(tenantId, format(new Date(), 'yyyy-MM-dd')) : Promise.resolve(null),
+      needsBatchLookup ? Promise.resolve(null) : getJobsForTenant(tenantId, baseJobsFilters),
     ]);
-
-    const newLook = (await getTenantLook(await getTenantProducts())) === 'new';
-    const [declinedJobs, proNeeds] = newLook
-      ? await Promise.all([getDeclinedJobs(tenantId), getProNeeds(tenantId, format(new Date(), 'yyyy-MM-dd'))])
-      : [[], null];
 
     const fieldFilterOptions = [
       ...SYSTEM_FILTER_FIELDS.map((f) => ({
@@ -243,18 +259,11 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
     const activeBatch = activeBatchId
       ? batchesResult.batches.find((batch) => batch.id === activeBatchId) ?? null
       : null;
-    // Batch is a combinable filter, not a separate mode — it must apply
-    // whichever view (list or batches) the URL currently has, so the batch
-    // and customer dropdowns can be used together.
     const jobsFilters: JobsFilters & { page?: number; view?: 'list' | 'batches' } = {
-      ...filters,
-      job_ids:
-        activeBatchId && activeBatchId !== 'ungrouped'
-          ? (activeBatch?.job_ids ?? [])
-          : undefined,
-      import_source_id: activeBatchId === 'ungrouped' ? 'ungrouped' : undefined,
+      ...baseJobsFilters,
+      job_ids: needsBatchLookup ? (activeBatch?.job_ids ?? []) : undefined,
     };
-    const { jobs, totalCount, error } = await getJobsForTenant(tenantId, jobsFilters);
+    const { jobs, totalCount, error } = earlyJobs ?? (await getJobsForTenant(tenantId, jobsFilters));
 
     const redirectError = rawParams.error ?? null;
 

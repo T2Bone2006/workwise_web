@@ -74,7 +74,11 @@ function parseSearchParams(
 }
 
 export default async function WorkersPage({ searchParams }: WorkersPageProps) {
-  const tenantId = await getTenantIdForCurrentUser();
+  const [tenantId, products, rawParams] = await Promise.all([
+    getTenantIdForCurrentUser(),
+    getTenantProducts(),
+    searchParams,
+  ]);
 
   if (!tenantId) {
     return (
@@ -87,8 +91,8 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
     );
   }
 
-  const rawParams = await searchParams;
   const filters = parseSearchParams(rawParams);
+  const newLook = (await getTenantLook(products)) === 'new';
   const defaultTab =
     rawParams.tab === 'invited' || rawParams.tab === 'inactive' ? rawParams.tab : 'workers';
 
@@ -100,6 +104,8 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
     { workers: inactiveWorkers, error: inactiveError },
     allowance,
     acceptedTeamSize,
+    assignableResult,
+    dayJobs,
   ] = await Promise.all([
     getWorkersListForTenant(tenantId, filters),
     getWorkerSkillsInUseForTenant(tenantId),
@@ -108,6 +114,9 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
     getDeactivatedWorkersForTenant(tenantId),
     getWorkerAllowance(),
     countTeamWorkers(tenantId, { includePending: false }),
+    // Only the new look's strip uses these; they start with the rest instead of after it.
+    newLook ? getWorkersForTenant(tenantId) : Promise.resolve(null),
+    newLook ? getProDayJobs(tenantId, format(new Date(), 'yyyy-MM-dd')) : Promise.resolve(null),
   ]);
   // Null for manual accounts (RS Locksmiths, Eden) and anyone we can't place on a tier: nothing shows.
   const allowanceLine = allowance ? usageLine(allowance) : null;
@@ -116,13 +125,9 @@ export default async function WorkersPage({ searchParams }: WorkersPageProps) {
 
   // New look: a strip about today's team above the table.
   let team: ReturnType<typeof teamForDay> | null = null;
-  if ((await getTenantLook(await getTenantProducts())) === 'new') {
-    const [{ workers: assignable }, dayJobs] = await Promise.all([
-      getWorkersForTenant(tenantId),
-      getProDayJobs(tenantId, format(new Date(), 'yyyy-MM-dd')),
-    ]);
+  if (assignableResult && dayJobs) {
     team = teamForDay(
-      assignable.map((w) => ({ id: w.id, name: w.full_name })),
+      assignableResult.workers.map((w) => ({ id: w.id, name: w.full_name })),
       dayJobs,
     );
   }

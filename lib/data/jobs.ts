@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
+import { sourceChipEntries } from '@/lib/jobs/send-out-chips';
 import {
   buildJobsSearchOrFilter,
   computeJobMatchPills,
@@ -219,7 +220,8 @@ export async function getPendingSendJobsForTenant(
         required_skills: Array.isArray(row.required_skills)
           ? (row.required_skills as string[])
           : [],
-        source_fields: parseSourceFields(row.source_fields),
+        // Only the fields the dialog shows (see sourceChipEntries); the rest would be sent to the browser for nothing.
+        source_fields: Object.fromEntries(sourceChipEntries(parseSourceFields(row.source_fields))),
       };
     });
 
@@ -875,12 +877,30 @@ export async function getImportBatchesForTenant(
 ): Promise<{ batches: ImportBatchRow[]; error: Error | null }> {
   try {
     const supabase = await createClient();
-    const { data: historyRows, error: historyError } = await supabase
-      .from('import_history')
-      .select('id, file_name, started_at, rows_imported, import_source_id, job_ids')
-      .eq('tenant_id', tenantId)
-      .order('started_at', { ascending: false });
+    // The three reads don't depend on each other, so they go out together. Only the customer
+    // names wait, for the source ids.
+    const [historyRes, sourcesRes, liveJobsRes] = await Promise.all([
+      supabase
+        .from('import_history')
+        .select('id, file_name, started_at, rows_imported, import_source_id, job_ids')
+        .eq('tenant_id', tenantId)
+        .order('started_at', { ascending: false }),
+      // Resolve each batch's owning customer via import_sources.customer_id.
+      supabase.from('import_sources').select('id, customer_id').eq('tenant_id', tenantId),
+      // One query for every live job on the tenant, filtered by tenant_id + status
+      // only — not by an .in('id', [...]) built from the history job ids. A tenant
+      // with a few hundred jobs puts that id list past the 16KB header limit and
+      // the request fails outright (Supabase sends .in() as URL params). Intersecting
+      // with the history ids in JS below is smaller, one round trip, and immune to
+      // tenant size. It also gives the ungrouped jobs (no import source), so no second query.
+      supabase
+        .from('jobs')
+        .select('id, status, import_source_id')
+        .eq('tenant_id', tenantId)
+        .in('status', LIVE_BATCH_STATUSES),
+    ]);
 
+    const { data: historyRows, error: historyError } = historyRes;
     if (historyError) {
       console.error('[getImportBatchesForTenant] import_history', historyError);
       return { batches: [], error: new Error(historyError.message ?? 'Failed to load import batches') };
@@ -896,14 +916,7 @@ export async function getImportBatchesForTenant(
       }
     }
 
-    // Resolve each batch's owning customer via import_sources.customer_id.
-    // Two small tenant-scoped queries (bounded by customer/source count, not
-    // job count) rather than a nested embed, matching this function's
-    // existing style of explicit maps over PostgREST embeds.
-    const { data: sourceRows, error: sourcesError } = await supabase
-      .from('import_sources')
-      .select('id, customer_id')
-      .eq('tenant_id', tenantId);
+    const { data: sourceRows, error: sourcesError } = sourcesRes;
     if (sourcesError) {
       console.error('[getImportBatchesForTenant] import_sources', sourcesError);
       return { batches: [], error: new Error(sourcesError.message ?? 'Failed to load import sources') };
@@ -932,31 +945,22 @@ export async function getImportBatchesForTenant(
       }
     }
 
-    // One query for every live job on the tenant, filtered by tenant_id + status
-    // only — not by an .in('id', [...]) built from allHistoryJobIds. A tenant
-    // with a few hundred jobs puts that id list past the 16KB header limit and
-    // the request fails outright (Supabase sends .in() as URL params). Fetching
-    // by the cheap predicates and intersecting with allHistoryJobIds in JS below
-    // is smaller, one round trip, and immune to tenant size.
+    if (liveJobsRes.error) {
+      console.error('[getImportBatchesForTenant] jobs', liveJobsRes.error);
+      return { batches: [], error: new Error(liveJobsRes.error.message ?? 'Failed to load import batch counts') };
+    }
+    const liveJobRows = (Array.isArray(liveJobsRes.data) ? liveJobsRes.data : []) as {
+      id?: string;
+      status?: JobStatus | null;
+      import_source_id?: string | null;
+    }[];
     const statusByJobId = new Map<string, JobStatus>();
-    if (allHistoryJobIds.size > 0) {
-      const { data: jobRows, error: jobsError } = await supabase
-        .from('jobs')
-        .select('id, status')
-        .eq('tenant_id', tenantId)
-        .in('status', LIVE_BATCH_STATUSES);
-
-      if (jobsError) {
-        console.error('[getImportBatchesForTenant] jobs', jobsError);
-        return { batches: [], error: new Error(jobsError.message ?? 'Failed to load import batch counts') };
-      }
-
-      for (const jobRow of Array.isArray(jobRows) ? jobRows : []) {
-        const id = (jobRow as { id?: string }).id;
-        const status = (jobRow as { status?: JobStatus | null }).status;
-        if (id && status && allHistoryJobIds.has(id)) statusByJobId.set(id, status);
+    for (const jobRow of liveJobRows) {
+      if (jobRow.id && jobRow.status && allHistoryJobIds.has(jobRow.id)) {
+        statusByJobId.set(jobRow.id, jobRow.status);
       }
     }
+    const ungroupedRows = liveJobRows.filter((jobRow) => jobRow.import_source_id == null);
 
     function summarizeHistoryJobIds(jobIds: string[] | null | undefined): {
       counts: BatchStatusCounts;
@@ -972,18 +976,6 @@ export async function getImportBatchesForTenant(
         incrementBatchStatusCount(counts, status);
       }
       return { counts, liveJobIds };
-    }
-
-    const { data: ungroupedRows, error: ungroupedError } = await supabase
-      .from('jobs')
-      .select('id, status')
-      .eq('tenant_id', tenantId)
-      .is('import_source_id', null)
-      .in('status', LIVE_BATCH_STATUSES);
-
-    if (ungroupedError) {
-      console.error('[getImportBatchesForTenant] ungrouped jobs', ungroupedError);
-      return { batches: [], error: new Error(ungroupedError.message ?? 'Failed to load ungrouped job counts') };
     }
 
     const ungroupedCounts = emptyBatchStatusCounts();

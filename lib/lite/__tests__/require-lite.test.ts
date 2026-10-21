@@ -6,21 +6,19 @@ const getTenantProducts = vi.hoisted(() => vi.fn());
 const widgetQuery = vi.hoisted(() => vi.fn());
 const adminFrom = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    auth: { getUser },
-    from: (table: string) => {
-      if (table !== 'users') throw new Error(table);
-      return {
-        select: () => ({
-          eq: (_key: string, value: unknown) => {
-            userQuery(value);
-            return { maybeSingle: async () => session.userRow };
-          },
-        }),
-      };
-    },
-  }),
+vi.mock('@/lib/supabase/auth-user', () => ({
+  getAuthUser: async () => {
+    const result = await getUser();
+    return { user: result.data.user, error: null };
+  },
+}));
+
+vi.mock('@/lib/data/tenant', () => ({
+  getCurrentUserRow: async () => {
+    const row = await session.userRow;
+    userQuery(session.user?.id);
+    return row.data ? { ...row.data, email: null } : null;
+  },
 }));
 
 vi.mock('@/lib/data/tenant-products', () => ({

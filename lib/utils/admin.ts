@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { getCurrentUserRow } from '@/lib/data/tenant';
 import { getAuthUser } from '@/lib/supabase/auth-user';
 
 /**
@@ -17,15 +17,9 @@ export async function isAdmin(): Promise<boolean> {
   const { user } = await getAuthUser();
   if (!user) return false;
 
-  const supabase = await createClient();
+  const userRow = await getCurrentUserRow();
 
-  const { data: userData } = await supabase
-    .from('users')
-    .select('email')
-    .eq('id', user.id)
-    .single();
-
-  const email = (userData?.email ?? user.email ?? '').toLowerCase();
+  const email = (userRow?.email ?? user.email ?? '').toLowerCase();
   return adminEmails.some((e) => e.toLowerCase() === email);
 }
 

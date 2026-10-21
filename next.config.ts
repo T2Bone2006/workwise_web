@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
     // Vercel itself caps a request body at 4.5 MB, so the dashboard shrinks
     // photos in the browser first and 5 MB is the most that can ever arrive.
     serverActions: { bodySizeLimit: '5mb' },
+    // Clicking back to a tab you visited a moment ago shows it straight away instead of asking the
+    // server again. Next's default for dynamic pages is 0 (never reuse). Saving something, router.refresh()
+    // and revalidatePath() all clear it, so your own changes always show; only changes made by someone
+    // else (a customer paying, a worker finishing a job) can take up to this long to appear on a revisit.
+    staleTimes: { dynamic: 30, static: 300 },
   },
   turbopack: {
     root: appRoot,

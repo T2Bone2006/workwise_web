@@ -6,7 +6,7 @@
  * runs the real provisioning. Test keys only.
  *
  *   npm run stripe:p9-account -- --email you+teamowner@gmail.com [--interval month|year] [--business "Name"]
- * The password is WALKTHROUGH_PASSWORD from the environment, or the test default below.
+ * The password is WALKTHROUGH_PASSWORD from the environment.
  */
 import Stripe from 'stripe';
 import { createAdminClient } from '../lib/supabase/admin';
@@ -26,7 +26,11 @@ const flag = (name: string, fallback?: string) => {
 const email = flag('email')?.toLowerCase() ?? '';
 const interval = (flag('interval', 'month') ?? 'month') as BillingInterval;
 const business = flag('business', `Team test ${email.split('+')[1]?.split('@')[0] ?? 'rounds'}`)!;
-const password = process.env.WALKTHROUGH_PASSWORD ?? 'WorkWise-test-9!';
+const password = process.env.WALKTHROUGH_PASSWORD;
+if (!password) {
+  console.error('Set WALKTHROUGH_PASSWORD.');
+  process.exit(1);
+}
 if (!email || !['month', 'year'].includes(interval)) {
   console.error('Usage: --email <addr> [--interval month|year] [--business <name>]');
   process.exit(1);

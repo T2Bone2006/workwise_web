@@ -1,4 +1,5 @@
 {
+  "regions": ["fra1"],
   "crons": [
     { "path": "/api/cron/cleanup-signups", "schedule": "30 3 * * *" },
     { "path": "/api/cron/generate-visits", "schedule": "0 2 * * *" },

@@ -1,8 +1,9 @@
 import 'server-only';
 
+import { getCurrentUserRow } from '@/lib/data/tenant';
 import { getTenantProducts } from '@/lib/data/tenant-products';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/supabase/auth-user';
 
 export type LiteContext = {
   tenantId: string;
@@ -45,19 +46,12 @@ function asWidget(row: unknown): LiteContext['widget'] | null {
  * preview still works.
  */
 export async function requireLite(): Promise<{ ok: true; ctx: LiteContext } | LiteFailure> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // The same per-request lookups the Lite layout already made, so a page load asks Supabase once.
+  const { user } = await getAuthUser();
   if (!user?.id) return { ok: false, status: 401, error: 'Not signed in' };
 
-  const { data: userRow, error: userError } = await supabase
-    .from('users')
-    .select('role, tenant_id')
-    .eq('id', user.id)
-    .maybeSingle();
-  const row = userRow as { role?: unknown; tenant_id?: unknown } | null;
-  if (userError || row?.role !== 'admin' || typeof row.tenant_id !== 'string' || row.tenant_id === '') {
+  const row = await getCurrentUserRow();
+  if (row?.role !== 'admin' || typeof row.tenant_id !== 'string' || row.tenant_id === '') {
     return { ok: false, status: 403, error: 'Only the account owner can do this.' };
   }
 

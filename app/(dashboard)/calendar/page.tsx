@@ -76,26 +76,36 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
   const view = raw.view === 'day' ? 'day' : raw.view === 'month' ? 'month' : 'week';
 
   const supabase = await createClient();
-  const settings = await getRoundsSettings(supabase, tenantId);
   // Lanes and the Person filter exist only for a business with a lead; without one the calendar is exactly as it was.
-  const team = await getCalendarTeam(tenantId, today);
+  const [settings, team] = await Promise.all([
+    getRoundsSettings(supabase, tenantId),
+    getCalendarTeam(tenantId, today),
+  ]);
   const person = team ? parsePersonParam(raw.person, team.people) : 'all';
 
   if (view === 'week') {
     const range = initialRange(date);
-    const [{ visits, error }, messaging, untold] = await Promise.all([
-      getVisitsForRange(tenantId, range.from, rangeEnd(range)),
+    const visitsPromise = getVisitsForRange(tenantId, range.from, rangeEnd(range));
+    const [{ visits, error }, messaging, untold, off, weather] = await Promise.all([
+      visitsPromise,
       getMessagingSettings(supabase, tenantId),
       listUntoldMoves(supabase, tenantId, { today }),
+      getOffContext(tenantId, today, range.from, rangeEnd(range)),
+      // Starts with the rest; it only waits for the visits when there is no start postcode.
+      loadWeather(supabase, {
+        tenantId,
+        startPostcode: settings.start_postcode,
+        visitPoints: visitsPromise.then((r) =>
+          team && person !== 'all' ? filterByPerson(r.visits, person, team.people) : r.visits,
+        ),
+      }),
     ]);
     const brand = {
       businessName: messaging.businessName,
       contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
     };
 
-    const off = await getOffContext(tenantId, today, range.from, rangeEnd(range));
     const shownVisits = team && person !== 'all' ? filterByPerson(visits, person, team.people) : visits;
-    const weather = await loadWeather(supabase, { tenantId, visitPoints: shownVisits });
     // A dot per visit only when everyone is shown and more than one person has work this week.
     const ownerId = team?.people.find((p) => p.isOwner)?.workerId ?? null;
     const workers = new Set(shownVisits.map((v) => v.assigned_worker_id ?? ownerId));
@@ -145,19 +155,24 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
   }
 
   if (view === 'day') {
-    const [{ visits, error }, { options: customers }, messaging, undoable] = await Promise.all([
-      getVisitsForDay(tenantId, date),
+    const visitsPromise = getVisitsForDay(tenantId, date);
+    const [{ visits, error }, { options: customers }, messaging, undoable, off, weather] = await Promise.all([
+      visitsPromise,
       listOneOffCustomerOptions(supabase, tenantId),
       getMessagingSettings(supabase, tenantId),
       getLatestUndoableChange(date),
+      getOffContext(tenantId, today, date, date),
+      loadWeather(supabase, {
+        tenantId,
+        startPostcode: settings.start_postcode,
+        visitPoints: visitsPromise.then((r) => r.visits),
+      }),
     ]);
     const brand = {
       businessName: messaging.businessName,
       contactPhone: messaging.contact_phone ?? normalizeUkPhoneE164(messaging.companyPhone),
     };
-    const weather = await loadWeather(supabase, { tenantId, visitPoints: visits });
     const dayWeather = weather?.[date];
-    const off = await getOffContext(tenantId, today, date, date);
 
     return (
       <div className="space-y-6">
@@ -199,12 +214,14 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
     );
   }
 
-  const off = await getOffContext(tenantId, today, date, date);
-  const { counts, error } = await getVisitCountsForMonth(
-    tenantId,
-    date,
-    team && person !== 'all' ? { personId: person, people: team.people } : undefined,
-  );
+  const [off, { counts, error }] = await Promise.all([
+    getOffContext(tenantId, today, date, date),
+    getVisitCountsForMonth(
+      tenantId,
+      date,
+      team && person !== 'all' ? { personId: person, people: team.people } : undefined,
+    ),
+  ]);
 
   return (
     <div className="space-y-6">
