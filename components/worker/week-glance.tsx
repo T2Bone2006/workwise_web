@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { CalendarRange } from 'lucide-react';
 import { LookCard } from '@/components/look';
 import { cn } from '@/lib/utils';
-import type { WeekDay } from '@/lib/worker/dashboard';
+import type { DashboardNumbers, WeekDay } from '@/lib/worker/dashboard';
 
 function statusOf(day: WeekDay): string {
   const { total, done, notCompleted } = day.plan;
@@ -13,7 +13,7 @@ function statusOf(day: WeekDay): string {
 }
 
 /** Monday to Sunday: how many jobs each day, today ringed. Each day opens in the calendar. */
-export function WeekGlance({ week }: { week: WeekDay[] }) {
+export function WeekGlance({ week, numbers }: { week: WeekDay[]; numbers: DashboardNumbers }) {
   const busiest = Math.max(1, ...week.map((d) => d.plan.total));
   const total = week.reduce((sum, d) => sum + d.plan.total, 0);
   return (
@@ -32,7 +32,7 @@ export function WeekGlance({ week }: { week: WeekDay[] }) {
                 href={`/worker/calendar?view=day&date=${day.date}`}
                 aria-label={`${format(parseISO(day.date), 'EEEE d MMMM')}: ${statusOf(day)}`}
                 className={cn(
-                  'grid grid-cols-[3rem_1fr] items-center gap-3 rounded-xl border px-3 py-2 transition-colors',
+                  'grid grid-cols-[3rem_1fr] items-center gap-3 rounded-xl border px-3 py-1.5 transition-colors',
                   'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
                   day.isToday
                     ? 'border-(--tone-rounds-solid) bg-(--tone-rounds-soft)'
@@ -52,18 +52,33 @@ export function WeekGlance({ week }: { week: WeekDay[] }) {
                   <span className={cn('block text-sm font-medium', free && !day.isPast && 'text-(--tone-emerald-text)', free && day.isPast && 'text-muted-foreground')}>
                     {statusOf(day)}
                   </span>
-                  <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                    <span
-                      className={cn('block h-full rounded-full', day.isPast ? 'bg-(--tone-rounds-solid)/50' : 'bg-(--tone-rounds-solid)')}
-                      style={{ width: `${Math.round((day.plan.total / busiest) * 100)}%` }}
-                    />
-                  </span>
+                  {free ? null : (
+                    <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                      <span
+                        className={cn('block h-full rounded-full', day.isPast ? 'bg-(--tone-rounds-solid)/50' : 'bg-(--tone-rounds-solid)')}
+                        style={{ width: `${Math.round((day.plan.total / busiest) * 100)}%` }}
+                      />
+                    </span>
+                  )}
                 </span>
               </Link>
             </li>
           );
         })}
       </ul>
+      <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-sm text-muted-foreground">
+        <Link href="/worker/jobs?tab=done" className="underline-offset-4 hover:text-foreground hover:underline">
+          <span className="font-semibold text-foreground tabular-nums">{numbers.doneThisMonth}</span> done this month
+        </Link>
+        <Link href="/worker/jobs" className="underline-offset-4 hover:text-foreground hover:underline">
+          <span className="font-semibold text-foreground tabular-nums">{numbers.comingUp}</span> coming up
+        </Link>
+        {numbers.notCompletedRecently > 0 ? (
+          <Link href="/worker/jobs?tab=not_completed" className="text-(--tone-amber-text) underline-offset-4 hover:underline">
+            <span className="font-semibold tabular-nums">{numbers.notCompletedRecently}</span> not completed lately
+          </Link>
+        ) : null}
+      </p>
     </LookCard>
   );
 }

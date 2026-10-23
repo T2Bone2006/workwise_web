@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Ban, CalendarCheck, CircleCheck, TriangleAlert } from 'lucide-react';
 import { EmptyState } from '@/components/look';
 import { JobRow } from '@/components/worker/job-row';
+import { groupByDay, groupByMonth } from '@/lib/worker/group';
 import { cn } from '@/lib/utils';
 import type { JobsTab, WorkerJob } from '@/lib/worker/types';
 
@@ -23,12 +24,14 @@ export function JobsList({
   page,
   hasMore,
   ok,
+  today,
 }: {
   jobs: readonly WorkerJob[];
   tab: JobsTab;
   page: number;
   hasMore: boolean;
   ok: boolean;
+  today: string;
 }) {
   if (!ok && jobs.length === 0) {
     return (
@@ -45,15 +48,21 @@ export function JobsList({
   }
   const link =
     'rounded-full border border-border bg-card px-4 py-1.5 text-sm font-medium hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none';
+  const groups = tab === 'upcoming' ? groupByDay(jobs, today) : groupByMonth(jobs, tab === 'done' ? 'completed' : 'scheduled');
   return (
-    <div className="space-y-3">
-      <ul className="space-y-2">
-        {jobs.map((job) => (
-          <li key={job.id}>
-            <JobRow job={job} lead="day" reason={tab === 'not_completed' ? job.notBecause : null} />
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-5">
+      {groups.map((group) => (
+        <section key={group.key} aria-label={group.label} className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted-foreground">{group.label}</h2>
+          <ul className="space-y-2">
+            {group.jobs.map((job) => (
+              <li key={job.id}>
+                <JobRow job={job} lead={tab === 'upcoming' ? 'time' : 'day'} reason={tab === 'not_completed' ? job.notBecause : null} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
       {page > 1 || hasMore ? (
         <nav aria-label="More jobs" className={cn('flex items-center gap-2', page > 1 && hasMore ? 'justify-between' : page > 1 ? 'justify-start' : 'justify-end')}>
           {page > 1 ? (

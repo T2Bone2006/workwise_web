@@ -3,7 +3,7 @@ import { Briefcase, TriangleAlert } from 'lucide-react';
 import { LookCard, Notice } from '@/components/look';
 import { LiteOfferSlot } from '@/components/worker/lite-offer-slot';
 import { ProfileActions } from '@/components/worker/profile-actions';
-import { ProfileDetails, ProfileHeader, ProfileStats } from '@/components/worker/profile-card';
+import { ProfileDetails, ProfileHeader } from '@/components/worker/profile-card';
 import { RoundsPhoneNote } from '@/components/worker/rounds-phone-note';
 import { getMyProfile } from '@/lib/data/worker/profile';
 import { getWorkerRoundsExtras } from '@/lib/data/worker/rounds-extras';
@@ -19,9 +19,8 @@ export default async function WorkerProfilePage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 sm:space-y-5">
+    <div className="mx-auto max-w-4xl space-y-4 sm:space-y-5">
       <ProfileHeader profile={profile} />
-      <ProfileStats profile={profile} />
       <ProfileDetails profile={profile} />
       {extras.employerIsRounds ? <RoundsPhoneNote /> : null}
       {profile.hasOwnBusiness ? (
