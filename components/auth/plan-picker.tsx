@@ -85,12 +85,12 @@ function IntervalSwitch({
 
 const TILE: Record<PlanKey, { solid: string; tint: string; ink: string; short: string }> = {
   rounds: { solid: '#0C66E4', tint: 'bg-[#EEF4FE] dark:bg-[#0C66E4]/15', ink: 'text-[#0A4FB5] dark:text-[#8DB8FF]', short: 'Plan the round, get paid, keep the books.' },
-  lite: { solid: '#9B30D9', tint: 'bg-[#F7EEFD] dark:bg-[#9B30D9]/15', ink: 'text-[#7A1FB5] dark:text-[#D9A6FF]', short: 'Your website quotes for you, day and night.' },
+  lite: { solid: '#9B30D9', tint: 'bg-[#F7EEFD] dark:bg-[#9B30D9]/15', ink: 'text-[#7A1FB5] dark:text-[#D9A6FF]', short: 'Your website quotes for you, day and night. Free one-page website if you stay 12 months.' },
   both: {
     solid: 'linear-gradient(120deg, #0C66E4 0%, #5A47E0 50%, #9B30D9 100%)',
     tint: 'bg-[linear-gradient(120deg,#EEF4FE,#F7EEFD)] dark:bg-[linear-gradient(120deg,rgba(12,102,228,.15),rgba(155,48,217,.15))]',
     ink: 'text-[#4A2FB8] dark:text-[#C0B4FF]',
-    short: 'Both, with won enquiries landing on your round.',
+    short: 'Both, with won enquiries landing on your round. Free one-page website if you stay 12 months.',
   },
 };
 

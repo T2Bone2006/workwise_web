@@ -6,6 +6,8 @@ import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { LeadsBoard } from '@/components/lite/leads/leads-board';
 import { LiteTiles } from '@/components/lite/leads/lite-tiles';
 import { SetupBanner } from '@/components/lite/setup-banner';
+import { WebsiteOfferCard } from '@/components/lite/website-offer-card';
+import { getWebsiteCard } from '@/lib/data/website-offer';
 import { getLeadsBoard } from '@/lib/data/lite/leads-board';
 import { requireLite } from '@/lib/lite/require-lite';
 import { litePaths } from '@/lib/navigation/lite-paths';
@@ -27,7 +29,7 @@ export default async function LiteHomePage() {
     );
   }
 
-  const data = await getLeadsBoard(auth.ctx.tenantId);
+  const [data, websiteCard] = await Promise.all([getLeadsBoard(auth.ctx.tenantId), getWebsiteCard()]);
   if (data.setup.state === 'not_started') redirect(litePaths.setup);
 
   const website = data.setup.state === 'live' ? data.setup.website : null;
@@ -42,6 +44,7 @@ export default async function LiteHomePage() {
             : 'Set your website in Widget to switch it on'
         }
       />
+      {websiteCard ? <WebsiteOfferCard state={websiteCard} /> : null}
       {data.setup.state === 'in_progress' ? (
         <SetupBanner stage={data.setup.stage} />
       ) : data.setup.state === 'live' && !data.websiteSet ? (

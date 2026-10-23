@@ -2,6 +2,8 @@ import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { SetupFlow } from '@/components/lite/setup/setup-flow';
 import { getOrStartInterview } from '@/lib/lite/interview';
 import { parseProfile } from '@/lib/lite/profile-schema';
+import { WebsiteOfferCard } from '@/components/lite/website-offer-card';
+import { getWebsiteCard } from '@/lib/data/website-offer';
 import { requireLite } from '@/lib/lite/require-lite';
 import { getSetupStatus } from '@/lib/lite/setup-status';
 import { widgetSnippet } from '@/lib/navigation/lite-paths';
@@ -83,7 +85,15 @@ export default async function LiteSetupPage() {
 
   if (status.state === 'live' && !status.redoInProgress) {
     const starterPrompts = await livePrompts(admin, auth.ctx.tenantId);
-    return <SetupFlow phase="done" starterPrompts={starterPrompts} {...shared} />;
+    const websiteCard = await getWebsiteCard();
+    return (
+      <SetupFlow
+        phase="done"
+        starterPrompts={starterPrompts}
+        websiteSlot={websiteCard ? <WebsiteOfferCard state={websiteCard} /> : null}
+        {...shared}
+      />
+    );
   }
 
   const view = await getOrStartInterview(admin, auth.ctx);

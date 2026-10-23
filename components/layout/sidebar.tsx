@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ChevronLeft, Brain, Eye, Gift } from 'lucide-react';
+import { ChevronLeft, Brain, Eye, Gift, Globe } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { AddLiteCard } from './add-lite-card';
 import { buildNavSections, isNavItemActive, SIDEBAR_STORAGE_KEY, type NavItem } from './nav-sections';
@@ -229,6 +229,28 @@ function ClassicSidebar({
                   {(!collapsed || isMobile) && (
                     <>
                       <span>Partner referrals</span>
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        Admin
+                      </Badge>
+                    </>
+                  )}
+                </Link>
+                <Link
+                  href="/admin/website"
+                  onClick={isMobile ? onMobileClose : undefined}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                    'hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:translate-x-0.5 hover:shadow-sm',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                    pathname === '/admin/website'
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+                      : 'text-sidebar-foreground/90'
+                  )}
+                >
+                  <Globe className="size-5 shrink-0" aria-hidden />
+                  {(!collapsed || isMobile) && (
+                    <>
+                      <span>Website tracker</span>
                       <Badge variant="secondary" className="ml-auto text-xs">
                         Admin
                       </Badge>

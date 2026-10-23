@@ -60,6 +60,8 @@ type Common = {
   initialWebsite: string;
   initialSignOff: string;
   initialMobile: string;
+  /** The free-website card, shown once set-up is finished. */
+  websiteSlot?: React.ReactNode;
 };
 
 type Props = Common & ({ phase: 'done' } | { phase: 'interview'; view: InterviewView });
@@ -284,6 +286,7 @@ export function SetupFlow(props: Props) {
         title="Set up Lily on your website"
         subtitle="About 10–15 minutes. Stop any time — it saves as you go."
       />
+      {showDone ? props.websiteSlot : null}
       <div className="flex w-full min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
         <ProgressRail stage={stage} />
         <div className="min-w-0 flex-1 space-y-4">

@@ -10,6 +10,7 @@ import { Tag } from "@/components/look/tag";
 import { changePlanAction, hasLiteNowAction } from "@/lib/actions/billing";
 import { formatPence, PLANS, type BillingInterval } from "@/lib/billing/plans";
 import { PhoneScene, RoundScene, WebsiteScene } from "./add-lite-scenes";
+import { WebsiteOfferLine } from "./website-offer-line";
 
 export type AddLiteOffer = {
   todayPence: number;
@@ -277,6 +278,8 @@ export function AddLiteView({
               Add Lite for {formatPence(offer.todayPence)}
             </Button>
           ) : null}
+
+          <WebsiteOfferLine />
 
           <ul className="mt-5 flex flex-col gap-2.5 text-[13px] leading-snug text-muted-foreground">
             <li className="flex gap-2">

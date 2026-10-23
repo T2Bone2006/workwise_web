@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useForm, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Gift, Info, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Gift, Globe, Info, Loader2 } from 'lucide-react';
 import {
   Form,
   FormControl,
@@ -27,6 +27,7 @@ import {
   authLinkClassName,
 } from '@/components/auth/auth-shell';
 import { SIDE_COLOUR } from '@/components/auth/auth-side-panel';
+import { WEBSITE_OFFER } from '@/lib/website-offer';
 import { PLAN_LOOK, PlanPicker, type FoundingView } from '@/components/auth/plan-picker';
 import { SignupSummary } from '@/components/auth/signup-summary';
 import { cn } from '@/lib/utils';
@@ -496,6 +497,17 @@ export function SignupForm({
               placeholder="e.g. plasterer, locksmith"
               disabled={isPending}
             />
+          ) : null}
+
+          {includesLite ? (
+            <div className="flex gap-3 rounded-xl border border-[#E6D3F5] bg-[#F7EEFD] px-4 py-3 dark:border-[#9B30D9]/30 dark:bg-[#9B30D9]/15">
+              <Globe className="mt-0.5 size-4 flex-shrink-0 text-[#7A1FB5] dark:text-[#D9A6FF]" aria-hidden />
+              <p className="text-sm leading-snug text-[#3A2150] dark:text-[#E9DDF7]">
+                <span className="font-semibold">Includes a free one-page website.</span> Stay {WEBSITE_OFFER.monthsToKeep} months
+                and it&apos;s yours to keep. You can cancel any time, but the site comes down if you leave sooner. Your
+                domain is always yours.
+              </p>
+            </div>
           ) : null}
 
           <SignupSummary choice={choice} offer={offer} />

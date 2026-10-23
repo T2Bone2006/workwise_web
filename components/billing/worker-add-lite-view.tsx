@@ -8,6 +8,7 @@ import { startWorkerLiteCheckoutAction } from '@/lib/actions/billing';
 import { formatPence, PLANS, type BillingInterval } from '@/lib/billing/plans';
 import { workerLitePence } from '@/lib/billing/worker-price';
 import { PhoneScene, WebsiteScene } from './add-lite-scenes';
+import { WebsiteOfferLine } from './website-offer-line';
 
 const INTERVALS: { value: BillingInterval; label: string }[] = [
   { value: 'month', label: 'Monthly' },
@@ -144,6 +145,7 @@ export function WorkerAddLiteView({ employerName }: { employerName: string }) {
             Add Lite for {formatPence(worker)} a {per}
           </button>
           <p className="mt-2 text-center text-xs text-muted-foreground">You&apos;ll pay on Stripe&apos;s secure page.</p>
+          <WebsiteOfferLine />
           <ul className="mt-5 flex flex-col gap-2.5 text-[13px] leading-snug text-muted-foreground">
             <li className="flex gap-2">
               <Check className="mt-0.5 size-3.5 shrink-0 text-(--tone-lite-text)" aria-hidden />

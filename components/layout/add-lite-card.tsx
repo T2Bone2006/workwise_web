@@ -61,7 +61,8 @@ export function AddLiteCard({
 
       <span className="mt-2.5 block px-0.5 text-[13px] leading-none font-semibold text-card-foreground">Add Lite</span>
       <span className="mt-1 block px-0.5 text-[11.5px] leading-snug text-muted-foreground">
-        {worker ? 'Lily answers customers on your own website while you work.' : 'Quotes customers from your website while you work.'}
+        {worker ? 'Lily answers customers on your own website while you work.' : 'Quotes customers from your website while you work.'}{' '}
+        No website? You get a free one.
       </span>
       {worker ? (
         <span className="mt-1.5 flex items-center gap-1.5 px-0.5 text-[11px] leading-none text-muted-foreground">

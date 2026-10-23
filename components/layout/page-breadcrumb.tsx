@@ -144,6 +144,7 @@ export function crumbsForPath(pathname: string): Crumb[] {
   if (root === 'admin') {
     if (a === 'view-as') return [home, { label: 'View as' }];
     if (a === 'referrals') return [home, { label: 'Partner referrals' }];
+    if (a === 'website') return [home, { label: 'Website tracker' }];
     if (a === 'ai-analytics') return [home, { label: 'AI analytics' }];
     return [{ label: section }];
   }

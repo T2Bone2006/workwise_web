@@ -5,6 +5,7 @@ import { MessageCircle, X } from 'lucide-react';
 import { Tag } from '@/components/look';
 import { Button } from '@/components/ui/button';
 import { useStoredFlag } from '@/components/rounds/use-stored-flag';
+import { WebsiteOfferLine } from '@/components/billing/website-offer-line';
 
 /**
  * The quiet Lite offer on the worker pages, for a self-employed worker. It can be closed on this browser
@@ -40,6 +41,9 @@ export function LiteOfferCard({ employerName }: { employerName: string }) {
           <Link href="/add-lite">See Lite</Link>
         </Button>
         <p className="text-xs text-muted-foreground">The price stays while you&apos;re connected to a Pro account.</p>
+      </div>
+      <div className="mt-3.5 border-t border-(--tone-lite-line) pt-3">
+        <WebsiteOfferLine variant="line" />
       </div>
     </section>
   );
