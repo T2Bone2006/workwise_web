@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Tag } from "@/components/look/tag";
 import { changePlanAction, hasLiteNowAction } from "@/lib/actions/billing";
 import { formatPence, PLANS, type BillingInterval } from "@/lib/billing/plans";
-import { PhoneScene, RoundScene, WebsiteScene } from "./add-lite-scenes";
+import { LeadScene, RoundScene, WebsiteScene } from "./add-lite-scenes";
 import { WebsiteOfferLine } from "./website-offer-line";
 
 export type AddLiteOffer = {
@@ -43,13 +43,13 @@ const STAGES = [
     scene: WebsiteScene,
   },
   {
-    title: "You accept in one tap",
-    text: "Customers can book in. You say yes from your phone.",
-    scene: PhoneScene,
+    title: "Leads land on your dashboard",
+    text: "You get an email, with the whole chat.",
+    scene: LeadScene,
   },
   {
     title: "It lands on your round",
-    text: "Won jobs arrive as a customer or a one-off visit.",
+    text: "Mark a lead won, then add it to your round in one tap.",
     scene: RoundScene,
   },
 ] as const;
@@ -120,8 +120,8 @@ export function AddLiteView({
         </h1>
         <p className="mt-3 max-w-[56ch] text-[15px] leading-relaxed text-muted-foreground">
           Rounds runs the jobs you have. Lite brings in the next ones: it talks
-          to customers on your website, quotes in your prices and puts what you
-          win straight onto your round.
+          to customers on your website, quotes in your prices and lets you add
+          what you win to your round.
         </p>
 
         <ol className="mt-7 grid gap-3 lg:grid-cols-3 lg:gap-5">

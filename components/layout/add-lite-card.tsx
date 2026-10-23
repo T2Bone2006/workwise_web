@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ChevronRight, MessageCircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { GiftBox } from '@/components/billing/gift-box';
 
 /**
  * Sidebar nudge to add Lite. No dismiss.
@@ -62,6 +63,7 @@ export function AddLiteCard({
       <span className="mt-2.5 block px-0.5 text-[13px] leading-none font-semibold text-card-foreground">Add Lite</span>
       <span className="mt-1 block px-0.5 text-[11.5px] leading-snug text-muted-foreground">
         {worker ? 'Lily answers customers on your own website while you work.' : 'Quotes customers from your website while you work.'}{' '}
+        <GiftBox site={false} className="mx-0.5 inline-block size-3.5 align-[-2px]" />
         No website? You get a free one.
       </span>
       {worker ? (

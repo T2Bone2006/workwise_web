@@ -2,8 +2,9 @@ import { Tag } from '@/components/look/tag';
 
 /**
  * The three code-drawn scenes on the Add Lite page: a customer chats on the website,
- * the trader accepts on a phone, the job lands on the round. Drawn from the site's
- * Lite renderings; they carry no real data.
+ * the lead lands on the trader's dashboard, the won job lands on the round. Drawn from
+ * the site's Lite renderings; they carry no real data. Lite only captures leads at launch,
+ * so nothing here shows accepting or booking.
  */
 
 function Bot() {
@@ -32,30 +33,31 @@ export function WebsiteScene() {
         <div className="flex items-end gap-1.5">
           <Bot />
           <p className="max-w-[85%] rounded-2xl rounded-bl-md bg-muted px-2.5 py-1.5 text-[12px] leading-snug">
-            Front and back is £18. I can do Thursday.
+            Front and back is usually £18. Shall I pass your details to Dave?
           </p>
         </div>
         <p className="max-w-[85%] self-end rounded-2xl rounded-br-md bg-foreground px-2.5 py-1.5 text-[12px] leading-snug text-background">
-          Lovely, book me in.
+          Yes please.
         </p>
       </div>
     </div>
   );
 }
 
-export function PhoneScene() {
+export function LeadScene() {
   return (
     <div className="mx-auto w-[168px] rounded-[26px] border-[5px] border-foreground/90 bg-background p-2 shadow-(--look-card-shadow)" aria-hidden>
       <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-border" />
-      <p className="text-[10px] font-medium text-muted-foreground">New booking</p>
+      <p className="text-[10px] font-medium text-muted-foreground">New enquiry</p>
       <div className="mt-1.5 rounded-xl border border-border bg-card p-2.5">
         <p className="text-[13px] leading-tight font-semibold">Sarah Bennett</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">Front windows · Thursday</p>
-        <p className="mt-1.5 text-[15px] leading-none font-semibold tabular-nums">£18</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">Front windows · WN6</p>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">Lily gave a guide price of</p>
+        <p className="text-[15px] leading-none font-semibold tabular-nums">£18</p>
         <div className="mt-2.5 grid grid-cols-[1fr_auto] gap-1.5">
-          <span className="rounded-lg bg-(--look-lite-pill) py-1.5 text-center text-[11px] font-semibold text-white">Accept</span>
+          <span className="rounded-lg bg-(--look-lite-pill) py-1.5 text-center text-[11px] font-semibold text-white">Call</span>
           <span className="rounded-lg border border-border px-2 py-1.5 text-center text-[11px] font-medium text-muted-foreground">
-            Not now
+            Read chat
           </span>
         </div>
       </div>

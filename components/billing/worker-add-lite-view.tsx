@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { startWorkerLiteCheckoutAction } from '@/lib/actions/billing';
 import { formatPence, PLANS, type BillingInterval } from '@/lib/billing/plans';
 import { workerLitePence } from '@/lib/billing/worker-price';
-import { PhoneScene, WebsiteScene } from './add-lite-scenes';
+import { LeadScene, WebsiteScene } from './add-lite-scenes';
 import { WebsiteOfferLine } from './website-offer-line';
 
 const INTERVALS: { value: BillingInterval; label: string }[] = [
@@ -62,12 +62,12 @@ export function WorkerAddLiteView({ employerName }: { employerName: string }) {
         </h1>
         <p className="mt-3 max-w-[58ch] text-[15px] leading-relaxed text-muted-foreground">
           You work with {employerName} through WorkWise. Lite is for the jobs that are yours: Lily answers customers on
-          your own website, quotes in your prices, and tells you the ones that book.
+          your own website, quotes in your prices, and hands you the leads.
         </p>
         <ol className="mt-7 grid gap-3 sm:grid-cols-2 sm:gap-5">
           {[
             { title: 'It answers on your website', text: 'Day and night, pricing jobs the way you do.', Scene: WebsiteScene },
-            { title: 'You accept in one tap', text: 'Customers can book in. You say yes from your phone.', Scene: PhoneScene },
+            { title: 'Leads land on your dashboard', text: 'You get an email, with the whole chat.', Scene: LeadScene },
           ].map((stage, i) => (
             <li
               key={stage.title}
