@@ -503,9 +503,9 @@ export function SignupForm({
             <div className="flex gap-3 rounded-xl border border-[#E6D3F5] bg-[#F7EEFD] px-4 py-3 dark:border-[#9B30D9]/30 dark:bg-[#9B30D9]/15">
               <Globe className="mt-0.5 size-4 flex-shrink-0 text-[#7A1FB5] dark:text-[#D9A6FF]" aria-hidden />
               <p className="text-sm leading-snug text-[#3A2150] dark:text-[#E9DDF7]">
-                <span className="font-semibold">Includes a free one-page website.</span> Stay {WEBSITE_OFFER.monthsToKeep} months
-                and it&apos;s yours to keep. You can cancel any time, but the site comes down if you leave sooner. Your
-                domain is always yours.
+                <span className="font-semibold">Includes a free one-page website, built for you.</span> It&apos;s yours to keep
+                once you&apos;ve been on Lite {WEBSITE_OFFER.monthsToKeep} months. You can cancel any time, but if you leave
+                sooner the site comes down. Your domain is always yours.
               </p>
             </div>
           ) : null}

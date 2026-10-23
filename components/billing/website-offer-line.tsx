@@ -12,7 +12,7 @@ export function WebsiteOfferLine({ variant = 'panel' }: { variant?: 'panel' | 'l
   if (variant === 'line') {
     return (
       <p className="text-[13px] leading-snug text-muted-foreground">
-        No website to put it on? A free one-page site comes with Lite when you stay {WEBSITE_OFFER.monthsToKeep} months.
+        No website to put it on? A free one-page site is included with Lite, yours to keep after {WEBSITE_OFFER.monthsToKeep} months.
       </p>
     );
   }
@@ -27,8 +27,8 @@ export function WebsiteOfferLine({ variant = 'panel' }: { variant?: 'panel' | 'l
       <div className="min-w-0">
         <p className="text-[13px] leading-snug font-semibold">No website yet? You get one free.</p>
         <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">
-          A one-page website with Lily on it, built by {WEBSITE_OFFER.builder} and hosted while you&apos;re on Lite. Stay{' '}
-          {WEBSITE_OFFER.monthsToKeep} months and it&apos;s yours to keep. We&apos;ll ask once you&apos;ve added Lite.
+          A one-page website with Lily on it, built by {WEBSITE_OFFER.builder} and hosted while you&apos;re on Lite. It&apos;s yours to
+          keep after {WEBSITE_OFFER.monthsToKeep} months. We&apos;ll ask once you&apos;ve added Lite.
         </p>
         <a
           href={WEBSITE_MORE_PAGES_URL}

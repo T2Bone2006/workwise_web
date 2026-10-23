@@ -72,7 +72,7 @@ export function WebsiteOfferCard({ state }: { state: WebsiteCardState }) {
           ) : undefined
         }
       >
-        It stays up while you&apos;re on Lite. Stay {WEBSITE_OFFER.monthsToKeep} months and it&apos;s yours to keep.
+        It stays up while you&apos;re on Lite, and it&apos;s yours to keep after {WEBSITE_OFFER.monthsToKeep} months.
       </Notice>
     );
   }
@@ -107,8 +107,8 @@ export function WebsiteOfferCard({ state }: { state: WebsiteCardState }) {
       }
     >
       Do you need one? If you don&apos;t have a website yet, {WEBSITE_OFFER.builder} will build you a simple one-page site
-      with Lily on it, and we&apos;ll host it while you&apos;re on Lite. Stay {WEBSITE_OFFER.monthsToKeep} months and it&apos;s
-      yours to keep if you ever leave. Leave sooner and the site comes down. You can cancel Lite any time.{' '}
+      with Lily on it, and we&apos;ll host it while you&apos;re on Lite. It&apos;s yours to keep once you&apos;ve been on Lite{' '}
+      {WEBSITE_OFFER.monthsToKeep} months. If you leave sooner, the site comes down. You can cancel Lite any time.{' '}
       <a
         href={WEBSITE_MORE_PAGES_URL}
         target="_blank"
