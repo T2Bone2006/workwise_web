@@ -88,7 +88,11 @@ export function CustomerPortalAccessTable({ customers }: CustomerPortalAccessTab
             </TableHeader>
             <TableBody>
               {customers.map((customer) => (
-                <TableRow key={customer.id}>
+                <TableRow
+                  key={customer.id}
+                  onClick={() => router.push(`/customers/${customer.id}`)}
+                  className="cursor-pointer"
+                >
                   <TableCell className="font-medium">
                     <Link
                       href={`/customers/${customer.id}`}
@@ -99,7 +103,11 @@ export function CustomerPortalAccessTable({ customers }: CustomerPortalAccessTab
                   </TableCell>
                   <TableCell>
                     {customer.email ? (
-                      <a href={`mailto:${customer.email}`} className="text-primary hover:underline">
+                      <a
+                        href={`mailto:${customer.email}`}
+                        className="text-primary hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {customer.email}
                       </a>
                     ) : (
@@ -107,7 +115,7 @@ export function CustomerPortalAccessTable({ customers }: CustomerPortalAccessTab
                     )}
                   </TableCell>
                   <TableCell>{formatDate(customer.portal_last_accessed_at)}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <Button
                       variant="destructive"
                       size="sm"

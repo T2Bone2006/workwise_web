@@ -79,7 +79,11 @@ export function InactiveCustomersTable({ customers }: InactiveCustomersTableProp
               {customers.map((customer) => {
                 const isBulk = customer.type === 'bulk_client';
                 return (
-                  <TableRow key={customer.id}>
+                  <TableRow
+                    key={customer.id}
+                    onClick={() => router.push(`/customers/${customer.id}`)}
+                    className="cursor-pointer"
+                  >
                     <TableCell className="font-medium">{customer.name}</TableCell>
                     <TableCell>{customer.email ?? '—'}</TableCell>
                     <TableCell>
@@ -95,7 +99,7 @@ export function InactiveCustomersTable({ customers }: InactiveCustomersTableProp
                         {isBulk ? 'Bulk Client' : 'Individual'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <Button
                         variant="outline"
                         size="sm"

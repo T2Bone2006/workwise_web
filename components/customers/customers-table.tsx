@@ -456,12 +456,13 @@ export function CustomersTable({
                   {customers.map((row) => (
                     <TableRow
                       key={row.id}
+                      onClick={() => router.push(`/customers/${row.id}`)}
                       className={cn(
-                        'border-border/80',
+                        'cursor-pointer border-border/80',
                         row.type === 'bulk_client' && 'bg-violet-500/[0.03] dark:bg-violet-500/[0.06]'
                       )}
                     >
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedIds.has(row.id)}
@@ -474,6 +475,7 @@ export function CustomersTable({
                         <Link
                           href={`/customers/${row.id}`}
                           className="font-medium text-primary hover:underline"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {row.name || '—'}
                         </Link>
@@ -486,6 +488,7 @@ export function CustomersTable({
                           <a
                             href={`mailto:${row.email}`}
                             className="text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             {row.email}
                           </a>
@@ -495,7 +498,11 @@ export function CustomersTable({
                       </TableCell>
                       <TableCell>
                         {row.phone ? (
-                          <a href={`tel:${row.phone}`} className="text-primary hover:underline">
+                          <a
+                            href={`tel:${row.phone}`}
+                            className="text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             {row.phone}
                           </a>
                         ) : (
@@ -514,6 +521,7 @@ export function CustomersTable({
                           <Link
                             href={`/jobs?customer_id=${row.id}`}
                             className="font-medium text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             {row.job_count}
                           </Link>
@@ -521,7 +529,7 @@ export function CustomersTable({
                           <span className="text-muted-foreground">0</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="size-8">

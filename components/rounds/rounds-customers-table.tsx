@@ -656,17 +656,18 @@ export function RoundsCustomersTable({
                   !customer.is_active && 'opacity-70',
                 )}
               >
-                <div className="flex min-w-0 items-center gap-3">
+                <Link
+                  href={`/customers/${customer.id}`}
+                  aria-label={`Open ${customer.name}`}
+                  className="absolute inset-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+                />
+                <div className="pointer-events-none flex min-w-0 items-center gap-3">
                   <Avatar name={customer.name} tone={customer.owed_amount > 0 ? 'rose' : 'rounds'} />
                   <div className="min-w-0">
-                    <Link
-                      href={`/customers/${customer.id}`}
-                      title={customer.name}
-                      className="block truncate font-medium text-foreground after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-                    >
+                    <p title={customer.name} className="truncate font-medium text-foreground">
                       {customer.name}
-                    </Link>
-                    {customer.added_by_unchecked ? <AddedByTag name={customer.added_by_unchecked} className="relative z-10 mt-0.5" /> : null}
+                    </p>
+                    {customer.added_by_unchecked ? <AddedByTag name={customer.added_by_unchecked} className="mt-0.5" /> : null}
                     <p className="truncate text-xs text-muted-foreground">
                       {[customer.postcode?.toUpperCase(), phoneLabel(customer) !== '—' ? phoneLabel(customer) : null]
                         .filter(Boolean)
@@ -690,14 +691,14 @@ export function RoundsCustomersTable({
                   <RowMenu customer={customer} onAction={openConfirm} />
                 </div>
 
-                <p className="col-span-2 truncate text-sm text-muted-foreground md:col-span-1" title={customer.services.join(', ')}>
+                <p className="pointer-events-none col-span-2 truncate text-sm text-muted-foreground md:col-span-1" title={customer.services.join(', ')}>
                   {servicesLabel(customer)}
                   {customer.agreement_count !== customer.active_agreement_count ? (
                     <span className="text-xs"> · {customer.active_agreement_count} of {customer.agreement_count} active</span>
                   ) : null}
                 </p>
-                <p className="hidden truncate text-sm text-muted-foreground md:block">{firstOf(customer.frequencies)}</p>
-                <div className="col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:contents">
+                <p className="pointer-events-none hidden truncate text-sm text-muted-foreground md:block">{firstOf(customer.frequencies)}</p>
+                <div className="pointer-events-none col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:contents">
                   <div className="md:block">
                     <NextVisit date={customer.next_visit_date} today={today} />
                   </div>

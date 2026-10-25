@@ -52,7 +52,17 @@ export function CustomerPortalCell({
   return (
     <div className="flex items-center gap-2">
       <Tag tone={state.status === 'invited' ? 'amber' : 'slate'}>{state.status === 'invited' ? 'Invited' : 'Not invited'}</Tag>
-      <Button type="button" size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => void send()} disabled={busy}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 px-2.5 text-xs"
+        onClick={(e) => {
+          e.stopPropagation();
+          void send();
+        }}
+        disabled={busy}
+      >
         {busy ? <Loader2 className="size-3 animate-spin" /> : state.status === 'invited' ? 'Resend' : 'Invite'}
       </Button>
     </div>

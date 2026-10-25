@@ -122,11 +122,16 @@ export function CustomerInvitesTable({ invites }: CustomerInvitesTableProps) {
             </TableHeader>
             <TableBody>
               {invites.map((invite) => (
-                <TableRow key={invite.inviteId}>
+                <TableRow
+                  key={invite.inviteId}
+                  onClick={() => router.push(`/customers/${invite.customer.id}`)}
+                  className="cursor-pointer"
+                >
                   <TableCell className="font-medium">
                     <Link
                       href={`/customers/${invite.customer.id}`}
                       className="text-primary hover:underline"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {invite.customer.name || '—'}
                     </Link>
@@ -149,7 +154,7 @@ export function CustomerInvitesTable({ invites }: CustomerInvitesTableProps) {
                       {invite.isExpired ? 'Expired' : 'Pending'}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
