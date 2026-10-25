@@ -187,7 +187,18 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
     }
     setExtraNotice(null);
     setPendingForm(null);
-    toast.success(mode === 'create' ? 'Worker created' : 'Worker updated');
+    const resentTo = (result as { inviteResentTo?: string | null }).inviteResentTo;
+    const resendError = (result as { inviteResendError?: string | null }).inviteResendError;
+    toast.success(
+      mode === 'create'
+        ? 'Worker created'
+        : resentTo
+          ? `Worker updated. A new invitation has gone to ${resentTo}.`
+          : 'Worker updated'
+    );
+    if (resendError) {
+      toast.error(`Saved, but the new invitation didn't send: ${resendError}. Use Resend invite on their page.`);
+    }
     await leaveTo('/workers');
   }
 

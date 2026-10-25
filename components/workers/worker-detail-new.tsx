@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { WorkerAutoAssignToggle } from '@/components/workers/worker-auto-assign-toggle';
 import { WorkerPasswordResetButton } from '@/components/workers/worker-password-reset-button';
 import { WorkerDeactivateButton } from '@/components/workers/worker-delete-button';
+import { WorkerResendInviteButton } from '@/components/workers/worker-resend-invite-button';
 import { JOB_STATUS_DISPLAY, type JobStatusUi } from '@/lib/job-status-display';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +46,9 @@ export type WorkerDetailData = {
   phone: string | null;
   email: string | null;
   userId: string | null;
+  /** Invited but hasn't accepted yet: can't be given jobs until they do. */
+  invitePending: boolean;
+  invite: { id: string; email: string | null; expired: boolean } | null;
   homePostcode: string | null;
   workerType: string | null;
   status: string | null;
@@ -77,7 +81,7 @@ export function WorkerDetailNew({ worker }: { worker: WorkerDetailData }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[28px]">{worker.fullName}</h1>
-              <Tag tone={status.tone}>{status.label}</Tag>
+              {worker.invitePending ? <Tag tone="amber">Pending invite</Tag> : <Tag tone={status.tone}>{status.label}</Tag>}
               {worker.workerType ? <Tag tone="slate">{WORKER_TYPE[worker.workerType] ?? worker.workerType}</Tag> : null}
             </div>
             <p className="mt-0.5 text-sm text-muted-foreground">On the team since {memberSince}</p>
@@ -90,6 +94,21 @@ export function WorkerDetailNew({ worker }: { worker: WorkerDetailData }) {
           </Link>
         </Button>
       </header>
+
+      {worker.invitePending ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-(--tone-amber-solid)/30 bg-(--tone-amber-solid)/10 px-4 py-3">
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold">Waiting for {worker.fullName.split(' ')[0]} to accept their invitation</p>
+            <p className="text-muted-foreground">
+              {worker.invite
+                ? `${worker.invite.expired ? 'The invitation to' : 'Invitation sent to'} ${worker.invite.email ?? worker.email ?? 'their email'}${worker.invite.expired ? ' has run out.' : '.'}`
+                : 'No invitation is open for them.'}{' '}
+              You can give them jobs once they accept.
+            </p>
+          </div>
+          {worker.invite ? <WorkerResendInviteButton inviteId={worker.invite.id} /> : null}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <Kpi
@@ -193,12 +212,24 @@ export function WorkerDetailNew({ worker }: { worker: WorkerDetailData }) {
               <div className="rounded-xl border border-border p-3">
                 <WorkerAutoAssignToggle workerId={worker.id} initialExcluded={worker.excludedFromAutoAssign} />
               </div>
-              <Button variant="outline" className="w-full justify-start" asChild>
-                <Link href={`/jobs/new?worker=${worker.id}`}>
+              {worker.invitePending ? (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  disabled
+                  title="They need to accept their invitation first"
+                >
                   <Briefcase className="mr-2 size-4" aria-hidden="true" />
-                  Assign a new job
-                </Link>
-              </Button>
+                  Assign a new job (after they accept)
+                </Button>
+              ) : (
+                <Button variant="outline" className="w-full justify-start" asChild>
+                  <Link href={`/jobs/new?worker=${worker.id}`}>
+                    <Briefcase className="mr-2 size-4" aria-hidden="true" />
+                    Assign a new job
+                  </Link>
+                </Button>
+              )}
               <Button variant="outline" className="w-full justify-start" asChild>
                 <Link href={`/jobs?worker_id=${worker.id}&status=in_progress`}>
                   <Clock className="mr-2 size-4" aria-hidden="true" />

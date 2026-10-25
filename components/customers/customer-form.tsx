@@ -16,7 +16,7 @@ import {
   type ContactChoice,
 } from '@/lib/messaging/channel';
 import { customerSchema, type CustomerFormInput } from '@/lib/validations/customer';
-import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer } from '@/lib/actions/customers';
+import { createCustomer, createRoundsCustomer, updateCustomer, deleteCustomer, inviteCustomerToPortal } from '@/lib/actions/customers';
 import { setCustomerHouse } from '@/lib/actions/rounds/agreements';
 import { splitHouse } from '@/lib/rounds/house';
 import {
@@ -181,6 +181,22 @@ export function CustomerForm({
         return;
       }
       toast.success(mode === 'create' ? 'Customer created' : 'Customer updated');
+      if ('portalInviteAvailable' in result && result.portalInviteAvailable && customer?.id) {
+        const customerId = customer.id;
+        toast.info('Nothing has been sent to them yet', {
+          description: 'Saving an email does not invite them. Send their portal invite now?',
+          duration: 15000,
+          action: {
+            label: 'Send invite',
+            onClick: () => {
+              void inviteCustomerToPortal(customerId).then((sent) => {
+                if (sent.success) toast.success('Portal invite sent');
+                else toast.error(sent.error ?? 'The invite did not send', { duration: 15000 });
+              });
+            },
+          },
+        });
+      }
       if ('warning' in result && typeof result.warning === 'string') {
         toast.warning(result.warning);
       }

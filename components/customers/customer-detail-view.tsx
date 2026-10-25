@@ -72,6 +72,7 @@ export function CustomerDetailView({
   const [isResending, setIsResending] = useState(false);
   const [canInviteToPortal, setCanInviteToPortal] = useState(false);
   const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
+  const [portalNote, setPortalNote] = useState<{ text: string; problem: boolean } | null>(null);
 
   const isBulk = customer.type === 'bulk_client';
 
@@ -85,13 +86,23 @@ export function CustomerDetailView({
       if (!state.success) {
         setCanInviteToPortal(false);
         setPendingInviteId(null);
+        setPortalNote({ text: `Couldn't check their portal access (${state.error ?? 'unknown error'}). Refresh the page to try again.`, problem: true });
         return;
       }
 
       setPendingInviteId(state.pendingInviteId ?? null);
+      setPortalNote(
+        state.status === 'invited'
+          ? { text: 'Portal: invitation sent, waiting for them to accept it.', problem: false }
+          : state.status === 'active'
+            ? { text: 'Portal: they have access.', problem: false }
+            : state.hasEmail
+              ? { text: 'Portal: not invited yet. Press Invite to Portal to send it.', problem: false }
+              : { text: 'Portal: add an email address (Edit customer) before you can invite them.', problem: true }
+      );
       // Invite when not yet accepted and nothing pending. Resend when pending.
       setCanInviteToPortal(
-        Boolean(state.hasEmail && !state.pendingInviteId && !state.hasAcceptedInvite)
+        Boolean(state.hasEmail && state.status === 'none')
       );
     }
 
@@ -118,7 +129,7 @@ export function CustomerDetailView({
       return;
     }
 
-    toast.error(result.error ?? 'Failed to send portal invite');
+    toast.error(result.error ?? 'Failed to send portal invite', { duration: 15000 });
   };
 
   const handleResendInvite = async () => {
@@ -142,7 +153,7 @@ export function CustomerDetailView({
       return;
     }
 
-    toast.error(result.error ?? 'Failed to resend invitation');
+    toast.error(result.error ?? 'Failed to resend invitation', { duration: 15000 });
   };
 
   return (
@@ -329,6 +340,11 @@ export function CustomerDetailView({
             <h2 className="text-base font-semibold text-foreground">Quick actions</h2>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
+            {portalNote ? (
+              <p className={cn('rounded-lg px-3 py-2 text-sm', portalNote.problem ? 'bg-amber-500/10 text-amber-900 dark:text-amber-200' : 'bg-muted/50 text-muted-foreground')}>
+                {portalNote.text}
+              </p>
+            ) : null}
             <Button variant="outline" className="w-full justify-start gap-2" asChild>
               <Link href={`/customers/${customer.id}/edit`}>
                 <Pencil className="size-4" />

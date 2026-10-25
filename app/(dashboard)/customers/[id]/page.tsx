@@ -25,6 +25,8 @@ import {
 import { getCustomerPortalInviteState } from '@/lib/actions/customers';
 import { usesProCrm, usesRoundsCrm, paths } from '@/lib/navigation/dashboard-paths';
 import { CustomerDetailView } from '@/components/customers/customer-detail-view';
+import { CustomerDetailNew } from '@/components/customers/customer-detail-new';
+import { getTenantLook } from '@/lib/data/tenant-look';
 import { CustomerDeleteButton } from '@/components/customers/customer-delete-button';
 import { CustomerWorkerFieldsCard } from '@/components/customers/customer-worker-fields-card';
 import { RevokeCustomerPortalAccessButton } from '@/components/customers/customers-table';
@@ -365,6 +367,31 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
 
   if (customerError || !customer) {
     redirect(paths.customers);
+  }
+
+  if ((await getTenantLook(products)) === 'new') {
+    return (
+      <div className="space-y-5">
+        <SetBreadcrumbName id={customerId} name={customer.name} />
+        <CustomerDetailNew
+          customer={customer}
+          stats={stats}
+          recentJobs={recentJobs}
+          jobsError={jobsError}
+          portal={
+            portalState.success && portalState.status
+              ? { status: portalState.status, pending: portalState.pending ?? null }
+              : null
+          }
+        />
+        <CustomerWorkerFieldsCard
+          customerId={customerId}
+          initialFields={workerFields.fields}
+          newKeys={workerFields.newKeys}
+          neverConfigured={workerFields.neverConfigured}
+        />
+      </div>
+    );
   }
 
   return (

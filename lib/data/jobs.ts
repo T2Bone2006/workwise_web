@@ -113,7 +113,7 @@ export interface ExportJobRow extends JobRow {
   status_set_at: string | null;
 }
 
-/** Dashboard-style counts for the jobs list summary bar (excludes cancelled). */
+/** Dashboard-style counts for the jobs list summary bar. */
 export interface JobsStatusSummary {
   notStarted: number;
   inProgress: number;
@@ -126,6 +126,8 @@ export interface JobsStatusSummary {
   completed: number;
   /** Report submitted but the work did not get done (`incomplete`). */
   incomplete: number;
+  /** Cancelled by the office (`cancelled`). */
+  cancelled: number;
 }
 
 export async function getJobsStatusSummary(
@@ -146,7 +148,7 @@ export async function getJobsStatusSummary(
     return q;
   };
 
-  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete, cancelled] =
     await Promise.all([
       countStatus('pending'),
       countStatus('in_progress'),
@@ -155,6 +157,7 @@ export async function getJobsStatusSummary(
       countStatus('pending_send'),
       countStatus('completed'),
       countStatus('incomplete'),
+      countStatus('cancelled'),
     ]);
 
   return {
@@ -165,6 +168,7 @@ export async function getJobsStatusSummary(
     readyToSend: readyToSend.count ?? 0,
     completed: completed.count ?? 0,
     incomplete: incomplete.count ?? 0,
+    cancelled: cancelled.count ?? 0,
   };
 }
 
@@ -1576,7 +1580,7 @@ export async function getJobsStatusSummaryForCustomer(
       .eq('customer_id', customerId)
       .eq('status', status);
 
-  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete] =
+  const [notStarted, inProgress, paused, assigned, readyToSend, completed, incomplete, cancelled] =
     await Promise.all([
       countStatus('pending'),
       countStatus('in_progress'),
@@ -1585,6 +1589,7 @@ export async function getJobsStatusSummaryForCustomer(
       countStatus('pending_send'),
       countStatus('completed'),
       countStatus('incomplete'),
+      countStatus('cancelled'),
     ]);
 
   return {
@@ -1595,6 +1600,7 @@ export async function getJobsStatusSummaryForCustomer(
     readyToSend: readyToSend.count ?? 0,
     completed: completed.count ?? 0,
     incomplete: incomplete.count ?? 0,
+    cancelled: cancelled.count ?? 0,
   };
 }
 

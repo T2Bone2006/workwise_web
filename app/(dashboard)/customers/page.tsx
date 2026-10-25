@@ -18,6 +18,7 @@ import {
 import { getRoundsCustomers } from '@/lib/data/rounds/customers';
 import { usesProCrm, usesRoundsCrm } from '@/lib/navigation/dashboard-paths';
 import { CustomersTable } from '@/components/customers/customers-table';
+import type { PortalCellState } from '@/components/customers/customer-portal-cell';
 import { CustomerInvitesTable } from '@/components/customers/customer-invites-table';
 import { CustomerPortalAccessTable } from '@/components/customers/customer-portal-access-table';
 import { InactiveCustomersTable } from '@/components/customers/inactive-customers-table';
@@ -173,6 +174,13 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
     getInactiveCustomersForTenant(tenantId),
   ]);
 
+  // An open invite beats a login row: the login is made when the invite goes out.
+  const portalByCustomer: Record<string, PortalCellState> = {};
+  for (const row of portalCustomers) portalByCustomer[row.id] = { status: 'active', inviteId: null };
+  for (const invite of invites) {
+    portalByCustomer[invite.customer.id] = { status: 'invited', inviteId: invite.inviteId };
+  }
+
   return (
     <div className="space-y-6">
       <PageGradientHeader
@@ -193,6 +201,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
         <TabsContent value="customers" className="mt-0">
           <CustomersTable
             customers={customers}
+            portalByCustomer={portalByCustomer}
             totalCount={totalCount}
             initialFilters={filters}
             fetchError={error}

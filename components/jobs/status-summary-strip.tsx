@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleAlert,
   CircleDashed,
+  XCircle,
   PauseCircle,
   RadioTower,
   UserCheck,
@@ -37,6 +38,8 @@ interface SummaryStripProps {
   className?: string;
   /** Grid column class — Pro uses 7 status pills; Rounds may use fewer. */
   gridClassName?: string;
+  /** New look only: small upright boxes, icon on top, number, then the name underneath. */
+  compact?: boolean;
 }
 
 /**
@@ -51,6 +54,7 @@ export function SummaryStrip({
   hint = '· click a status to filter',
   className,
   gridClassName = 'grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7',
+  compact = false,
 }: SummaryStripProps) {
   const look = useLook();
   if (look === 'new') {
@@ -72,22 +76,38 @@ export function SummaryStrip({
                 aria-pressed={active}
                 title={active ? `Clear ${item.title} filter` : `Show ${item.title}`}
                 className={cn(
-                  'flex min-h-[4rem] min-w-0 items-center gap-3 rounded-2xl border bg-card px-3.5 py-2.5 text-left transition-all',
+                  compact
+                    ? 'flex min-w-0 items-center justify-between gap-1.5 rounded-xl border bg-card px-2.5 py-2 text-left transition-all'
+                    : 'flex min-h-[4rem] min-w-0 items-center gap-3 rounded-2xl border bg-card px-3.5 py-2.5 text-left transition-all',
                   'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
                   active
                     ? cn(tone.edge, tone.soft, 'ring-1 ring-current/10 shadow-(--look-card-shadow)')
                     : 'border-border hover:border-(--tone-slate-solid)/40',
                 )}
               >
-                <IconChip icon={item.icon} tone={item.tone ?? 'slate'} />
-                <span className="min-w-0 flex-1">
-                  <span className={cn('block truncate text-[13px]', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>
-                    {item.title}
+                {compact ? null : <IconChip icon={item.icon} tone={item.tone ?? 'slate'} />}
+                {compact ? (
+                  <>
+                    <IconChip icon={item.icon} tone={item.tone ?? 'slate'} />
+                    <span className="min-w-0 flex-1 text-right">
+                      <span className={cn('block text-xl leading-tight font-semibold tabular-nums', item.tone ? tone.figure : 'text-foreground')}>
+                        {item.count}
+                      </span>
+                      <span className={cn('block truncate text-[11px] leading-tight', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>
+                        {item.title}
+                      </span>
+                    </span>
+                  </>
+                ) : (
+                  <span className="min-w-0 flex-1">
+                    <span className={cn('block truncate text-[13px]', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>
+                      {item.title}
+                    </span>
+                    <span className={cn('block truncate text-xl leading-tight font-semibold tabular-nums', item.tone ? tone.figure : 'text-foreground')}>
+                      {item.count}
+                    </span>
                   </span>
-                  <span className={cn('block truncate text-xl leading-tight font-semibold tabular-nums', item.tone ? tone.figure : 'text-foreground')}>
-                    {item.count}
-                  </span>
-                </span>
+                )}
               </button>
             );
           })}
@@ -191,7 +211,8 @@ export type StatusSummaryKey =
   | 'in_progress'
   | 'paused'
   | 'completed'
-  | 'incomplete';
+  | 'incomplete'
+  | 'cancelled';
 
 export type StatusSummaryCounts = Record<StatusSummaryKey, number>;
 
@@ -200,48 +221,64 @@ const SUMMARY_ITEMS: Array<{
   title: string;
   icon: LucideIcon;
   glow: string;
+  /** The colour a box takes on when it is the active filter (new look). */
+  tone: Tone;
 }> = [
   {
     key: 'pending',
     title: 'Not Started',
     icon: CircleDashed,
     glow: 'rgb(100 116 139)',
+    tone: 'slate',
   },
   {
     key: 'pending_send',
     title: 'Ready to send',
     icon: RadioTower,
     glow: 'rgb(6 182 212)',
+    tone: 'sky',
   },
   {
     key: 'assigned',
     title: 'Assigned',
     icon: UserCheck,
     glow: 'rgb(245 158 11)',
+    tone: 'indigo',
   },
   {
     key: 'in_progress',
     title: 'In Progress',
     icon: Briefcase,
     glow: 'rgb(59 130 246)',
+    tone: 'teal',
   },
   {
     key: 'paused',
     title: 'Paused',
     icon: PauseCircle,
     glow: 'rgb(180 83 9)',
+    tone: 'violet',
   },
   {
     key: 'completed',
     title: 'Completed',
     icon: CheckCircle2,
     glow: 'rgb(16 185 129)',
+    tone: 'emerald',
   },
   {
     key: 'incomplete',
     title: 'Not completed',
     icon: CircleAlert,
     glow: 'rgb(249 115 22)',
+    tone: 'amber',
+  },
+  {
+    key: 'cancelled',
+    title: 'Cancelled',
+    icon: XCircle,
+    glow: 'rgb(225 29 72)',
+    tone: 'rose',
   },
 ];
 
@@ -265,11 +302,14 @@ export function StatusSummaryStrip({
   label = 'Overview',
   className,
 }: StatusSummaryStripProps) {
+  const look = useLook();
   return (
     <SummaryStrip
       className={className}
       label={label}
       activeKey={activeStatus}
+      compact
+      gridClassName={look === 'new' ? 'grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8' : 'grid-cols-2 gap-3 sm:grid-cols-4'}
       onSelect={(key) => onSelect(key as StatusSummaryKey)}
       items={SUMMARY_ITEMS.map((item) => ({
         ...item,

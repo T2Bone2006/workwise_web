@@ -49,6 +49,7 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
       phone,
       email,
       user_id,
+      invite_status,
       home_postcode,
       home_lat,
       home_lng,
@@ -170,6 +171,19 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
     cancelled: { color: 'bg-red-100 text-red-800', label: 'Cancelled' },
   };
 
+  const invitePending = worker.invite_status === 'pending';
+  const { data: openInvite } = invitePending
+    ? await supabase
+        .from('worker_invites')
+        .select('id, email, expires_at')
+        .eq('worker_id', id)
+        .eq('tenant_id', tenantId)
+        .is('used_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ id: string; email: string | null; expires_at: string | null }>()
+    : { data: null };
+
   if ((await getTenantLook(await getTenantProducts())) === 'new') {
     const count = (...statuses: string[]) => jobStats?.filter((j) => statuses.includes(j.status as string)).length ?? 0;
     return (
@@ -180,6 +194,14 @@ export default async function WorkerDetailPage({ params }: WorkerDetailPageProps
           phone: worker.phone,
           email: worker.email,
           userId: worker.user_id,
+          invitePending,
+          invite: openInvite
+            ? {
+                id: openInvite.id,
+                email: openInvite.email,
+                expired: openInvite.expires_at ? new Date(openInvite.expires_at).getTime() < Date.now() : false,
+              }
+            : null,
           homePostcode: worker.home_postcode,
           workerType: worker.worker_type as string | null,
           status: worker.status as string | null,

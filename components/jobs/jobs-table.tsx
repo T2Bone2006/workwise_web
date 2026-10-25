@@ -34,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -193,56 +194,68 @@ function PriorityBadge({ priority }: { priority: JobPriority | null }) {
   );
 }
 
-const SEND_ARM_TIMEOUT_MS = 4000;
-
 /**
- * The "Ready to send" badge, made clickable — but a single tap can't fire a
- * real notification to a worker by accident. First click arms it (badge
- * flips to a distinct "Click to send" state); the SAME click target must be
- * tapped again to actually send. Arming clears itself after a few seconds,
- * or the moment any other row is armed, so a stray armed badge never sits
- * there waiting to be mis-tapped later.
+ * The "Ready to send" badge, made a button you can see is a button. It asks first
+ * ("Send this job to their phone?") in a small box that stays open until you answer,
+ * so a stray tap can't notify a worker, and there is no timer to race.
  */
 function SendJobBadge({
-  jobId,
-  armed,
+  workerName,
   sending,
-  onArm,
   onConfirm,
 }: {
-  jobId: string;
-  armed: boolean;
+  workerName: string | null;
   sending: boolean;
-  onArm: (jobId: string) => void;
-  onConfirm: (jobId: string) => void;
+  onConfirm: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const meta = JOB_STATUS_DISPLAY.pending_send;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button
           type="button"
           disabled={sending}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (armed) onConfirm(jobId);
-            else onArm(jobId);
-          }}
+          onClick={(e) => e.stopPropagation()}
           className={cn(
-            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all',
-            armed
-              ? 'animate-pulse border-cyan-400/70 bg-gradient-to-br from-cyan-500 to-sky-600 text-white shadow-sm'
-              : cn('cursor-pointer hover:brightness-[0.98]', meta?.badgeClass),
+            'inline-flex cursor-pointer items-center gap-1.5 rounded-full border py-0.5 pr-0.5 pl-2.5 text-xs font-medium leading-4 transition-all hover:brightness-[0.97]',
+            meta?.badgeClass,
             sending && 'cursor-wait opacity-70'
           )}
         >
-          {sending ? 'Sending…' : armed ? 'Click to send' : meta?.label}
+          <span>{sending ? 'Sending…' : meta?.label}</span>
+          {sending ? null : (
+            <span className="inline-flex h-4 items-center gap-1 rounded-full bg-cyan-600 px-1.5 text-[10px] leading-none font-semibold text-white">
+              <RadioTower className="size-2.5" aria-hidden="true" />
+              Send
+            </span>
+          )}
         </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-left">
-        {armed ? 'Click again to send this job to the worker now.' : 'Click to send this job now.'}
-      </TooltipContent>
-    </Tooltip>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 space-y-3 p-3" onClick={(e) => e.stopPropagation()}>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">Send this job to {workerName ?? 'the worker'}?</p>
+          <p className="text-xs text-muted-foreground">
+            It goes on their phone in the WorkWise app straight away and they get a notification.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="flex-1"
+            onClick={() => {
+              setOpen(false);
+              onConfirm();
+            }}
+          >
+            Send now
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1" onClick={() => setOpen(false)}>
+            Not yet
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -391,9 +404,7 @@ export function JobsTable({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const [armedSendId, setArmedSendId] = useState<string | null>(null);
   const [sendingSingleId, setSendingSingleId] = useState<string | null>(null);
-  const armedSendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendSelectedOpen, setSendSelectedOpen] = useState(false);
   const [isSendingSelected, setIsSendingSelected] = useState(false);
   const [sendGroup, setSendGroup] = useState<{ label: string; jobIds: string[] } | null>(null);
@@ -549,23 +560,7 @@ export function JobsTable({
   const allDeletableSelected =
     deletableJobs.length > 0 && deletableJobs.every((j) => selectedIds.has(j.id));
 
-  const armSend = (jobId: string) => {
-    if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
-    setArmedSendId(jobId);
-    armedSendTimeoutRef.current = setTimeout(() => {
-      setArmedSendId((current) => (current === jobId ? null : current));
-    }, SEND_ARM_TIMEOUT_MS);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
-    };
-  }, []);
-
   const confirmSend = async (jobId: string) => {
-    if (armedSendTimeoutRef.current) clearTimeout(armedSendTimeoutRef.current);
-    setArmedSendId(null);
     setSendingSingleId(jobId);
     try {
       const result = await sendPendingJobsToWorkers([jobId]);
@@ -1073,6 +1068,7 @@ export function JobsTable({
     paused: statusSummary.paused,
     completed: statusSummary.completed,
     incomplete: statusSummary.incomplete,
+    cancelled: statusSummary.cancelled,
   };
 
   const activeStatusFilter =
@@ -2245,11 +2241,9 @@ export function JobsTable({
                             <TableCell className="whitespace-normal">
                               {rowStatus === 'pending_send' && showOfficeTools ? (
                                 <SendJobBadge
-                                  jobId={job.id}
-                                  armed={armedSendId === job.id}
+                                  workerName={job.worker_name ?? null}
                                   sending={sendingSingleId === job.id}
-                                  onArm={armSend}
-                                  onConfirm={(id) => void confirmSend(id)}
+                                  onConfirm={() => void confirmSend(job.id)}
                                 />
                               ) : (
                                 <div className="flex flex-col items-start gap-1">

@@ -274,7 +274,7 @@ export async function updateCustomer(customerId: string, formData: FormData) {
 
   const { data: existing } = await supabase
     .from('customers')
-    .select('id, tenant_id')
+    .select('id, tenant_id, email')
     .eq('id', customerId)
     .single();
 
@@ -324,7 +324,19 @@ export async function updateCustomer(customerId: string, formData: FormData) {
   revalidatePath(`/customers/${customerId}/edit`);
   revalidatePath('/customers');
   revalidatePath(`/customers/${customerId}`);
-  return { success: true };
+
+  // Saving an email never sends anything. If this one is new and they have no portal access or
+  // open invite, say so, so the form can offer to send the invite there and then.
+  const newEmail = validated.email?.trim().toLowerCase() ?? '';
+  const oldEmail = (existing.email ?? '').trim().toLowerCase();
+  let portalInviteAvailable = false;
+  if (newEmail && newEmail !== oldEmail) {
+    const state = await getCustomerPortalInviteState(customerId);
+    portalInviteAvailable = Boolean(
+      state.success && state.status === 'none'
+    );
+  }
+  return { success: true, portalInviteAvailable };
 }
 
 export async function deleteCustomer(customerId: string) {
@@ -565,6 +577,8 @@ export async function getCustomerActiveJobCount(customerId: string): Promise<num
   return count ?? 0;
 }
 
+export type PortalStatus = 'none' | 'invited' | 'active';
+
 export async function getCustomerPortalInviteState(customerId: string) {
   const supabase = await createClient();
 
@@ -652,13 +666,13 @@ export async function getCustomerPortalInviteState(customerId: string) {
   const inviteClient = admin ?? supabase;
   const { data: pendingInvite } = await inviteClient
     .from('customer_invites')
-    .select('id')
+    .select('id, email, created_at, expires_at')
     .eq('customer_id', customerId)
     .eq('tenant_id', userData.tenant_id)
     .is('used_at', null)
     .order('created_at', { ascending: false })
     .limit(1)
-    .maybeSingle<{ id: string }>();
+    .maybeSingle<{ id: string; email: string | null; created_at: string; expires_at: string | null }>();
 
   const { data: acceptedInvite } = await inviteClient
     .from('customer_invites')
@@ -669,11 +683,26 @@ export async function getCustomerPortalInviteState(customerId: string) {
     .limit(1)
     .maybeSingle<{ id: string }>();
 
+  // The login row is made the moment an invite goes out, so "has a login" alone doesn't mean they
+  // accepted: an open invite wins. Revoking access removes the login, which is why an old accepted
+  // invite must not count either (it used to stop anyone being invited again).
+  const status: PortalStatus = pendingInvite ? 'invited' : portalLink?.user_id ? 'active' : 'none';
+
   return {
     success: true,
+    status,
+    email: customer.email,
     hasEmail: !!customer.email,
     hasPortalUser: !!portalLink?.user_id,
     pendingInviteId: pendingInvite?.id ?? null,
+    pending: pendingInvite
+      ? {
+          id: pendingInvite.id,
+          email: pendingInvite.email,
+          createdAt: pendingInvite.created_at,
+          expired: pendingInvite.expires_at ? new Date(pendingInvite.expires_at).getTime() < Date.now() : false,
+        }
+      : null,
     hasAcceptedInvite: !!acceptedInvite,
   };
 }
@@ -697,8 +726,14 @@ async function ensurePortalAuthUser(
       .maybeSingle<{ role: string | null }>();
 
     if (profile?.role && profile.role !== 'customer_portal') {
+      const who =
+        profile.role === 'worker'
+          ? 'a worker login'
+          : profile.role === 'owner' || profile.role === 'admin'
+            ? 'a login for running a WorkWise business'
+            : `a ${profile.role} login`;
       return {
-        error: `This email is already used by a ${profile.role} account and cannot be invited to the portal.`,
+        error: `${email} is already ${who}, so it can't also be a customer login. Use a different email address for this customer, then send the invite again.`,
       };
     }
 

@@ -31,6 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { CustomerPortalCell, type PortalCellState } from '@/components/customers/customer-portal-cell';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -155,6 +156,8 @@ export function RevokeCustomerPortalAccessButton({ customerId }: { customerId: s
 
 export interface CustomersTableProps {
   customers: CustomerListRow[];
+  /** Where each customer stands with the portal; one missing from here has not been invited. */
+  portalByCustomer?: Record<string, PortalCellState>;
   totalCount: number;
   initialFilters: CustomersListFilters & { page?: number };
   fetchError: Error | null;
@@ -162,6 +165,7 @@ export interface CustomersTableProps {
 
 export function CustomersTable({
   customers,
+  portalByCustomer = {},
   totalCount,
   initialFilters,
   fetchError,
@@ -434,6 +438,7 @@ export function CustomersTable({
                       </button>
                     </TableHead>
                     <TableHead>Phone</TableHead>
+                    <TableHead>Portal</TableHead>
                     <TableHead>
                       <button
                         type="button"
@@ -496,6 +501,13 @@ export function CustomersTable({
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <CustomerPortalCell
+                          customerId={row.id}
+                          hasEmail={Boolean(row.email)}
+                          state={portalByCustomer[row.id] ?? { status: 'none', inviteId: null }}
+                        />
                       </TableCell>
                       <TableCell>
                         {row.job_count > 0 ? (

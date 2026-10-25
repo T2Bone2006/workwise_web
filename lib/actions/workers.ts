@@ -149,7 +149,7 @@ export async function updateWorker(workerId: string, formData: FormData) {
 
   const { data: existing } = await supabase
     .from('workers')
-    .select('id, primary_tenant_id')
+    .select('id, primary_tenant_id, email, invite_status')
     .eq('id', workerId)
     .single();
 
@@ -203,9 +203,32 @@ export async function updateWorker(workerId: string, formData: FormData) {
     return { success: false, error: error.message };
   }
 
+  // A worker who hasn't accepted yet is waiting on an email at the old address: changing it
+  // sends a fresh invitation to the new one (the old link stops working).
+  let inviteResentTo: string | null = null;
+  let inviteResendError: string | null = null;
+  const newEmail = validated.email?.trim().toLowerCase() ?? '';
+  const oldEmail = (existing.email ?? '').trim().toLowerCase();
+  if (existing.invite_status === 'pending' && newEmail && newEmail !== oldEmail) {
+    const { data: openInvite } = await supabase
+      .from('worker_invites')
+      .select('id')
+      .eq('worker_id', workerId)
+      .eq('tenant_id', userData.tenant_id)
+      .is('used_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+    if (openInvite) {
+      const resent = await resendWorkerInvite(openInvite.id);
+      if (resent.success) inviteResentTo = newEmail;
+      else inviteResendError = resent.error ?? 'Could not send the new invitation';
+    }
+  }
+
   revalidatePath('/workers');
   revalidatePath(`/workers/${workerId}`);
-  return { success: true };
+  return { success: true, inviteResentTo, inviteResendError };
 }
 
 export async function updateWorkerAutoAssign(workerId: string, exclude: boolean) {

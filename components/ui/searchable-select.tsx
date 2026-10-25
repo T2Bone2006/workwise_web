@@ -114,6 +114,7 @@ export function SearchableSelect({
             className
           )}
           disabled={disabled}
+          title={selectedOption?.label}
         >
           <span className="line-clamp-1 flex items-center gap-2">
             {selectedOption?.label ?? placeholder}
@@ -151,6 +152,7 @@ export function SearchableSelect({
                   <CommandPrimitive.Item
                     key={option.value}
                     value={option.value}
+                    title={option.label}
                     onSelect={() => {
                       onValueChange(option.value)
                       handleOpenChange(false)
