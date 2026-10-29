@@ -98,6 +98,7 @@ import { cn } from '@/lib/utils';
 import { BatchesView } from '@/components/jobs/batches-view';
 import { BatchesCustomerView } from '@/components/jobs/batches-customer-view';
 import { ExportJobsButton } from '@/components/jobs/export-jobs-button';
+import { PortalExportButton } from '@/components/portal/portal-export-button';
 import { JobsDateRangeFilter } from '@/components/jobs/jobs-date-range-filter';
 import { JobsColumnsPicker } from '@/components/jobs/jobs-columns-picker';
 import { updateJobsListColumns } from '@/lib/actions/jobs-columns';
@@ -1347,6 +1348,9 @@ export function JobsTable({
                           : undefined
                       }
                     />
+                  )}
+                  {isPortalView && !isBrowsingBatchesGrid && (
+                    <PortalExportButton filters={initialFilters} disabled={initialJobs.length === 0} />
                   )}
                   {showOfficeTools && (
                     <ExportJobsButton

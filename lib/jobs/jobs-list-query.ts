@@ -109,7 +109,7 @@ export function getRememberedPortalJobsListHref(): string {
   return rememberedListHref(
     PORTAL_JOBS_LIST_QUERY_KEY,
     PORTAL_JOBS_LIST_FILTERS_KEY,
-    '/portal'
+    '/portal/jobs'
   );
 }
 

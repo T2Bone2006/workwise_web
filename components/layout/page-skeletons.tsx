@@ -1107,6 +1107,36 @@ export function PortalHomeSkeleton() {
   );
 }
 
+export function PortalOverviewSkeleton() {
+  return (
+    <LoadingScreen label="Loading your overview">
+      <HeaderSkeleton eyebrow title="w-32" subtitle="w-96" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {slots(4).map((i) => (
+          <Panel key={i} className="h-28" />
+        ))}
+      </div>
+      <Panel className="h-64" />
+    </LoadingScreen>
+  );
+}
+
+export function PortalAttentionSkeleton() {
+  return (
+    <LoadingScreen label="Loading jobs that need attention">
+      <HeaderSkeleton eyebrow title="w-40" subtitle="w-72" />
+      <div className="flex gap-2">
+        {slots(3).map((i) => (
+          <Skeleton key={i} className="h-9 w-28 rounded-full" />
+        ))}
+      </div>
+      {slots(4).map((i) => (
+        <Panel key={i} className="h-28" />
+      ))}
+    </LoadingScreen>
+  );
+}
+
 export function PortalJobDetailSkeleton() {
   return (
     <LoadingScreen label="Loading job">
@@ -1180,7 +1210,9 @@ export function skeletonForPath(pathname: string): ReactNode {
   const path = pathname.replace(/\/$/, '') || '/';
 
   if (path === '/dashboard' || path === '/rounds') return <JobsDaySkeleton />;
-  if (path === '/portal') return <PortalHomeSkeleton />;
+  if (path === '/portal') return <PortalOverviewSkeleton />;
+  if (path === '/portal/jobs') return <PortalHomeSkeleton />;
+  if (path === '/portal/attention') return <PortalAttentionSkeleton />;
   if (path === '/jobs') return <JobsListSkeleton />;
   if (path === '/jobs/calendar') return <WeekCalendarSkeleton />;
   if (path === '/jobs/new') return <FormPageSkeleton title="w-28" subtitle="w-56" />;

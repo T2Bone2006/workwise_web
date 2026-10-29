@@ -1,0 +1,245 @@
+import { Suspense } from 'react';
+import { Lock } from 'lucide-react';
+import { redirect } from 'next/navigation';
+import { LookPage } from '@/components/look';
+import { TenantSelector } from '@/components/portal/tenant-selector';
+import { PageGradientHeader } from '@/components/layout/page-gradient-header';
+import { getPortalAccess } from '@/lib/data/portal';
+import { EmptyState } from '@/components/look/empty-state';
+import { JobsTableBlock } from '@/components/layout/page-skeletons';
+import { JobsTable } from '@/components/jobs/jobs-table';
+import {
+  getJobsForCustomer,
+  getJobsStatusSummaryForCustomer,
+  getSourceFieldKeysForCustomer,
+  getFieldFilterValuesForCustomer,
+  getImportBatchesForCustomer,
+  type JobsFilters,
+  type JobStatus,
+  type JobPriority,
+} from '@/lib/data/jobs';
+import {
+  SYSTEM_FILTER_FIELDS,
+  encodeSourceFieldFilter,
+  parseFieldFiltersFromSearchParams,
+  type FieldFilterValueOption,
+} from '@/lib/jobs/field-filter';
+import type { JobsListColumnKey } from '@/lib/data/settings-types';
+
+const PORTAL_COLUMNS: JobsListColumnKey[] = [
+  'address',
+  'postcode',
+  'scheduled',
+  'priority',
+  'status',
+];
+
+const PORTAL_SYSTEM_FILTERS = SYSTEM_FILTER_FIELDS.filter(
+  (f) => f.key === 'status' || f.key === 'priority' || f.key === 'postcode'
+);
+
+const VALID_STATUS = [
+  'pending',
+  'accepted',
+  'pending_send',
+  'assigned',
+  'in_progress',
+  'paused',
+  'completed',
+  'cancelled',
+  'incomplete',
+  'declined',
+] as JobStatus[];
+const VALID_PRIORITY: JobPriority[] = ['low', 'normal', 'high', 'emergency'];
+
+interface PortalPageProps {
+  searchParams: Promise<{
+    tenant?: string;
+    search?: string;
+    status?: string;
+    priority?: string;
+    date_from?: string;
+    date_to?: string;
+    page?: string;
+    sort?: string;
+    sort_dir?: string;
+    group?: string;
+    batchId?: string;
+    field?: string;
+    value?: string;
+    f0?: string;
+    v0?: string;
+    f1?: string;
+    v1?: string;
+    f2?: string;
+    v2?: string;
+    f3?: string;
+    v3?: string;
+    f4?: string;
+    v4?: string;
+  }>;
+}
+
+function parsePortalSearchParams(
+  raw: Awaited<PortalPageProps['searchParams']>
+): JobsFilters & { page?: number } {
+  const statusRaw = raw.status?.trim();
+  const status: JobStatus | JobStatus[] | undefined = statusRaw
+    ? statusRaw.includes(',')
+      ? (statusRaw.split(',').filter((s) => VALID_STATUS.includes(s as JobStatus)) as JobStatus[])
+      : VALID_STATUS.includes(statusRaw as JobStatus)
+        ? (statusRaw as JobStatus)
+        : undefined
+    : undefined;
+  const priority =
+    raw.priority && VALID_PRIORITY.includes(raw.priority as JobPriority)
+      ? (raw.priority as JobPriority)
+      : undefined;
+  const page = raw.page ? Math.max(1, parseInt(raw.page, 10) || 1) : undefined;
+  const sort =
+    raw.sort === 'reference_number' ||
+    raw.sort === 'status' ||
+    raw.sort === 'priority' ||
+    raw.sort === 'scheduled_date' ||
+    raw.sort === 'created_at'
+      ? raw.sort
+      : undefined;
+  const sort_dir = raw.sort_dir === 'asc' || raw.sort_dir === 'desc' ? raw.sort_dir : undefined;
+  const field_filters = parseFieldFiltersFromSearchParams(raw);
+  return {
+    search: raw.search?.trim() || undefined,
+    status,
+    priority,
+    job_group_id: raw.group?.trim() || undefined,
+    date_from: raw.date_from?.trim() || undefined,
+    date_to: raw.date_to?.trim() || undefined,
+    field_filters: field_filters.length > 0 ? field_filters : undefined,
+    sort,
+    sort_dir,
+    page,
+  };
+}
+
+export default async function PortalJobsPage({ searchParams }: PortalPageProps) {
+  const raw = await searchParams;
+  const access = await getPortalAccess(raw.tenant);
+
+  if (access.status === 'signed_out') redirect('/login');
+
+  if (access.status === 'none') {
+    return (
+      <div className="space-y-5">
+        <PageGradientHeader
+          title="Jobs"
+          subtitle="Track the status of work raised with your service provider."
+        />
+        <EmptyState
+          icon={Lock}
+          title="No access"
+          body="Your account is not linked to any customer portal. Contact your service provider if you believe this is an error."
+        />
+      </div>
+    );
+  }
+
+  const tenantOptions = access.options;
+  const selectedCustomerId = access.customerId;
+  const selectedTenantName = access.tenantName;
+
+  let filters: JobsFilters & { page?: number };
+  try {
+    filters = parsePortalSearchParams(raw);
+  } catch (paramErr) {
+    console.error('[PortalPage] searchParams parse error:', paramErr);
+    filters = {};
+  }
+
+  const activeBatchId = raw.batchId?.trim() || null;
+
+  const [statusSummary, sourceKeysResult, batchesResult] = await Promise.all([
+    getJobsStatusSummaryForCustomer(selectedCustomerId),
+    getSourceFieldKeysForCustomer(selectedCustomerId),
+    getImportBatchesForCustomer(selectedCustomerId),
+  ]);
+
+  const batches = batchesResult.error ? [] : batchesResult.batches;
+  const activeBatch = activeBatchId
+    ? batches.find((batch) => batch.id === activeBatchId) ?? null
+    : null;
+
+  const jobsFilters: JobsFilters & { page?: number } = {
+    ...filters,
+    customer_id: selectedCustomerId,
+    job_ids:
+      activeBatchId && activeBatchId !== 'ungrouped'
+        ? (activeBatch?.job_ids ?? [])
+        : undefined,
+  };
+
+  const { jobs, totalCount, error } = await getJobsForCustomer(
+    selectedCustomerId,
+    jobsFilters
+  );
+
+  const fieldFilterOptions = [
+    ...PORTAL_SYSTEM_FILTERS.map((f) => ({
+      value: f.key,
+      label: f.label,
+      group: 'System',
+    })),
+    ...(sourceKeysResult.keys ?? []).map((key) => ({
+      value: encodeSourceFieldFilter(key),
+      label: key,
+      group: 'Stored fields',
+    })),
+  ];
+
+  let fieldFilterValuesByField: Record<string, FieldFilterValueOption[]> = {};
+  const fieldsNeedingValues = [
+    ...new Set((jobsFilters.field_filters ?? []).map((f) => f.field)),
+  ];
+  if (fieldsNeedingValues.length > 0) {
+    const entries = await Promise.all(
+      fieldsNeedingValues.map(async (field) => {
+        const valuesResult = await getFieldFilterValuesForCustomer(
+          selectedCustomerId,
+          field
+        );
+        return [field, valuesResult.values] as const;
+      })
+    );
+    fieldFilterValuesByField = Object.fromEntries(entries);
+  }
+
+  return (
+    <LookPage
+      title="Jobs"
+      subtitle={`Everything raised with ${selectedTenantName}.`}
+      actions={
+        tenantOptions.length > 1 ? (
+          <TenantSelector options={tenantOptions} selectedCustomerId={selectedCustomerId} />
+        ) : undefined
+      }
+    >
+      <Suspense fallback={<JobsTableBlock filters={2} labelled />}>
+        <JobsTable
+          key={selectedCustomerId}
+          variant="portal"
+          basePath="/portal/jobs"
+          initialJobs={Array.isArray(jobs) ? jobs : []}
+          totalCount={typeof totalCount === 'number' ? totalCount : 0}
+          initialFilters={jobsFilters}
+          fetchError={error}
+          statusSummary={statusSummary}
+          batches={batches}
+          activeBatchId={activeBatchId}
+          fieldFilterOptions={fieldFilterOptions}
+          fieldFilterValuesByField={fieldFilterValuesByField}
+          initialVisibleColumns={PORTAL_COLUMNS}
+          importHeaders={sourceKeysResult.keys ?? []}
+          workers={[]}
+        />
+      </Suspense>
+    </LookPage>
+  );
+}

@@ -43,6 +43,8 @@ const UNPROTECTED_PATHS = [
   // Phase 6: one-tap Accept / Decline / Change price from the new-lead email or text.
   // The link token is the only credential; opening it must not bounce to /login.
   '/lead',
+  // Local design preview of the customer portal with made-up data. The page itself 404s in production.
+  ...(process.env.NODE_ENV === 'production' ? [] : ['/design-preview']),
 ] as const;
 
 function isUnprotectedPath(pathname: string): boolean {

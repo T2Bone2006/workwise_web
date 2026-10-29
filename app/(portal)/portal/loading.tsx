@@ -1,5 +1,5 @@
-import { PortalHomeSkeleton } from '@/components/layout/page-skeletons';
+import { PortalOverviewSkeleton } from '@/components/layout/page-skeletons';
 
 export default function Loading() {
-  return <PortalHomeSkeleton />;
+  return <PortalOverviewSkeleton />;
 }

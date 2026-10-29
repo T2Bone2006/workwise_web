@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -22,6 +22,7 @@ interface TenantSelectorProps {
 
 export function TenantSelector({ options, selectedCustomerId }: TenantSelectorProps) {
   const router = useRouter();
+  const pathname = usePathname();
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -31,7 +32,8 @@ export function TenantSelector({ options, selectedCustomerId }: TenantSelectorPr
       <Select
         value={selectedCustomerId}
         onValueChange={(customerId) => {
-          router.push(`/portal?tenant=${customerId}`);
+          // Stay on the same page, so switching provider keeps you where you were.
+          router.push(`${pathname}?tenant=${customerId}`);
         }}
       >
         <SelectTrigger id="portal-tenant-select" className="w-full sm:w-[240px]">

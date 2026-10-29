@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { leaveTo } from '@/lib/navigation/leave-to';
 import { useTheme } from 'next-themes';
-import { Briefcase, ChevronsUpDown, LogOut, Menu, Moon, Sun } from 'lucide-react';
-import { PortalProCard } from '@/components/portal/portal-pro-card';
+import { Briefcase, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Moon, Sun, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { Avatar } from '@/components/look/avatar';
 import { LookAttribute } from '@/components/look/look-attribute';
 import { LookProvider } from '@/components/look/use-look';
@@ -36,6 +35,15 @@ const emptySubscribe = () => () => {};
 function useHydrated(): boolean {
   return useSyncExternalStore(emptySubscribe, () => true, () => false);
 }
+
+/** The printable job report fills the page on its own, without the sidebar. */
+const REPORT_PATH = /^\/portal\/jobs\/[^/]+\/report\/?$/;
+
+const NAV: Array<{ href: string; label: string; icon: LucideIcon; match: (pathname: string) => boolean }> = [
+  { href: '/portal', label: 'Overview', icon: LayoutDashboard, match: (p) => p === '/portal' },
+  { href: '/portal/attention', label: 'Needs attention', icon: TriangleAlert, match: (p) => p.startsWith('/portal/attention') },
+  { href: '/portal/jobs', label: 'Jobs', icon: Briefcase, match: (p) => p.startsWith('/portal/jobs') },
+];
 
 function isAuthPath(pathname: string): boolean {
   return AUTH_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
@@ -120,7 +128,6 @@ function PortalFrame({
   className?: string;
 }) {
   const pathname = usePathname();
-  const jobsActive = pathname === '/portal' || pathname.startsWith('/portal/jobs');
 
   return (
     <div className={cn('flex h-full shrink-0 flex-col', className)}>
@@ -132,25 +139,28 @@ function PortalFrame({
         </div>
       </div>
 
-      <nav className="mt-6 flex min-h-0 flex-1 flex-col overflow-y-auto px-3" aria-label="Portal">
-        <Link
-          href="/portal"
-          onClick={onNavigate}
-          aria-current={jobsActive ? 'page' : undefined}
-          className={cn(
-            'flex items-center gap-3 rounded-xl px-[15.5px] py-2.5 text-sm font-medium transition-colors',
-            'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-            jobsActive
-              ? 'bg-(--look-rounds-pill) text-white'
-              : 'text-sidebar-foreground/80 hover:bg-muted hover:text-foreground',
-          )}
-        >
-          <Briefcase className="size-[17px] shrink-0" aria-hidden />
-          Your jobs
-        </Link>
-        <div className="mt-auto pt-3">
-          <PortalProCard onNavigate={onNavigate} />
-        </div>
+      <nav className="mt-6 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3" aria-label="Portal">
+        {NAV.map((item) => {
+          const active = item.match(pathname);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex items-center gap-3 rounded-xl px-[15.5px] py-2.5 text-sm font-medium transition-colors',
+                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                active
+                  ? 'bg-(--look-rounds-pill) text-white'
+                  : 'text-sidebar-foreground/80 hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <item.icon className="size-[17px] shrink-0" aria-hidden />
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="shrink-0 border-t border-sidebar-border p-3">
@@ -176,7 +186,7 @@ function PortalTopbar({
 }) {
   const pathname = usePathname();
   const crumbs = crumbsForPath(pathname);
-  const title = crumbs.at(-1)?.label ?? 'Your jobs';
+  const title = crumbs.at(-1)?.label ?? 'Overview';
   const subtitle = crumbs.length > 1 ? crumbs[0]?.label : 'Customer portal';
 
   return (
@@ -207,20 +217,21 @@ function PortalTopbar({
 export function PortalShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const auth = isAuthPath(pathname);
+  const report = REPORT_PATH.test(pathname);
   const [openOnPath, setOpenOnPath] = useState<string | null>(null);
   const mobileOpen = openOnPath === pathname;
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    if (auth) return;
+    if (auth || report) return;
     const supabase = createBrowserClient();
     void supabase.auth.getUser().then(({ data: { user } }) => {
       setEmail(user?.email ?? null);
     });
-  }, [auth]);
+  }, [auth, report]);
 
   useEffect(() => {
-    if (auth) return;
+    if (auth || report) return;
     const html = document.documentElement;
     const body = document.body;
     const previous = {
@@ -233,13 +244,17 @@ export function PortalShell({ children }: { children: ReactNode }) {
       html.style.overflow = previous.htmlOverflow;
       body.style.overflow = previous.bodyOverflow;
     };
-  }, [auth]);
+  }, [auth, report]);
 
   return (
     <LookProvider value="new">
       <LookAttribute look="new" />
       {auth ? (
         children
+      ) : report ? (
+        <div data-look="new" className="min-h-screen bg-background text-foreground">
+          {children}
+        </div>
       ) : (
         <div data-look="new" className="fixed inset-0 flex overflow-clip bg-background text-foreground">
           <aside className="hidden shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">

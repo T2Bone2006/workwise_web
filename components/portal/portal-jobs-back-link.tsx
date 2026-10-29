@@ -6,7 +6,7 @@ import { getRememberedPortalJobsListHref } from '@/lib/jobs/jobs-list-query';
 export function PortalJobsBackLink() {
   return (
     <HistoryBackButton
-      label="Back to all jobs"
+      label="Back"
       fallbackHref={getRememberedPortalJobsListHref()}
       className="text-muted-foreground"
     />

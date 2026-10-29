@@ -75,10 +75,11 @@ export function crumbsForPath(pathname: string): Crumb[] {
   const [root, a, b, c, d] = parts;
 
   if (root === 'portal') {
-    const home: Crumb = { label: 'Your jobs', href: '/portal' };
-    if (a === 'jobs' && b) return [home, { label: 'Job' }];
-    if (a === 'pro') return [home, { label: 'WorkWise Pro' }];
-    return [{ label: 'Your jobs' }];
+    const jobs: Crumb = { label: 'Jobs', href: '/portal/jobs' };
+    if (a === 'jobs' && b) return [jobs, { label: 'Job' }];
+    if (a === 'jobs') return [{ label: 'Jobs' }];
+    if (a === 'attention') return [{ label: 'Needs attention' }];
+    return [{ label: 'Overview' }];
   }
 
   const section = SECTION[root];
@@ -148,6 +149,8 @@ export function crumbsForPath(pathname: string): Crumb[] {
     if (a === 'ai-analytics') return [home, { label: 'AI analytics' }];
     return [{ label: section }];
   }
+
+  if (root === 'calendar' && a === 'done') return [home, { label: 'Mark remaining done' }];
 
   if (parts.length === 1) return [{ label: section }];
   return [home, { label: parts.slice(1).join(' / ') }];
