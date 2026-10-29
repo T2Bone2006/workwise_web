@@ -56,6 +56,24 @@ export const completeVisitSchema = z.object({
 export type CompleteVisitInput = z.input<typeof completeVisitSchema>;
 export type CompleteVisitValues = z.output<typeof completeVisitSchema>;
 
+export const completeRemainingSchema = z.object({
+  date: z.string().refine(isValidYmd, { message: 'Invalid date' }),
+  rows: z
+    .array(
+      z.object({
+        jobId: z.string().uuid('Invalid job'),
+        cashAmount: moneyAmountSchema.nullable(),
+        sendMessage: z.boolean(),
+        sendInvoice: z.boolean(),
+      }),
+    )
+    .min(1, 'Nothing to mark')
+    .max(200),
+});
+
+export type CompleteRemainingInput = z.input<typeof completeRemainingSchema>;
+export type CompleteRemainingValues = z.output<typeof completeRemainingSchema>;
+
 export const reorderDaySchema = z.object({
   date: z.string().refine(isValidYmd, { message: 'Invalid date' }),
   jobIds: z.array(z.string().uuid('Invalid job')).min(1),

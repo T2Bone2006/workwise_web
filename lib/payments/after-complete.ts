@@ -15,6 +15,8 @@ export async function afterVisitCompleted(
     jobId: string;
     customerId: string | null;
     sendInvoice: boolean | null | undefined;
+    /** False skips the "we've been" message. The single Done button leaves this on. */
+    sendNotice?: boolean;
   },
 ): Promise<void> {
   try {
@@ -28,6 +30,8 @@ export async function afterVisitCompleted(
   } catch (err) {
     console.error('[afterVisitCompleted] sendInvoice', p.jobId, err);
   }
+
+  if (p.sendNotice === false) return;
 
   try {
     await sendVisitDoneNotice(supabase, { tenantId: p.tenantId, jobId: p.jobId });

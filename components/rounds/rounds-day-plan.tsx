@@ -7,8 +7,11 @@ import { addDays, format, parseISO, subDays } from 'date-fns';
 import {
   ArrowDown,
   ArrowUp,
+  CalendarDays,
+  Check,
   ChevronLeft,
   ChevronRight,
+  CircleOff,
   GripVertical,
   Loader2,
   Plus,
@@ -63,6 +66,7 @@ import { groupIntoLanes, personColours, type LanePerson } from '@/lib/rounds/lan
 import { cn } from '@/lib/utils';
 import { formatGbp } from '@/lib/money/pence';
 import { summariseToday } from '@/lib/rounds/today-strip';
+import { isRemainingVisit } from '@/lib/rounds/remaining-plan';
 import { VisitStopCard } from '@/components/rounds/visit-stop-card';
 
 function toYmd(date: Date): Ymd {
@@ -70,12 +74,7 @@ function toYmd(date: Date): Ymd {
 }
 
 function isLeftover(status: string): boolean {
-  return ![
-    'completed',
-    'cancelled',
-    'declined',
-    'incomplete',
-  ].includes(status);
+  return isRemainingVisit(status);
 }
 
 function repliesToReview(visits: VisitRow[]): number {
@@ -324,8 +323,6 @@ export function RoundsDayPlan({
     if (ids.length === 0) return;
     requestGive(ids, person, group[0]!.address.split(',')[0] ?? 'the visit');
   };
-
-  const toolbarName = (own: string, all: string) => (team ? (activeFocus ? `${activeFocus.name === 'You' ? 'your' : `${activeFocus.name}'s`} ${own}` : `everyone's ${all}`) : null);
 
   /** One house-card, with its drag handle, order arrows and (with a team) who has it and a Give to… menu. */
   const renderGroups = (list: VisitRow[], compact = false) => {
@@ -582,6 +579,12 @@ export function RoundsDayPlan({
         <div className="flex flex-wrap items-center gap-2">
           {leftovers.length > 0 ? (
             <>
+              <Button size="sm" asChild>
+                <Link href={`/calendar/done?date=${date}${activeFocus ? `&person=${activeFocus.workerId}` : ''}`}>
+                  <Check />
+                  Mark houses done
+                </Link>
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -590,7 +593,8 @@ export function RoundsDayPlan({
                   setMoveOpen(true);
                 }}
               >
-                {team ? `Move ${toolbarName('remaining', 'remaining')}` : 'Move remaining'} ({leftovers.length})
+                <CalendarDays />
+                Move to another day
               </Button>
               <Button
                 variant="outline"
@@ -600,34 +604,26 @@ export function RoundsDayPlan({
                   setSkipOpen(true);
                 }}
               >
-                {team ? `Skip ${toolbarName('remaining', 'remaining')}` : 'Skip remaining'} ({leftovers.length})
+                <CircleOff />
+                Skip what's left
               </Button>
             </>
           ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void runOptimise(activeFocus)}
-            disabled={optimising || leftovers.length < 2}
-          >
-            {optimising ? (
-              <Loader2 className="mr-1.5 size-4 animate-spin" />
-            ) : (
-              <Route className="mr-1.5 size-4" />
-            )}
-            {team ? `Optimise ${activeFocus ? (activeFocus.name === 'You' ? 'your' : `${activeFocus.name}'s`) : "everyone's"} route${activeFocus ? '' : 's'}` : 'Optimise'}
-          </Button>
+          {leftovers.length >= 2 ? (
+            <Button variant="outline" size="sm" onClick={() => void runOptimise(activeFocus)} disabled={optimising}>
+              {optimising ? <Loader2 className="animate-spin" /> : <Route />}
+              Shortest route
+            </Button>
+          ) : null}
           {orderDirty ? (
             <Button size="sm" onClick={() => void saveOrder()} disabled={savingOrder}>
-              {savingOrder ? (
-                <Loader2 className="mr-1.5 size-4 animate-spin" />
-              ) : null}
+              {savingOrder ? <Loader2 className="animate-spin" /> : null}
               Save order
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => setOneOffOpen(true)}>
-            <Plus className="mr-1.5 size-4" />
-            One-off
+          <Button variant="outline" size="sm" onClick={() => setOneOffOpen(true)}>
+            <Plus />
+            Add a house
           </Button>
         </div>
       </div>

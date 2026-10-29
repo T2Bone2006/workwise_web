@@ -181,11 +181,11 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
           subtitle={
             dayWeather ? (
               <span className="flex flex-col gap-1">
-                <span>Reorder, optimise, done / skip / reschedule, or move remaining.</span>
+                <span>The houses for this day, in the order you&apos;ll do them.</span>
                 <DayWeather weather={dayWeather} showLabel className="text-sm" />
               </span>
             ) : (
-              'Reorder, optimise, done / skip / reschedule, or move remaining.'
+              "The houses for this day, in the order you'll do them."
             )
           }
           actions={

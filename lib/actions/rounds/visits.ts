@@ -26,6 +26,7 @@ import {
   undoVisitChangeCore,
   type VisitChangeSummary,
 } from '@/lib/rounds/visit-changes';
+import { completeRemainingCore } from '@/lib/rounds/complete-remaining';
 import {
   completeVisitCore,
   reorderDayCore,
@@ -33,6 +34,7 @@ import {
 } from '@/lib/rounds/visit-transitions';
 import {
   completeVisitSchema,
+  completeRemainingSchema,
   moveRemainingSchema,
   moveStopSchema,
   moveRoundSchema,
@@ -45,6 +47,7 @@ import {
   tellChangeSchema,
   undoVisitChangeSchema,
   type CompleteVisitInput,
+  type CompleteRemainingInput,
   type MoveRemainingInput,
   type MoveStopInput,
   type MoveRoundInput,
@@ -528,6 +531,31 @@ export async function optimiseDay(
     distanceKm: result.distanceKm,
     stops: result.stops.length,
   };
+}
+
+export async function completeRemaining(
+  input: CompleteRemainingInput,
+): Promise<
+  | { success: true; done: number; cash: number; messages: number; invoices: number }
+  | { success: false; error: string }
+> {
+  const ctx = await requireRoundsActor();
+  if (!ctx.success) return ctx;
+
+  const parsed = completeRemainingSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: firstZodError(parsed.error) };
+
+  const supabase = await createClient();
+  const result = await completeRemainingCore(supabase, {
+    tenantId: ctx.tenantId,
+    actor: ctx.actor,
+    date: parsed.data.date,
+    rows: parsed.data.rows,
+  });
+  if (!result.success) return result;
+
+  revalidateVisits();
+  return result;
 }
 
 export async function createOneOffVisit(

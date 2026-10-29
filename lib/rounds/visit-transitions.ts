@@ -269,6 +269,8 @@ type CompleteVisitParams = {
   alreadyDonePayment?: 'record' | 'ignore';
   /** Set by the staff API: the payment is held by this member of staff (Phase 9, D10). Owners leave it out. */
   collectedBy?: { workerId: string; name: string } | null;
+  /** False marks the visit done without the "we've been" message. Default true. */
+  notify?: boolean;
 };
 
 /** Done arrived for a visit that is already skipped: keep any cash as credit against this job id. */
@@ -321,6 +323,7 @@ async function completeWhenAlreadyDone(
     jobId: job.id,
     customerId: job.customer_id,
     sendInvoice: params.sendInvoice,
+    sendNotice: params.notify !== false,
   });
   return {
     success: true,
@@ -454,6 +457,7 @@ export async function completeVisitCore(
     jobId: job.id,
     customerId: job.customer_id,
     sendInvoice: params.sendInvoice,
+    sendNotice: params.notify !== false,
   });
 
   return {
