@@ -5,6 +5,7 @@ import { toneClasses } from '@/components/look/tones';
 import { PortalPrintButton } from '@/components/portal/portal-print-button';
 import { duration, outcomeFor } from '@/components/portal/portal-job-view';
 import type { PortalJobView } from '@/lib/portal/job';
+import type { JobReportRow } from '@/lib/jobs/job-report-display';
 import type { TimelineEvent } from '@/lib/portal/timeline';
 import { formatDay, formatStamp, formatTimeOfDay, minutesBetween, stampParts } from '@/lib/portal/dates';
 
@@ -26,11 +27,13 @@ export function PortalJobReport({
   tenantName,
   timeline,
   photos,
+  reportRows = [],
 }: {
   job: PortalJobView;
   tenantName: string;
   timeline: TimelineEvent[];
   photos: Array<{ id: string; url: string; name: string }>;
+  reportRows?: JobReportRow[];
 }) {
   const outcome = outcomeFor(job);
   const tone = toneClasses(outcome.tone);
@@ -90,6 +93,19 @@ export function PortalJobReport({
           {job.reason && job.reason !== outcome.body ? <Row label="Why it was not completed">{job.reason}</Row> : null}
           {job.completionNotes ? <Row label="Notes from the engineer">{job.completionNotes}</Row> : null}
         </dl>
+
+        {reportRows.length > 0 ? (
+          <section className="mt-7 break-inside-avoid">
+            <h2 className="text-sm font-semibold">Engineer&apos;s report</h2>
+            <dl className="mt-3 flex flex-col gap-3">
+              {reportRows.map((row) => (
+                <Row key={row.id} label={row.label}>
+                  {row.value}
+                </Row>
+              ))}
+            </dl>
+          </section>
+        ) : null}
 
         {timeline.length > 0 ? (
           <section className="mt-7 break-inside-avoid">

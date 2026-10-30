@@ -15,8 +15,9 @@ export function customerStatus(status: string | null | undefined): { label: stri
     case 'paused':
       return { label: 'Paused', tone: 'amber' };
     case 'assigned':
-    case 'accepted':
       return { label: 'Booked', tone: 'indigo' };
+    case 'accepted':
+      return { label: 'Confirmed', tone: 'indigo' };
     case 'declined':
       return { label: 'Being reassigned', tone: 'slate' };
     case 'cancelled':

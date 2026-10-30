@@ -15,6 +15,7 @@ import {
 import type { PortalTenantOption } from '@/components/portal/tenant-selector';
 import { buildTimeline, type HistoryRow, type TimelineEvent } from '@/lib/portal/timeline';
 import type { PortalJobView } from '@/lib/portal/job';
+import { visibleJobReportRows, type JobReportRow } from '@/lib/jobs/job-report-display';
 
 const JOB_COLUMNS =
   'id, reference_number, address, status, scheduled_date, scheduled_time, completed_at, arrived_at, updated_at, industry_data';
@@ -280,6 +281,8 @@ export type PortalJobLoad =
       timeline: TimelineEvent[];
       photos: PortalPhoto[];
       documents: PortalDocument[];
+      /** The engineer's answers on the finish-job form, labelled by the business's own questions. */
+      reportRows: JobReportRow[];
     };
 
 /**
@@ -302,8 +305,8 @@ export async function loadPortalJob(jobId: string): Promise<PortalJobLoad> {
     .select(
       `
       id, reference_number, address, status, scheduled_date, scheduled_time, job_description,
-      completion_notes, industry_data, arrived_at, completed_at, created_at, assigned_worker_id,
-      customer_id, customers ( tenants ( name ) )
+      completion_notes, industry_data, arrived_at, started_at, completed_at, created_at, updated_at, assigned_worker_id,
+      customer_id, customers ( tenants ( name, settings ) )
     `,
     )
     .eq('id', jobId)
@@ -324,9 +327,15 @@ export async function loadPortalJob(jobId: string): Promise<PortalJobLoad> {
 
   const { photos, documents } = splitAttachments(Array.isArray(attachments) ? (attachments as AttachmentRow[]) : []);
 
-  const customer = job.customers as { tenants?: { name?: string | null } | Array<{ name?: string | null }> | null } | null;
+  type TenantRow = { name?: string | null; settings?: unknown };
+  const customer = job.customers as { tenants?: TenantRow | TenantRow[] | null } | null;
   const tenants = customer?.tenants;
-  const tenantName = (Array.isArray(tenants) ? tenants[0]?.name : tenants?.name)?.trim() || 'Your provider';
+  const tenant = Array.isArray(tenants) ? tenants[0] : tenants;
+  const tenantName = tenant?.name?.trim() || 'Your provider';
+  const tenantSettings =
+    tenant?.settings && typeof tenant.settings === 'object' && !Array.isArray(tenant.settings)
+      ? (tenant.settings as Record<string, unknown>)
+      : null;
 
   const industryData =
     job.industry_data && typeof job.industry_data === 'object' && !Array.isArray(job.industry_data)
@@ -338,10 +347,15 @@ export async function loadPortalJob(jobId: string): Promise<PortalJobLoad> {
     tenantName,
     photos,
     documents,
+    reportRows: visibleJobReportRows(industryData, tenantSettings?.job_report_fields),
     timeline: buildTimeline({
       createdAt: (job.created_at as string | null) ?? null,
       arrivedAt: (job.arrived_at as string | null) ?? null,
       history: Array.isArray(history) ? (history as HistoryRow[]) : [],
+      status: (job.status as string | null) ?? null,
+      startedAt: (job.started_at as string | null) ?? null,
+      completedAt: (job.completed_at as string | null) ?? null,
+      updatedAt: (job.updated_at as string | null) ?? null,
     }),
     job: {
       id: job.id as string,

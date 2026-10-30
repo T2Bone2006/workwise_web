@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { CalendarClock, CircleCheck, Clock, Download, FileText, History, ImageIcon, Paperclip, Pause, Ban, TriangleAlert, UserRound } from 'lucide-react';
+import { CalendarClock, CircleCheck, ClipboardList, Clock, Download, FileText, History, ImageIcon, Paperclip, Pause, Ban, TriangleAlert, UserRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LookCard, LookPage, Notice } from '@/components/look';
+import { JobReportRows } from '@/components/jobs/job-report-rows';
+import type { JobReportRow } from '@/lib/jobs/job-report-display';
 import { toneClasses, type Tone } from '@/components/look/tones';
 import { formatDay, formatStamp, formatTimeOfDay, minutesBetween, stampParts } from '@/lib/portal/dates';
 import type { TimelineEvent } from '@/lib/portal/timeline';
@@ -62,12 +64,18 @@ export function outcomeFor(job: PortalJobView): Outcome {
     case 'paused':
       return { tone: 'amber', icon: Pause, title: 'Work paused', body: engineer ? `${engineer} has paused this visit.` : null };
     case 'assigned':
-    case 'accepted':
       return {
         tone: 'indigo',
         icon: CalendarClock,
         title: booked ? `Booked for ${booked}` : 'Booked',
         body: engineer ? `${engineer} is assigned to this visit.` : null,
+      };
+    case 'accepted':
+      return {
+        tone: 'indigo',
+        icon: CalendarClock,
+        title: booked ? `Confirmed for ${booked}` : 'Confirmed',
+        body: `${engineer ?? 'The engineer'} has accepted this visit.`,
       };
     case 'declined':
       return { tone: 'slate', icon: UserRound, title: 'Being reassigned', body: 'Your provider is arranging another engineer.' };
@@ -123,6 +131,7 @@ export function PortalJobPage({
   timeline,
   photos,
   documents,
+  reportRows = [],
   back,
 }: {
   job: PortalJobView;
@@ -130,6 +139,8 @@ export function PortalJobPage({
   timeline: TimelineEvent[];
   photos: Array<{ id: string; url: string; name: string }>;
   documents: Array<{ id: string; url: string; name: string }>;
+  /** The engineer's answers on the finish-job form, labelled. */
+  reportRows?: JobReportRow[];
   back: ReactNode;
 }) {
   const outcome = outcomeFor(job);
@@ -220,6 +231,12 @@ export function PortalJobPage({
                 </Field>
               ) : null}
             </LookCard>
+
+            {reportRows.length > 0 ? (
+              <LookCard title="Engineer's report" icon={ClipboardList} tone="emerald">
+                <JobReportRows rows={reportRows} />
+              </LookCard>
+            ) : null}
 
             {documents.length > 0 ? (
               <LookCard title="Documents" icon={Paperclip} tone="slate" aside={documents.length}>

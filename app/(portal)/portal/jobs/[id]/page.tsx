@@ -52,6 +52,7 @@ export default async function PortalJobDetailPage({ params }: PortalJobDetailPag
       timeline={loaded.timeline}
       photos={loaded.photos}
       documents={loaded.documents}
+      reportRows={loaded.reportRows}
     />
   );
 }

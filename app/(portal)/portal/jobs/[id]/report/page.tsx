@@ -15,5 +15,5 @@ export default async function PortalJobReportPage({ params }: { params: Promise<
     );
   }
 
-  return <PortalJobReport job={loaded.job} tenantName={loaded.tenantName} timeline={loaded.timeline} photos={loaded.photos} />;
+  return <PortalJobReport job={loaded.job} tenantName={loaded.tenantName} timeline={loaded.timeline} photos={loaded.photos} reportRows={loaded.reportRows} />;
 }
