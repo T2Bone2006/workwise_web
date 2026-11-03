@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Loader2,
-  UserPlus,
   Play,
   CheckCircle,
   XCircle,
@@ -83,19 +82,8 @@ export function JobDetailActionsCard({
         {isPending && (
           <>
             <p className="text-xs text-muted-foreground mb-2">
-              Assign a worker first, or cancel the job.
+              Choose a worker in Assignment above, or cancel the job.
             </p>
-            <Button
-              variant="outline"
-              size="default"
-              className="w-full gap-2 border-border/80 hover:bg-primary/5 hover:border-primary/30"
-              asChild
-            >
-              <a href="#assignment">
-                <UserPlus className="size-4" />
-                Assign Worker
-              </a>
-            </Button>
             <Button
               variant="destructive"
               size="default"

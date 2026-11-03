@@ -62,6 +62,13 @@ describe('createDoorstepCustomerCore', () => {
     expect(db.rows('customers')).toHaveLength(0);
   });
 
+  it('stores no phone when none was given', async () => {
+    const { phone: _phone, ...withoutPhone } = body;
+    const r = await createDoorstepCustomerCore(db.client, { tenantId: T, body: withoutPhone });
+    expect(r.ok).toBe(true);
+    expect(db.rows('customers')[0]).toMatchObject({ phone: null, phone_e164: null });
+  });
+
   it('answers a bad form with the first problem, creating nothing', async () => {
     const r = await createDoorstepCustomerCore(db.client, { tenantId: T, body: { ...body, price: -1 } });
     expect(r.ok).toBe(false);

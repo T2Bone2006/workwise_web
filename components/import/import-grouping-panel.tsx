@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Group, Loader2, Sparkles } from 'lucide-react';
+import { Group, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { computeRowGroups, countGroupedRows } from '@/lib/import/job-grouping';
 import type { GroupingSuggestion } from '@/lib/import/suggest-grouping-columns';
@@ -52,17 +52,14 @@ export function ImportGroupingPanel({
   };
 
   const suggestionNote = (() => {
-    if (isSuggesting) return 'Checking whether rows in this sheet belong together…';
+    if (isSuggesting) return 'Loading the columns you used last time…';
     if (!suggestion) return null;
     if (suggestion.source === 'saved') {
       return suggestion.columns.length > 0
         ? 'Using the grouping you chose last time for this customer.'
         : 'Grouping was switched off for this customer last time.';
     }
-    if (suggestion.source === 'ai') {
-      return suggestion.reason ?? 'Suggested from the sheet contents.';
-    }
-    return 'Pick which columns mean these jobs travel together for this customer — or leave grouping off.';
+    return 'Tick the columns that mean these jobs go together — or leave them all off.';
   })();
 
   return (
@@ -80,11 +77,7 @@ export function ImportGroupingPanel({
 
       {suggestionNote && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          {isSuggesting ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : suggestion?.source === 'ai' ? (
-            <Sparkles className="size-3.5 text-primary" />
-          ) : null}
+          {isSuggesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
           {suggestionNote}
         </p>
       )}

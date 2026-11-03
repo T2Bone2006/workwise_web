@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -38,6 +38,8 @@ function AdminResetPasswordContent() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   async function handleContinue() {
     if (!resetToken) {
@@ -160,22 +162,38 @@ function AdminResetPasswordContent() {
           <Label htmlFor="password" className={authLabelClassName}>
             New password
           </Label>
-          <Input
-            id="password"
-            type="password"
-            autoComplete="new-password"
-            autoFocus
-            disabled={isSubmitting}
-            aria-invalid={Boolean(passwordError)}
-            aria-describedby={passwordError ? 'password-error' : 'password-hint'}
-            className={authInputClassName}
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              setPasswordError(null);
-              setSubmitError(null);
-            }}
-          />
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              autoFocus
+              disabled={isSubmitting}
+              aria-invalid={Boolean(passwordError)}
+              aria-describedby={passwordError ? 'password-error' : 'password-hint'}
+              className={`${authInputClassName} pr-12`}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(null);
+                setSubmitError(null);
+              }}
+            />
+            <button
+              type="button"
+              className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-[#6E6A63] hover:bg-black/5 hover:text-[#0A1A2E] dark:text-[#93A3BA] dark:hover:bg-white/10 dark:hover:text-[#EAF1FB]"
+              onClick={() => setShowPassword((v) => !v)}
+              disabled={isSubmitting}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              tabIndex={-1}
+            >
+              {showPassword ? (
+                <EyeOff className="size-[18px]" aria-hidden />
+              ) : (
+                <Eye className="size-[18px]" aria-hidden />
+              )}
+            </button>
+          </div>
           {passwordError ? (
             <FieldError id="password-error">{passwordError}</FieldError>
           ) : (
@@ -188,21 +206,37 @@ function AdminResetPasswordContent() {
           <Label htmlFor="confirm-password" className={authLabelClassName}>
             Type it again
           </Label>
-          <Input
-            id="confirm-password"
-            type="password"
-            autoComplete="new-password"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(confirmError)}
-            aria-describedby={confirmError ? 'confirm-error' : undefined}
-            className={authInputClassName}
-            value={confirmPassword}
-            onChange={(e) => {
-              setConfirmPassword(e.target.value);
-              setConfirmError(null);
-              setSubmitError(null);
-            }}
-          />
+          <div className="relative">
+            <Input
+              id="confirm-password"
+              type={showConfirm ? 'text' : 'password'}
+              autoComplete="new-password"
+              disabled={isSubmitting}
+              aria-invalid={Boolean(confirmError)}
+              aria-describedby={confirmError ? 'confirm-error' : undefined}
+              className={`${authInputClassName} pr-12`}
+              value={confirmPassword}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                setConfirmError(null);
+                setSubmitError(null);
+              }}
+            />
+            <button
+              type="button"
+              className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-[#6E6A63] hover:bg-black/5 hover:text-[#0A1A2E] dark:text-[#93A3BA] dark:hover:bg-white/10 dark:hover:text-[#EAF1FB]"
+              onClick={() => setShowConfirm((v) => !v)}
+              disabled={isSubmitting}
+              aria-label={showConfirm ? 'Hide password' : 'Show password'}
+              tabIndex={-1}
+            >
+              {showConfirm ? (
+                <EyeOff className="size-[18px]" aria-hidden />
+              ) : (
+                <Eye className="size-[18px]" aria-hidden />
+              )}
+            </button>
+          </div>
           {confirmError ? <FieldError id="confirm-error">{confirmError}</FieldError> : null}
         </div>
         <div className="pt-1">

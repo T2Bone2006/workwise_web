@@ -20,17 +20,6 @@ export const EXTRACTION_AI_MODEL =
   process.env.ANTHROPIC_EXTRACTION_MODEL?.trim() || 'claude-haiku-4-5';
 
 /**
- * Import grouping suggestion: one call per new import source, reading the
- * headers plus a sample of rows and naming the columns that identify a set of
- * jobs one worker should do together. Haiku, Sonnet and Opus all picked the
- * same four columns on the real MPAAS sheet (twice each), and the answer is
- * validated against the rows before it is used, so the cheapest model is
- * fine. Raise via ANTHROPIC_GROUPING_MODEL if a sheet defeats it.
- */
-export const GROUPING_AI_MODEL =
-  process.env.ANTHROPIC_GROUPING_MODEL?.trim() || 'claude-haiku-4-5';
-
-/**
  * Phase 5 receipt reading. Owner decision (2026-10-02, before any real-receipt
  * test): Sonnet reads every receipt. It costs about 1p a receipt against 0.3p on
  * Haiku, and a confidently-wrong total is the error the "unsure" re-read cannot

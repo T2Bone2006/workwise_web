@@ -71,7 +71,13 @@ export const doorstepCustomerSchema = agreementSchema
   })
   .extend({
     name: z.string().trim().min(2).max(120),
-    phone: z.string().trim().min(7).max(30),
+    // Blank is allowed, same as the website form. A short number is still refused.
+    phone: z
+      .string()
+      .trim()
+      .max(30)
+      .refine((value) => value.length === 0 || value.length >= 7, { message: 'Enter a phone number.' })
+      .optional(),
     email: z.string().email('Invalid email').optional().or(z.literal('')),
   });
 

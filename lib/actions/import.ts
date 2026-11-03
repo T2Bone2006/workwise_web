@@ -418,6 +418,16 @@ export async function importJobs(params: {
       }
     }
 
+    if (params.groupingColumns && params.groupingColumns.length > 0 && groupCount === 0) {
+      if (groupingColumns.length === 0) {
+        errors.push('The ticked grouping columns are not on this sheet, so no groups were created.');
+      } else if (jobIdByRowIndex.size === 0) {
+        errors.push('The jobs were saved, but they could not be matched back to the sheet, so no groups were created.');
+      } else {
+        errors.push('No two imported rows shared the same values in the ticked columns, so no groups were created.');
+      }
+    }
+
     const shouldAutoAllocate = params.autoAllocate !== false;
     let assignedCount = 0;
     const failedAllocationIds: string[] = [];

@@ -48,6 +48,7 @@ export async function createDoorstepCustomerCore(
   if (!parsed.success) return { ok: false, status: 400, error: firstZodErrorMessage(parsed.error) };
   const values = parsed.data;
   const email = values.email?.trim() ? values.email.trim() : null;
+  const phone = values.phone?.trim() ? values.phone.trim() : null;
   const accessNotes = values.access_notes?.trim() ? values.access_notes.trim() : null;
 
   const { data: customer, error: customerError } = await supabase
@@ -57,8 +58,8 @@ export async function createDoorstepCustomerCore(
       name: values.name,
       type: 'individual',
       email,
-      phone: values.phone,
-      phone_e164: normalizeUkPhoneE164(values.phone),
+      phone,
+      phone_e164: normalizeUkPhoneE164(phone),
       billing_address: joinHouse(values.address, values.postcode),
       access_notes: accessNotes,
       created_at: new Date().toISOString(),

@@ -25,7 +25,14 @@ function scrollToWhenReady(main: HTMLElement, top: number) {
   apply();
 }
 
-export function DashboardScroll({ children }: { children: React.ReactNode }) {
+export function DashboardScroll({
+  children,
+  reserveAskButton = false,
+}: {
+  children: React.ReactNode;
+  /** Leave room at the bottom so the fixed Ask button does not cover the last buttons. */
+  reserveAskButton?: boolean;
+}) {
   const look = useLook();
   const pathname = usePathname();
   const mainRef = useRef<HTMLElement>(null);
@@ -74,7 +81,15 @@ export function DashboardScroll({ children }: { children: React.ReactNode }) {
       ref={mainRef}
       className={cn(
         'flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain',
-        fullBleed ? 'p-0' : look === 'new' ? 'px-4 py-5 sm:px-8 sm:py-7' : 'p-4 sm:p-6',
+        fullBleed
+          ? 'p-0'
+          : look === 'new'
+            ? reserveAskButton
+              ? 'px-4 pt-5 pb-40 sm:px-8 sm:pt-7 sm:pb-40'
+              : 'px-4 py-5 sm:px-8 sm:py-7'
+            : reserveAskButton
+              ? 'px-4 pt-4 pb-40 sm:px-6 sm:pt-6 sm:pb-40'
+              : 'p-4 sm:p-6',
       )}
     >
       <BreadcrumbNamesProvider>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
@@ -132,6 +132,9 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
   /** Sheet columns that define a job group; [] = grouping off for this import. */
   const [groupingColumns, setGroupingColumns] = useState<string[]>([]);
   const [groupingSuggestion, setGroupingSuggestion] = useState<GroupingSuggestion | null>(null);
+  // Set when the user ticks or unticks a column, so a suggestion that arrives
+  // later cannot wipe the grouping they just chose.
+  const groupingTouched = useRef(false);
   const [isSuggestingGrouping, setIsSuggestingGrouping] = useState(false);
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
@@ -248,12 +251,12 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
   }, []);
 
   /**
-   * Ask for grouping columns alongside extraction — saved choice for a
-   * returning customer, otherwise one trade-neutral AI suggestion — and
-   * pre-tick them.
+   * Pre-tick the columns this customer used last time. Nothing is suggested.
+   * A choice she makes while this is still loading is kept.
    */
   const runGroupingSuggestion = useCallback(
     async (rows: Record<string, string>[], forCustomerId: string) => {
+      groupingTouched.current = false;
       setIsSuggestingGrouping(true);
       setGroupingSuggestion(null);
       setGroupingColumns([]);
@@ -265,7 +268,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
         });
         if (result.success) {
           setGroupingSuggestion(result.suggestion);
-          setGroupingColumns(result.suggestion.columns);
+          if (!groupingTouched.current) setGroupingColumns(result.suggestion.columns);
         }
       } catch (e) {
         console.error('[ImportWizard] grouping suggestion failed', e);
@@ -404,6 +407,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
     setIsExtracting(false);
     setImportResult(null);
     setAllowPartialImport(false);
+    groupingTouched.current = false;
     setGroupingColumns([]);
     setGroupingSuggestion(null);
   };
@@ -683,10 +687,13 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
                 rows={csvData}
                 importableRowIndexes={importableRowIndexes}
                 selectedColumns={groupingColumns}
-                onChange={setGroupingColumns}
+                onChange={(columns) => {
+                  groupingTouched.current = true;
+                  setGroupingColumns(columns);
+                }}
                 suggestion={groupingSuggestion}
                 isSuggesting={isSuggestingGrouping}
-                disabled={isImporting || isExtracting}
+                disabled={isImporting}
               />
             )}
 
@@ -822,7 +829,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
               {importResult.autoAllocate
                 ? ` · ${importResult.assignedCount} assigned · ${importResult.unassignedCount} need manual assignment`
                 : ' · assign them from the Jobs list'}
-              {importResult.groupCount
+              {groupingColumns.length > 0 || importResult.groupCount
                 ? ` · ${importResult.groupCount} group${importResult.groupCount === 1 ? '' : 's'} created`
                 : ''}
               .
@@ -862,7 +869,7 @@ export function ImportWizard({ customers: initialCustomers }: ImportWizardProps)
             {importResult.errors.length > 0 && (
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
                 <p className="font-medium text-amber-900 dark:text-amber-100">
-                  {importResult.errors.length} row warning
+                  {importResult.errors.length} warning
                   {importResult.errors.length === 1 ? '' : 's'}
                 </p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-950/90 dark:text-amber-50/90">

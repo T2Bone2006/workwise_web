@@ -110,7 +110,7 @@ export function DashboardShell({
             viewAsActive={Boolean(viewAsTenantName)}
           />
           {overdue ? <OverdueBanner /> : null}
-          <DashboardScroll>
+          <DashboardScroll reserveAskButton={Boolean(assistant)}>
             <Suspense fallback={null}>
               <RestartedWelcome />
             </Suspense>

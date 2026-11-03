@@ -63,19 +63,35 @@ describe('agreementSchema', () => {
 });
 
 describe('doorstepCustomerSchema', () => {
-  it('requires name and phone and still defaults schedule_mode to fixed', () => {
+  const base = {
+    name: 'Jane Smith',
+    title: 'Regular visit',
+    address: '12 Elm Road',
+    postcode: 'SW1A 1AA',
+    price: 15,
+    frequency_days: 28,
+    anchor_date: '2026-09-18',
+  };
+
+  it('requires a name and still defaults schedule_mode to fixed', () => {
     const parsed = doorstepCustomerSchema.parse({
-      name: 'Jane Smith',
+      ...base,
       phone: '07700900123',
-      title: 'Regular visit',
-      address: '12 Elm Road',
-      postcode: 'SW1A 1AA',
-      price: 15,
-      frequency_days: 28,
-      anchor_date: '2026-09-18',
     });
     expect(parsed.schedule_mode).toBe('fixed');
     expect(parsed.name).toBe('Jane Smith');
+    expect(parsed.phone).toBe('07700900123');
+  });
+
+  it('allows a missing phone, the same as the website form', () => {
+    expect(doorstepCustomerSchema.parse(base).phone).toBeUndefined();
+    expect(doorstepCustomerSchema.parse({ ...base, phone: '' }).phone).toBe('');
+    expect(doorstepCustomerSchema.parse({ ...base, phone: '   ' }).phone).toBe('');
+  });
+
+  it('refuses a phone that is too short to be a number', () => {
+    const result = doorstepCustomerSchema.safeParse({ ...base, phone: '123' });
+    expect(result.success).toBe(false);
   });
 
   it('rejects a missing name', () => {

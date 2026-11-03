@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -35,6 +35,8 @@ function ResetPasswordContent() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   async function handleContinue() {
     if (!resetToken) {
@@ -164,36 +166,70 @@ function ResetPasswordContent() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                autoComplete="new-password"
-                disabled={isSubmitting}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setPasswordError(null);
-                  setSubmitError(null);
-                }}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  disabled={isSubmitting}
+                  value={password}
+                  className="pr-12"
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError(null);
+                    setSubmitError(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground"
+                  onClick={() => setShowPassword((v) => !v)}
+                  disabled={isSubmitting}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-[18px]" aria-hidden />
+                  ) : (
+                    <Eye className="size-[18px]" aria-hidden />
+                  )}
+                </button>
+              </div>
               {passwordError ? <p className="text-sm text-destructive">{passwordError}</p> : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                placeholder="••••••••"
-                autoComplete="new-password"
-                disabled={isSubmitting}
-                value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  setConfirmError(null);
-                  setSubmitError(null);
-                }}
-              />
+              <div className="relative">
+                <Input
+                  id="confirm-password"
+                  type={showConfirm ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  disabled={isSubmitting}
+                  value={confirmPassword}
+                  className="pr-12"
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    setConfirmError(null);
+                    setSubmitError(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground"
+                  onClick={() => setShowConfirm((v) => !v)}
+                  disabled={isSubmitting}
+                  aria-label={showConfirm ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showConfirm ? (
+                    <EyeOff className="size-[18px]" aria-hidden />
+                  ) : (
+                    <Eye className="size-[18px]" aria-hidden />
+                  )}
+                </button>
+              </div>
               {confirmError ? <p className="text-sm text-destructive">{confirmError}</p> : null}
             </div>
             {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}
