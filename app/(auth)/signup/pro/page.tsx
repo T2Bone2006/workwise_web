@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { ProSignupForm } from '@/components/auth/pro-signup-form';
+import { MetaPixel } from '@/components/auth/meta-pixel';
 import { lookupReferrer, normaliseReferralCode, REFERRAL_COOKIE } from '@/lib/billing/offers';
 import { parseProSignupParams } from '@/lib/billing/pro-signup-params';
 
@@ -28,6 +29,7 @@ export default async function ProSignupPage({
 
   return (
     <Suspense fallback={null}>
+      <MetaPixel />
       <ProSignupForm
         initialChoice={params.choice}
         initialWorkers={params.workers}

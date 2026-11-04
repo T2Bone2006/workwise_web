@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { SignupForm, type SignupOffers } from '@/components/auth/signup-form';
+import { MetaPixel } from '@/components/auth/meta-pixel';
 import { parsePlanChoice } from '@/lib/billing/plans';
 import { chooseSignupOffer, getFoundingStatus, offerView, REFERRAL_COOKIE } from '@/lib/billing/offers';
 import { referralFromSources } from '@/lib/billing/signup-referral';
@@ -39,6 +40,7 @@ export default async function SignupPage({
 
   return (
     <Suspense fallback={null}>
+      <MetaPixel />
       <SignupForm
         initialChoice={choice}
         founding={{ active: founding.active, placesLeft: founding.placesLeft }}

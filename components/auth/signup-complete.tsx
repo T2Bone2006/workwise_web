@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { authButtonClassName, authSecondaryButtonClassName } from '@/components/auth/auth-shell';
 import { logout } from '@/lib/actions/auth';
+import { MetaPixel, trackMetaEvent } from '@/components/auth/meta-pixel';
 import type { SignupStatus } from '@/app/api/signup/status/route';
 
 const POLL_MS = 2000;
@@ -32,6 +33,7 @@ export function SignupComplete({ canceled }: { canceled: boolean }) {
         if (cancelled) return;
         setStatus(body.status);
         if (body.status === 'provisioned') {
+          trackMetaEvent('CompleteRegistration');
           router.replace('/dashboard');
           return;
         }
@@ -72,6 +74,7 @@ export function SignupComplete({ canceled }: { canceled: boolean }) {
 
   return (
     <div className="space-y-6">
+      <MetaPixel />
       <div
         role="status"
         className="rounded-2xl border border-[#EBEBEA] bg-[#FAFAF8] p-4 dark:border-white/10 dark:bg-white/[0.03]"
