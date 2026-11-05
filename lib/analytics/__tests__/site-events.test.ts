@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeBot, originAllowed, parseSiteEvent, summariseSiteEvents, type StoredEvent } from '../site-events';
+import {
+  biggestLeak,
+  funnelSteps,
+  looksLikeBot,
+  originAllowed,
+  parseSiteEvent,
+  summariseSiteEvents,
+  verdict,
+  type Funnel,
+  type StoredEvent,
+} from '../site-events';
 
 describe('parseSiteEvent', () => {
   const base = { visit: 'abc12345-def', page: '/pricing', kind: 'view' };
@@ -139,5 +149,36 @@ describe('summariseSiteEvents', () => {
       pages: [],
       funnel: { views: 0, clickedStart: 0, plan: 0, details: 0, submitted: 0 },
     });
+  });
+});
+
+describe('plain-words summary', () => {
+  const funnel = (over: Partial<Funnel>): Funnel => ({ views: 0, clickedStart: 0, plan: 0, details: 0, submitted: 0, ...over });
+
+  it('says it is too early when there are few visits', () => {
+    const v = verdict(funnel({ views: 12, clickedStart: 3 }));
+    expect(v.tone).toBe('amber');
+    expect(v.text).toContain('Too early to tell');
+    expect(v.text).toContain('12 page visits');
+  });
+
+  it('works out "out of every 100" against the first step', () => {
+    const steps = funnelSteps(funnel({ views: 200, clickedStart: 20, plan: 10, details: 8, submitted: 2 }));
+    expect(steps.map((s) => s.per100)).toEqual([100, 10, 5, 4, 1]);
+    expect(steps[1].kept).toBeCloseTo(0.1);
+  });
+
+  it('names the step where most people stop', () => {
+    const f = funnel({ views: 200, clickedStart: 40, plan: 36, details: 10, submitted: 9 });
+    expect(biggestLeak(funnelSteps(f))?.label).toBe('Filled in their details');
+    expect(verdict(f).text).toContain('Out of every 100 page visits, 20 press Start and 5 get as far as paying.');
+    expect(verdict(f).text).toContain('After pressing Start, most people give up between "Saw the plan choice" and "Filled in their details"');
+  });
+
+  it('ignores steps too small to judge, and a step that has more than the one before', () => {
+    expect(biggestLeak(funnelSteps(funnel({ views: 100, clickedStart: 5, plan: 4, details: 1, submitted: 0 })))).toBeNull();
+    expect(biggestLeak(funnelSteps(funnel({ views: 400, clickedStart: 40, plan: 8, details: 7, submitted: 6 })))?.label).toBe('Saw the plan choice');
+    const odd = funnelSteps(funnel({ views: 100, clickedStart: 5, plan: 9 }));
+    expect(odd[2].kept).toBe(1);
   });
 });

@@ -223,3 +223,75 @@ export function summariseSiteEvents(events: StoredEvent[], ad: string | null): S
     },
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Saying it in plain words (what /admin/website shows)
+// ---------------------------------------------------------------------------------------------
+
+/** Below this many visits, any percentage is too jumpy to act on. */
+export const MIN_VISITS = 30;
+/** A single page needs fewer visits before we say anything about it. */
+export const MIN_PAGE_VISITS = 15;
+
+export type FunnelStep = {
+  label: string;
+  count: number;
+  /** How many out of every 100 visits got this far. null when there are no visits to compare with. */
+  per100: number | null;
+  /** The share of the previous step that carried on, 0-1. null for the first step. */
+  kept: number | null;
+};
+
+export function funnelSteps(f: Funnel): FunnelStep[] {
+  const raw: [string, number][] = [
+    ['Opened a page', f.views],
+    ['Pressed Start', f.clickedStart],
+    ['Saw the plan choice', f.plan],
+    ['Filled in their details', f.details],
+    ['Pressed pay', f.submitted],
+  ];
+  return raw.map(([label, count], i) => ({
+    label,
+    count,
+    per100: f.views > 0 ? Math.min(100, Math.round((count / f.views) * 100)) : null,
+    kept: i === 0 || raw[i - 1][1] === 0 ? null : Math.min(1, count / raw[i - 1][1]),
+  }));
+}
+
+/**
+ * Among people who pressed Start, the step where the most give up, as long as enough people reached the step before it
+ * to mean anything. (Most visitors never mean to sign up, so "opened a page" to "pressed Start" is reported separately.)
+ */
+export function biggestLeak(steps: FunnelStep[]): FunnelStep | null {
+  let worst: FunnelStep | null = null;
+  for (let i = 2; i < steps.length; i++) {
+    const before = steps[i - 1];
+    const here = steps[i];
+    if (before.count < 10 || here.kept === null) continue;
+    if (worst === null || here.kept < (worst.kept ?? 1)) worst = here;
+  }
+  return worst;
+}
+
+export type Verdict = { tone: 'amber' | 'sky'; text: string };
+
+/** One or two plain sentences that answer "how is it going?" */
+export function verdict(f: Funnel): Verdict {
+  if (f.views < MIN_VISITS) {
+    return {
+      tone: 'amber',
+      text: `Too early to tell. There have only been ${f.views} page visit${f.views === 1 ? '' : 's'} so far, and the numbers jump around until there are about ${MIN_VISITS}.`,
+    };
+  }
+  const steps = funnelSteps(f);
+  const start = steps[1].per100 ?? 0;
+  const pay = steps[4].per100 ?? 0;
+  const leak = biggestLeak(steps);
+  const lead = `Out of every 100 page visits, ${start} press Start and ${pay} get as far as paying.`;
+  if (!leak) return { tone: 'sky', text: lead };
+  const before = steps[steps.indexOf(leak) - 1];
+  return {
+    tone: 'sky',
+    text: `${lead} After pressing Start, most people give up between "${before.label}" and "${leak.label}".`,
+  };
+}
