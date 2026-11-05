@@ -23,6 +23,7 @@ describe('parseSiteEvent', () => {
       ad_content: 'rounds',
       detail: null,
       value: null,
+      person: null,
     });
   });
 
@@ -30,6 +31,12 @@ describe('parseSiteEvent', () => {
     const event = parseSiteEvent({ ...base, ad_content: '<script>alert(1)</script>', ad_source: 'a b' });
     expect(event?.ad_content).toBeNull();
     expect(event?.ad_source).toBeNull();
+  });
+
+  it('keeps a clean person code and drops a bad one', () => {
+    expect(parseSiteEvent({ ...base, person: '3f2b8c1e-9d4a-4e6b-8a1c-5d7e9f0a1b2c' })?.person).toBe('3f2b8c1e-9d4a-4e6b-8a1c-5d7e9f0a1b2c');
+    expect(parseSiteEvent({ ...base, person: 'x y' })?.person).toBeNull();
+    expect(parseSiteEvent(base)?.person).toBeNull();
   });
 
   it('refuses things that are not events', () => {

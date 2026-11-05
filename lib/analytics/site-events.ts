@@ -15,6 +15,8 @@ export type SiteEvent = {
   ad_content: string | null;
   detail: string | null;
   value: number | null;
+  /** Random code from the ww_vid cookie. Only present when the visitor pressed Accept; null otherwise. */
+  person: string | null;
 };
 
 const VISIT = /^[a-z0-9-]{8,40}$/i;
@@ -79,6 +81,7 @@ export function parseSiteEvent(body: unknown): SiteEvent | null {
     ad_content: clean(raw.ad_content, SLUG),
     detail,
     value,
+    person: clean(raw.person, VISIT),
   };
 }
 
@@ -86,7 +89,11 @@ export function parseSiteEvent(body: unknown): SiteEvent | null {
 // Adding events up
 // ---------------------------------------------------------------------------------------------
 
-export type StoredEvent = Pick<SiteEvent, 'visit' | 'kind' | 'page' | 'ad_content' | 'detail' | 'value'>;
+/** Events are read oldest first, so their order is the order things happened. */
+export type StoredEvent = Pick<SiteEvent, 'visit' | 'kind' | 'page' | 'ad_content' | 'detail' | 'value'> & {
+  person?: string | null;
+  created_at?: string;
+};
 
 /** The sign-up step names the sign-up pages send, in the order a person meets them. */
 export const SIGNUP_STEPS = ['plan', 'details', 'submitted'] as const;
@@ -129,6 +136,15 @@ function median(numbers: number[]): number | null {
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
+/** `ad` null = everyone; 'organic' = events with no ad tag; anything else = that ad's name. */
+export function scopeEvents<T extends { ad_content: string | null }>(events: T[], ad: string | null): T[] {
+  return events.filter((e) => {
+    if (ad === null) return true;
+    if (ad === 'organic') return !e.ad_content;
+    return e.ad_content === ad;
+  });
+}
+
 /** `ad` null = everyone; 'organic' = visits with no ad tag; anything else = that ad's name. */
 export function summariseSiteEvents(events: StoredEvent[], ad: string | null): SiteSummary {
   const adViews = new Map<string, number>();
@@ -137,11 +153,7 @@ export function summariseSiteEvents(events: StoredEvent[], ad: string | null): S
   }
   const ads = [...adViews.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
 
-  const inScope = events.filter((e) => {
-    if (ad === null) return true;
-    if (ad === 'organic') return !e.ad_content;
-    return e.ad_content === ad;
-  });
+  const inScope = scopeEvents(events, ad);
 
   type Bucket = {
     visits: Set<string>;

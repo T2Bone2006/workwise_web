@@ -43,7 +43,14 @@ export async function POST(request: Request) {
   if (!event) return done();
 
   try {
-    const { error } = await createAdminClient().from('site_events').insert(event);
+    const admin = createAdminClient();
+    let { error } = await admin.from('site_events').insert(event);
+    // The "person" column arrives with its own SQL paste. Until then, keep counting without it rather than lose the event.
+    if (error && event.person && (error.code === '42703' || error.code === 'PGRST204')) {
+      const { person: _person, ...withoutPerson } = event;
+      void _person;
+      ({ error } = await admin.from('site_events').insert(withoutPerson));
+    }
     // 42P01 = the table hasn't been pasted into Supabase yet; stay quiet until it is.
     if (error && error.code !== '42P01') console.error(`[track] insert failed: ${error.code ?? 'unknown'}`);
   } catch {

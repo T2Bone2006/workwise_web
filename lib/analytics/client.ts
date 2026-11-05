@@ -1,6 +1,8 @@
-// Browser side of the cookie-free sign-up step counting (the marketing site has its own copy of this in
-// workwise_site lib/track.ts). Nothing is stored in the browser: the visit code below is held in memory only,
-// so it joins one sign-up page's steps together and is gone when the page closes.
+// Browser side of the sign-up step counting (the marketing site has its own copy of this in workwise_site lib/track.ts).
+// The visit code below is held in memory only. For a visitor who pressed Accept on the cookie banner, the event also
+// carries their random visitor code (the ww_vid cookie), so their sign-up steps join up with the pages they looked at.
+
+import { previewMode, readPersonId } from '@/lib/consent';
 
 const ROOT_DOMAIN = 'joinworkwise.com';
 
@@ -22,12 +24,12 @@ function allowedHere(): boolean {
   const host = window.location.hostname;
   if (host !== ROOT_DOMAIN && !host.endsWith(`.${ROOT_DOMAIN}`)) return false;
   const nav = navigator as NavigatorWithPrivacy;
-  return nav.doNotTrack !== '1' && nav.globalPrivacyControl !== true;
+  return nav.doNotTrack !== '1' && nav.globalPrivacyControl !== true && !previewMode();
 }
 
 /** Counts a sign-up step: 'plan', 'details' or 'submitted'. Never throws and never slows the page. */
 export function trackSignupStep(step: 'plan' | 'details' | 'submitted'): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || previewMode()) return;
 
   const params = new URLSearchParams(window.location.search);
   const body = JSON.stringify({
@@ -37,6 +39,7 @@ export function trackSignupStep(step: 'plan' | 'details' | 'submitted'): void {
     detail: step,
     ad_source: params.get('utm_source') || undefined,
     ad_content: params.get('utm_content') || undefined,
+    person: readPersonId() || undefined,
   });
 
   if (process.env.NODE_ENV !== 'production') {
