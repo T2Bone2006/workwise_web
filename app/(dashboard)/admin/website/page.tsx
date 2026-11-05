@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Globe, Hammer, Sparkles, UserPlus } from 'lucide-react';
 import { isAdmin } from '@/lib/utils/admin';
 import { listSignups, type SignupRow } from '@/lib/data/admin-website';
+import { listAdSignups } from '@/lib/data/admin-ad-signups';
 import { WEBSITE_STATUS_LABEL, type WebsiteStatus } from '@/lib/website-offer';
 import { WebsiteRowForm } from '@/components/admin/website-row-form';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
@@ -130,7 +131,7 @@ export default async function WebsiteTrackerPage({
 
   const { show } = await searchParams;
   const filter: FilterKey = FILTERS.some((f) => f.key === show) ? (show as FilterKey) : 'all';
-  const { rows, error, tableMissing, now } = await listSignups();
+  const [{ rows, error, tableMissing, now }, ads] = await Promise.all([listSignups(), listAdSignups()]);
 
   const lite = rows.filter((r) => r.lite);
   const count = (status: WebsiteStatus) => lite.filter((r) => r.website?.status === status).length;
@@ -160,6 +161,26 @@ export default async function WebsiteTrackerPage({
         <StatTile label="Building" value={String(count('building'))} sub="In progress" tone="sky" icon={Hammer} />
         <StatTile label="Live" value={String(count('done'))} sub="Free websites delivered" tone="emerald" icon={Sparkles} />
       </div>
+
+      <section aria-label="Sign-ups from ads" className="rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-(--look-card-shadow) sm:p-5">
+        <h2 className="text-base font-semibold">Sign-ups from ads</h2>
+        {ads.error ? (
+          <p className="mt-1 text-sm text-destructive">Couldn&apos;t load these from Stripe. Reload to try again.</p>
+        ) : ads.rows.length === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground">Nobody has started signing up from an ad yet.</p>
+        ) : (
+          <ul className="mt-3 grid gap-2 sm:grid-cols-3">
+            {ads.rows.map((row) => (
+              <li key={row.ad} className="rounded-xl border border-border p-3">
+                <p className="text-sm font-semibold capitalize">{row.ad}</p>
+                <p className="mt-0.5 text-sm tabular-nums text-muted-foreground">
+                  {row.started} started · {row.paid} paid
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <nav aria-label="Filter" className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (

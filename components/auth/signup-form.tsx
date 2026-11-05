@@ -32,6 +32,7 @@ import { PLAN_LOOK, PlanPicker, type FoundingView } from '@/components/auth/plan
 import { SignupSummary } from '@/components/auth/signup-summary';
 import { cn } from '@/lib/utils';
 import { startSignup } from '@/lib/actions/signup';
+import { AD_TAGS } from '@/lib/billing/ad-source';
 import { signupFormSchema, type SignupFormInput } from '@/lib/validations/signup';
 import { formatPence, PLANS, type BillingInterval, type PlanChoice, type PlanKey } from '@/lib/billing/plans';
 import type { SignupOfferView } from '@/lib/billing/offers';
@@ -269,7 +270,7 @@ export function SignupForm({
     form.setValue('plan', next.plan);
     form.setValue('interval', next.interval);
     const params = new URLSearchParams({ plan: next.plan, interval: next.interval });
-    for (const key of ['ref', 'canceled']) {
+    for (const key of ['ref', 'canceled', ...AD_TAGS]) {
       const value = searchParams.get(key);
       if (value) params.set(key, value);
     }
@@ -333,6 +334,9 @@ export function SignupForm({
         >
           <input type="hidden" name="plan" value={choice.plan} />
           <input type="hidden" name="interval" value={choice.interval} />
+          {AD_TAGS.map((tag) => (
+            <input key={tag} type="hidden" name={tag} value={searchParams.get(tag) ?? ''} />
+          ))}
 
           {notes}
 

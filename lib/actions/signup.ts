@@ -16,6 +16,7 @@ import {
   REFERRAL_COOKIE,
 } from '@/lib/billing/offers';
 import { referralFromSources } from '@/lib/billing/signup-referral';
+import { adMetadata } from '@/lib/billing/ad-source';
 import { signupSchema } from '@/lib/validations/signup';
 
 export type SignupResult = {
@@ -215,6 +216,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
           plan: values.plan,
           interval: values.interval,
           contact_name: values.fullName,
+          ...adMetadata((tag) => formData.get(tag)),
         },
       });
       customerId = customer.id;

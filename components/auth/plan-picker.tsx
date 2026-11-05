@@ -193,14 +193,18 @@ function PlanTile({
 
 /** The founding offer, with the 200 places drawn as a bar. */
 function FoundingMeter({ placesLeft }: { placesLeft: number | null }) {
-  const taken = placesLeft != null ? Math.max(0, Math.min(200, 200 - placesLeft)) : null;
+  // The count and bar only show once places are going: "199 of 200 left" reads as nobody has joined.
+  const shownLeft = placesLeft != null && placesLeft < 100 ? placesLeft : null;
+  const taken = shownLeft != null ? Math.max(0, Math.min(200, 200 - shownLeft)) : null;
   return (
     <div className="rounded-xl bg-[#FFF6E0] px-3.5 py-3 dark:bg-[#F0A500]/10">
       <div className="flex items-baseline justify-between gap-3 text-[13px]">
         <p className="font-semibold text-[#6B4100] dark:text-[#F5BC3A]">Founding offer: half price for 2 months</p>
-        {placesLeft != null ? (
-          <p className="flex-shrink-0 tabular-nums text-[#8A5300] dark:text-[#E9C77A]">{placesLeft} of 200 left</p>
-        ) : null}
+        {shownLeft != null ? (
+          <p className="flex-shrink-0 tabular-nums text-[#8A5300] dark:text-[#E9C77A]">{shownLeft} of 200 left</p>
+        ) : (
+          <p className="flex-shrink-0 text-[#8A5300] dark:text-[#E9C77A]">First 200 customers</p>
+        )}
       </div>
       {taken != null ? (
         <div aria-hidden className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#F0A500]/20">

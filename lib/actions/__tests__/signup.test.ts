@@ -155,6 +155,22 @@ beforeEach(() => {
   sessionsCreate.mockResolvedValue({ id: 'cs_new', url: 'https://checkout.test/pay' });
 });
 
+describe('ad tags', () => {
+  it('saves the ad a sign-up came from on the Stripe customer', async () => {
+    await run({ utm_source: 'facebook', utm_campaign: 'founding-half-price', utm_content: 'lite' });
+    expect(customersCreate.mock.calls[0][0].metadata).toMatchObject({
+      ad_source: 'facebook',
+      ad_campaign: 'founding-half-price',
+      ad_content: 'lite',
+    });
+  });
+
+  it('adds nothing to an ordinary sign-up', async () => {
+    await run();
+    expect(customersCreate.mock.calls[0][0].metadata.ad_source).toBeUndefined();
+  });
+});
+
 async function run(fields: Record<string, string> = {}) {
   const { startSignup } = await import('@/lib/actions/signup');
   await expect(startSignup(null, form({ ...base, ...fields }))).rejects.toThrow('REDIRECT');
