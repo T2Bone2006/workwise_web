@@ -9,7 +9,7 @@ const AD_TAGS = 'utm_source=facebook&utm_medium=paid&utm_campaign=founding-half-
 export type AdPage = { ad: string; name: string; headline: string; path: string };
 
 export const AD_PAGES: AdPage[] = [
-  { ad: 'bundle', name: 'Ad 1 · Rounds + Lite bundle', headline: 'Run your round. Win the work.', path: '/pricing' },
+  { ad: 'bundle', name: 'Ad 1 · Rounds + Lite bundle', headline: 'Run your round. Win the work.', path: '/rounds-lite' },
   { ad: 'rounds', name: 'Ad 2 · Rounds', headline: "Get paid before you're back in the van", path: '/rounds' },
   { ad: 'lite', name: 'Ad 3 · Lite and free website', headline: 'A free website that quotes for you', path: '/lite' },
 ];
