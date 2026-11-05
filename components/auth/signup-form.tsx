@@ -33,6 +33,7 @@ import { SignupSummary } from '@/components/auth/signup-summary';
 import { cn } from '@/lib/utils';
 import { startSignup } from '@/lib/actions/signup';
 import { AD_TAGS } from '@/lib/billing/ad-source';
+import { trackMetaEvent } from '@/components/auth/meta-pixel';
 import { signupFormSchema, type SignupFormInput } from '@/lib/validations/signup';
 import { formatPence, PLANS, type BillingInterval, type PlanChoice, type PlanKey } from '@/lib/billing/plans';
 import type { SignupOfferView } from '@/lib/billing/offers';
@@ -329,7 +330,10 @@ export function SignupForm({
             if (!parsed.success) {
               e.preventDefault();
               void form.trigger();
+              return;
             }
+            // Tells Meta a sign-up has started (only with marketing consent), so a later campaign can learn from it.
+            trackMetaEvent('InitiateCheckout');
           }}
         >
           <input type="hidden" name="plan" value={choice.plan} />
