@@ -4,6 +4,8 @@ import { Globe, Hammer, Sparkles, UserPlus } from 'lucide-react';
 import { isAdmin } from '@/lib/utils/admin';
 import { listSignups, type SignupRow } from '@/lib/data/admin-website';
 import { listAdSignups } from '@/lib/data/admin-ad-signups';
+import { getSiteFunnel } from '@/lib/data/admin-site-funnel';
+import { SiteFunnel } from '@/components/admin/site-funnel';
 import { WEBSITE_STATUS_LABEL, type WebsiteStatus } from '@/lib/website-offer';
 import { WebsiteRowForm } from '@/components/admin/website-row-form';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
@@ -129,9 +131,14 @@ export default async function WebsiteTrackerPage({
   const admin = await isAdmin();
   if (!admin) redirect('/dashboard');
 
-  const { show } = await searchParams;
+  const { show, ad: adParam } = await searchParams;
   const filter: FilterKey = FILTERS.some((f) => f.key === show) ? (show as FilterKey) : 'all';
-  const [{ rows, error, tableMissing, now }, ads] = await Promise.all([listSignups(), listAdSignups()]);
+  const adFilter = typeof adParam === 'string' && /^[a-z0-9][a-z0-9_-]{0,49}$/i.test(adParam) ? adParam : null;
+  const [{ rows, error, tableMissing, now }, ads, funnel] = await Promise.all([
+    listSignups(),
+    listAdSignups(),
+    getSiteFunnel(adFilter),
+  ]);
 
   const lite = rows.filter((r) => r.lite);
   const count = (status: WebsiteStatus) => lite.filter((r) => r.website?.status === status).length;
@@ -181,6 +188,8 @@ export default async function WebsiteTrackerPage({
           </ul>
         )}
       </section>
+
+      <SiteFunnel result={funnel} ad={adFilter} />
 
       <nav aria-label="Filter" className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (

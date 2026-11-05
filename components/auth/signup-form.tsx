@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils';
 import { startSignup } from '@/lib/actions/signup';
 import { AD_TAGS } from '@/lib/billing/ad-source';
 import { trackMetaEvent } from '@/components/auth/meta-pixel';
+import { trackSignupStep } from '@/lib/analytics/client';
 import { signupFormSchema, type SignupFormInput } from '@/lib/validations/signup';
 import { formatPence, PLANS, type BillingInterval, type PlanChoice, type PlanKey } from '@/lib/billing/plans';
 import type { SignupOfferView } from '@/lib/billing/offers';
@@ -255,6 +256,11 @@ export function SignupForm({
     if (serverError?.toLowerCase().includes('referral code')) setDetailsCodeOpen(true);
   }, [serverError]);
 
+  // Counts which sign-up step people reach (cookie-free), so /admin/website can show where they stop.
+  useEffect(() => {
+    trackSignupStep(step);
+  }, [step]);
+
   useEffect(() => {
     if (!stepChanged.current) return;
     window.scrollTo({ top: 0 });
@@ -334,6 +340,7 @@ export function SignupForm({
             }
             // Tells Meta a sign-up has started (only with marketing consent), so a later campaign can learn from it.
             trackMetaEvent('InitiateCheckout');
+            trackSignupStep('submitted');
           }}
         >
           <input type="hidden" name="plan" value={choice.plan} />
