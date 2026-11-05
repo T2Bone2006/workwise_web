@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getAuthUser } from '@/lib/supabase/auth-user';
 import { redirect } from 'next/navigation';
 import { DashboardShell } from '@/components/layout/dashboard-shell';
+import { AnalyticsIdentify } from '@/components/analytics/identify';
 import {
   getCurrentUserRow,
   getTenantIdForCurrentUser,
@@ -123,6 +124,8 @@ export default async function DashboardLayout({
     : undefined;
 
   return (
+    <>
+      <AnalyticsIdentify userId={user.id} email={user.email ?? undefined} />
     <DashboardShell
       tenantName={tenantName}
       userEmail={user.email ?? undefined}
@@ -147,5 +150,6 @@ export default async function DashboardLayout({
     >
       {children}
     </DashboardShell>
+    </>
   );
 }

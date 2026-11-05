@@ -44,6 +44,7 @@ vi.mock('@/lib/stripe/provision', () => ({ provisionFromCheckoutSession }));
 vi.mock('@/lib/stripe/sync-subscription', () => ({ syncRestartSession, syncSubscription: vi.fn(), ensureWidgetClient }));
 vi.mock('@/lib/billing/referrals', () => ({ onInvoicePaid, onSubscriptionEnded: vi.fn() }));
 vi.mock('@/lib/billing/second-month', () => ({ onFirstInvoicePaid: vi.fn() }));
+vi.mock('@/lib/analytics/server', () => ({ trackSignupPaid: vi.fn() }));
 
 import { POST } from '@/app/api/stripe/webhook/route';
 

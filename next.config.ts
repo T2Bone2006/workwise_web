@@ -35,6 +35,13 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
+      // HeyCatch short links: /a-/z and /0-/9 forward to the home page with the channel attribution in the query.
+      // /r is excluded: it is the real referral-link route (app/r/[code]).
+      {
+        source: "/:l([a-qs-z0-9])",
+        destination: "/?utm_source=heycatch&utm_campaign=:l",
+        permanent: false,
+      },
       // Old product-prefixed dashboard URLs → neutral paths (entitlement picks the UI).
       { source: '/rounds', destination: '/dashboard', permanent: false },
       { source: '/rounds/customers', destination: '/customers', permanent: false },

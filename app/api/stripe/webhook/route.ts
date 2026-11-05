@@ -7,6 +7,7 @@ import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
 import { ensureWidgetClient, syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
 import { onInvoicePaid, onSubscriptionEnded } from '@/lib/billing/referrals';
 import { onFirstInvoicePaid } from '@/lib/billing/second-month';
+import { trackSignupPaid } from '@/lib/analytics/server';
 
 export const runtime = 'nodejs';
 
@@ -83,6 +84,8 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
         if (tenantId) await ensureWidgetClient(tenantId);
       } else if (session.mode === 'subscription') {
         await provisionFromCheckoutSession(session);
+        // HeyCatch: the business now exists, so this is the moment a sign-up is real. Never throws.
+        if (session.client_reference_id) await trackSignupPaid(session.client_reference_id);
         // Stripe can send invoice.paid for the first invoice before this event, when the
         // business doesn't exist yet and a referral reward has nothing to attach to.
         // Now that it does, look at that first invoice again (safe to repeat).

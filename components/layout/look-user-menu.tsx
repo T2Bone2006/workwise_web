@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { LogOut, Moon, Sun } from 'lucide-react';
+import { analytics } from '@heycatch/sdk';
 import { logout } from '@/lib/actions/auth';
 import {
   DropdownMenu,
@@ -54,6 +55,7 @@ export function LookUserMenu({
     if (viewAsActive) {
       await fetch('/api/admin/view-as/stop', { method: 'POST' });
     }
+    analytics.resetIdentity(); // next visitor on this browser starts anonymous
     await logout();
   };
 

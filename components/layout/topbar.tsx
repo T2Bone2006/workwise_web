@@ -1,6 +1,7 @@
 'use client';
 
 import { Menu, LogOut } from 'lucide-react';
+import { analytics } from '@heycatch/sdk';
 import { logout } from '@/lib/actions/auth';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
@@ -43,6 +44,7 @@ export function Topbar({
     if (viewAsActive) {
       await fetch('/api/admin/view-as/stop', { method: 'POST' });
     }
+    analytics.resetIdentity(); // next visitor on this browser starts anonymous
     await logout();
   };
 
