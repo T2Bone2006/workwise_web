@@ -81,8 +81,8 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
     fullName: formData.get('fullName'),
     email: formData.get('email'),
     password: formData.get('password'),
-    phone: formData.get('phone'),
-    postcode: formData.get('postcode'),
+    phone: formData.get('phone') ?? '',
+    postcode: formData.get('postcode') ?? '',
     trade: formData.get('trade') ?? '',
     ref: formData.get('ref') ?? '',
   });
@@ -161,8 +161,8 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       billing_interval: values.interval,
       business_name: values.businessName,
       full_name: values.fullName,
-      phone: values.phone,
-      postcode: values.postcode,
+      phone: values.phone ?? null,
+      postcode: values.postcode ?? null,
       trade: values.trade || null,
       referral_code: referrer?.code ?? null,
       referrer_tenant_id: referrer?.tenantId ?? null,
@@ -209,7 +209,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
       const customer = await stripe.customers.create({
         email,
         name: values.businessName,
-        phone: values.phone,
+        ...(values.phone ? { phone: values.phone } : {}),
         ...(testClock ? { test_clock: testClock } : {}),
         metadata: {
           signup_intent_id: intentId,

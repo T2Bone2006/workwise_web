@@ -215,7 +215,6 @@ export function SignupForm({
   const [choice, setChoice] = useState<PlanChoice>(initialChoice);
   const [step, setStep] = useState<Step>(canceled ? 'details' : 'plan');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [detailsCodeOpen, setDetailsCodeOpen] = useState(false);
   const stepChanged = useRef(false);
 
@@ -228,7 +227,6 @@ export function SignupForm({
       fullName: '',
       email: '',
       password: '',
-      confirmPassword: '',
       phone: '',
       postcode: '',
       trade: '',
@@ -426,46 +424,11 @@ export function SignupForm({
             )}
           />
 
-          <FormField
-            control={form.control}
-            name="confirmPassword"
-            render={({ field }) => (
-              <FormItem className="gap-2">
-                <FormLabel className={authLabelClassName}>Confirm password</FormLabel>
-                <div className="relative">
-                  <FormControl>
-                    <Input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      autoComplete="new-password"
-                      disabled={isPending}
-                      className={cn(authInputClassName, 'pr-12')}
-                      {...field}
-                    />
-                  </FormControl>
-                  <button
-                    type="button"
-                    className="absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-[#6E6A63] hover:bg-black/5 hover:text-[#0A1A2E] dark:text-[#93A3BA] dark:hover:bg-white/10 dark:hover:text-[#EAF1FB]"
-                    onClick={() => setShowConfirmPassword((v) => !v)}
-                    aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                    tabIndex={-1}
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff className="size-[18px]" aria-hidden />
-                    ) : (
-                      <Eye className="size-[18px]" aria-hidden />
-                    )}
-                  </button>
-                </div>
-                <FormMessage role="alert" />
-              </FormItem>
-            )}
-          />
-
           <div className="grid grid-cols-2 gap-3">
             <TextField
               control={form.control}
               name="phone"
-              label="Mobile"
+              label="Mobile (optional)"
               type="tel"
               placeholder="07700 900000"
               autoComplete="tel"
@@ -474,13 +437,17 @@ export function SignupForm({
             <TextField
               control={form.control}
               name="postcode"
-              label="Postcode"
+              label="Postcode (optional)"
               placeholder="SW1A 1AA"
               autoComplete="postal-code"
               autoCapitalize="characters"
               disabled={isPending}
             />
           </div>
+
+          <p className="-mt-2 text-[13px] leading-snug text-[#6E6A63] dark:text-[#93A3BA]">
+            Mobile and postcode can wait: you can add them in Settings once you&apos;re in.
+          </p>
 
           {detailsCodeOpen ? (
             <TextField
