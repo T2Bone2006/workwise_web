@@ -12,6 +12,7 @@ import {
 import type { PeopleSummary } from '@/lib/analytics/site-people';
 import { StatTile, Tag, toneClasses } from '@/components/look';
 import { RefreshButton } from '@/components/admin/refresh-button';
+import { IgnoreMeToggle } from '@/components/admin/ignore-me-toggle';
 import { AD_PAGES, adPageUrl } from '@/lib/analytics/ad-pages';
 import { cn } from '@/lib/utils';
 
@@ -249,6 +250,8 @@ export function SiteFunnel({ result, ad }: { result: SiteFunnelResult; ad: strin
         </div>
         <RefreshButton updatedAt={result.loadedAt} />
       </div>
+
+      <IgnoreMeToggle />
 
       {tableMissing ? (
         <p role="status" className="mt-4 rounded-xl border border-(--tone-amber-line) bg-(--tone-amber-soft) p-3.5 text-sm">

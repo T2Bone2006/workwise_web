@@ -73,6 +73,7 @@ function SignupCard({ row, now }: { row: SignupRow; now: number }) {
               {row.interval ? `, ${row.interval === 'year' ? 'yearly' : 'monthly'}` : ''}
             </Tag>
             {row.closed ? <Tag tone="rose">Closed</Tag> : null}
+            {row.isTest ? <Tag tone="slate">Test</Tag> : null}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">Signed up {formatDay(row.signedUpAt)}</p>
         </div>
@@ -131,15 +132,19 @@ export default async function WebsiteTrackerPage({
   const admin = await isAdmin();
   if (!admin) redirect('/dashboard');
 
-  const { show, ad: adParam } = await searchParams;
+  const { show, ad: adParam, tests } = await searchParams;
+  const showTests = tests === '1';
   const filter: FilterKey = FILTERS.some((f) => f.key === show) ? (show as FilterKey) : 'all';
   const adFilter = typeof adParam === 'string' && /^[a-z0-9][a-z0-9_-]{0,49}$/i.test(adParam) ? adParam : null;
-  const [{ rows, error, tableMissing, now }, ads, funnel] = await Promise.all([
+  const [{ rows: allRows, error, tableMissing, now }, ads, funnel] = await Promise.all([
     listSignups(),
     listAdSignups(),
     getSiteFunnel(adFilter),
   ]);
 
+  // Test businesses are flagged in the database and hidden here unless asked for.
+  const hiddenTests = allRows.filter((r) => r.isTest).length;
+  const rows = showTests ? allRows : allRows.filter((r) => !r.isTest);
   const lite = rows.filter((r) => r.lite);
   const count = (status: WebsiteStatus) => lite.filter((r) => r.website?.status === status).length;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
@@ -195,7 +200,10 @@ export default async function WebsiteTrackerPage({
         {FILTERS.map((f) => (
           <Link
             key={f.key}
-            href={f.key === 'all' ? '/admin/website' : `/admin/website?show=${f.key}`}
+            href={{
+              pathname: '/admin/website',
+              query: { ...(f.key === 'all' ? {} : { show: f.key }), ...(showTests ? { tests: '1' } : {}) },
+            }}
             aria-current={filter === f.key ? 'page' : undefined}
             className={cn(
               'rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
@@ -209,6 +217,21 @@ export default async function WebsiteTrackerPage({
           </Link>
         ))}
       </nav>
+
+      {hiddenTests > 0 || showTests ? (
+        <p className="text-sm text-muted-foreground">
+          {showTests ? 'Showing test businesses. ' : `${hiddenTests} test ${hiddenTests === 1 ? 'business' : 'businesses'} hidden. `}
+          <Link
+            href={{
+              pathname: '/admin/website',
+              query: { ...(filter === 'all' ? {} : { show: filter }), ...(showTests ? {} : { tests: '1' }) },
+            }}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            {showTests ? 'Hide them' : 'Show them'}
+          </Link>
+        </p>
+      ) : null}
 
       {shown.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">

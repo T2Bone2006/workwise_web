@@ -76,6 +76,8 @@ export type SignupRow = {
   interval: 'month' | 'year' | null;
   signedUpAt: string;
   closed: boolean;
+  /** Flagged in the database as a test business (tenants.settings.test_business), so the tracker hides it. */
+  isTest: boolean;
   lite: LiteSummary | null;
   website: {
     status: WebsiteStatus;
@@ -91,7 +93,7 @@ export type SignupList = { rows: SignupRow[]; error: string | null; tableMissing
 
 const MAX_BUSINESSES = 150;
 
-type TenantRow = { id: string; name: string | null; closed_at: string | null };
+type TenantRow = { id: string; name: string | null; closed_at: string | null; settings: { test_business?: unknown } | null };
 type UserRow = { tenant_id: string | null; email: string | null; full_name: string | null; role: string | null };
 type RequestRow = {
   tenant_id: string;
@@ -129,7 +131,7 @@ export async function listSignups(): Promise<SignupList> {
   if (ids.length === 0) return { rows: [], error: null, tableMissing: false, now: Date.now() };
 
   const [tenants, users, requests] = await Promise.all([
-    admin.from('tenants').select('id, name, closed_at').in('id', ids),
+    admin.from('tenants').select('id, name, closed_at, settings').in('id', ids),
     admin.from('users').select('tenant_id, email, full_name, role').in('tenant_id', ids).eq('role', 'admin'),
     admin
       .from('website_requests')
@@ -175,6 +177,7 @@ export async function listSignups(): Promise<SignupList> {
       interval: interval === 'year' || interval === 'month' ? interval : null,
       signedUpAt: startOf(subs),
       closed: !!tenant.closed_at,
+      isTest: tenant.settings?.test_business === true,
       lite,
       website,
       takeDown:
