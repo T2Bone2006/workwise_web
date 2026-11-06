@@ -9,7 +9,7 @@ export const META_PIXEL_ID = '1800844387634264';
 export const CONSENT_COOKIE = 'ww_consent';
 /** Which wording the choice was made under; see the site's lib/consent.ts. */
 export const CONSENT_VERSION_COOKIE = 'ww_consent_v';
-export const CONSENT_VERSION = '2';
+export const CONSENT_VERSION = '3';
 /** The visitor's random code, set by the marketing site after Accept. */
 export const PERSON_COOKIE = 'ww_vid';
 
