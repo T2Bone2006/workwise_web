@@ -16,6 +16,8 @@ const STATUS_LABELS: Record<string, string> = {
   pending_send: 'Ready to send',
   assigned: 'Assigned',
   accepted: 'Accepted',
+  en_route: 'On the way',
+  arrived: 'Arrived',
   in_progress: 'In progress',
   paused: 'Paused',
   completed: 'Completed',
@@ -29,6 +31,8 @@ const STATUS_DOT_CLASS: Record<string, string> = {
   pending_send: 'bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.45)]',
   assigned: 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.4)]',
   accepted: 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.4)]',
+  en_route: 'bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.4)]',
+  arrived: 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.4)]',
   in_progress: 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.4)]',
   paused: 'bg-amber-300 shadow-[0_0_8px_rgba(180,83,9,0.35)]',
   completed: 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]',
@@ -117,6 +121,9 @@ export function JobStatusTimeline({ entries, showActor = true }: JobStatusTimeli
                     <p className="mt-0.5 text-xs text-muted-foreground/80">
                       {changedByLabel(entry)}
                     </p>
+                  ) : null}
+                  {entry.notes && !entry.notes.toLowerCase().includes('assign') ? (
+                    <p className="mt-0.5 text-xs text-muted-foreground">{entry.notes}</p>
                   ) : null}
                   {declineReason(entry) && (
                     <p className="mt-1 text-xs italic text-muted-foreground">
