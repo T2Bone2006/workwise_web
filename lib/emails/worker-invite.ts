@@ -1,9 +1,6 @@
 import { APP_DOWNLOAD_URL } from '@/lib/app-stores';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const LOGO_URL = SUPABASE_URL
-  ? `${SUPABASE_URL}/storage/v1/object/public/assets/workwise_logo.png`
-  : 'https://app.joinworkwise.com/workwise_logo.png';
+const LOGO_URL = 'https://app.joinworkwise.com/brand/email-logo-reversed.png';
 
 export function buildWorkerInviteEmail({
   workerName,
@@ -30,7 +27,7 @@ export function buildWorkerInviteEmail({
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
           <tr>
             <td style="background:linear-gradient(to right,#1d4ed8,#2563eb,#06b6d4);padding:32px 24px;text-align:center;">
-              <img src="${LOGO_URL}" alt="WorkWise" width="120" height="120" style="display:block;margin:0 auto 16px;height:auto;max-width:120px;" />
+              <img src="${LOGO_URL}" alt="WorkWise" width="200" style="display:block;margin:0 auto 16px;height:auto;max-width:200px;border:0;" />
               <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.02em;">You're invited to WorkWise</h1>
             </td>
           </tr>

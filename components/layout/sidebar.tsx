@@ -152,7 +152,7 @@ function ClassicSidebar({
       >
         <div className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-accent/20">
           <Image
-            src="/workwise_logo.png"
+            src="/brand/mark-tile.png"
             alt="WorkWise"
             width={28}
             height={28}

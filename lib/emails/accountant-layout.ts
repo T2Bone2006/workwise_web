@@ -1,9 +1,6 @@
 // Shared by the two accountant emails: same branded shell as the other WorkWise emails.
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const LOGO_URL = SUPABASE_URL
-  ? `${SUPABASE_URL}/storage/v1/object/public/assets/workwise_logo.png`
-  : 'https://app.joinworkwise.com/workwise_logo.png';
+const LOGO_URL = 'https://app.joinworkwise.com/brand/email-logo-reversed.png';
 
 export function escapeHtml(value: string): string {
   return value
@@ -34,7 +31,7 @@ export function accountantEmailShell(p: { title: string; heading: string; bodyHt
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
           <tr>
             <td style="background:linear-gradient(to right,#1d4ed8,#2563eb,#06b6d4);padding:28px 24px;text-align:center;">
-              <img src="${LOGO_URL}" alt="WorkWise" width="96" height="96" style="display:block;margin:0 auto 14px;height:auto;max-width:96px;" />
+              <img src="${LOGO_URL}" alt="WorkWise" width="180" style="display:block;margin:0 auto 14px;height:auto;max-width:180px;border:0;" />
               <h1 style="margin:0;color:#ffffff;font-size:21px;font-weight:600;letter-spacing:-0.02em;">${escapeHtml(p.heading)}</h1>
             </td>
           </tr>

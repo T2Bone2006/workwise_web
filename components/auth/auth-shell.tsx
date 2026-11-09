@@ -59,16 +59,21 @@ function Wordmark({ onDark }: { onDark?: boolean }) {
       )}
     >
       <Image
-        src="/workwise_logo.png"
-        alt=""
-        width={32}
-        height={32}
-        className="size-8 object-contain"
+        src="/brand/lockup-horizontal-colour.svg"
+        alt="WorkWise"
+        width={174}
+        height={28}
+        className={cn('h-7 w-auto dark:hidden', onDark && 'hidden')}
         priority
       />
-      <span className="text-[17px] font-semibold tracking-tight text-[#0A1A2E] dark:text-[#EAF1FB]">
-        WorkWise
-      </span>
+      <Image
+        src="/brand/lockup-horizontal-reversed.svg"
+        alt="WorkWise"
+        width={174}
+        height={28}
+        className={cn('hidden h-7 w-auto dark:block', onDark && '!block')}
+        priority
+      />
     </a>
   );
 }

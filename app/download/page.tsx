@@ -42,7 +42,7 @@ export default async function DownloadPage() {
       <CardHeader className="space-y-1 text-center">
         <div className="mb-6 flex justify-center">
           <Image
-            src="/workwise_logo.png"
+            src="/brand/mark-tile.png"
             alt="WorkWise"
             width={120}
             height={120}

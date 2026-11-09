@@ -141,7 +141,7 @@ function ResetPasswordContent() {
       <CardHeader className="space-y-1 text-center">
         <div className="flex justify-center mb-6">
           <Image
-            src="/workwise_logo.png"
+            src="/brand/mark-tile.png"
             alt="WorkWise"
             width={120}
             height={120}
@@ -260,7 +260,7 @@ function ResetPasswordLoadingCard() {
       <CardHeader className="space-y-1 text-center">
         <div className="flex justify-center mb-6">
           <Image
-            src="/workwise_logo.png"
+            src="/brand/mark-tile.png"
             alt="WorkWise"
             width={120}
             height={120}

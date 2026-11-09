@@ -132,7 +132,7 @@ function PortalFrame({
   return (
     <div className={cn('flex h-full shrink-0 flex-col', className)}>
       <div className="flex shrink-0 items-center gap-2.5 px-5 pt-5 pb-1">
-        <Image src="/workwise_logo.png" alt="" width={32} height={32} className="size-8 shrink-0 object-contain" />
+        <Image src="/brand/mark-tile.png" alt="" width={32} height={32} className="size-8 shrink-0 object-contain" />
         <div className="min-w-0">
           <p className="text-[15px] leading-tight font-semibold">WorkWise</p>
           <p className="truncate text-[11px] text-muted-foreground">Customer portal</p>
