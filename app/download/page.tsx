@@ -1,4 +1,4 @@
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -41,14 +41,7 @@ export default async function DownloadPage() {
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
       <CardHeader className="space-y-1 text-center">
         <div className="mb-6 flex justify-center">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
+          <BrandMark width={120} alt="WorkWise" priority />
         </div>
         <CardTitle className="text-2xl font-semibold tracking-tight">
           Get the WorkWise app

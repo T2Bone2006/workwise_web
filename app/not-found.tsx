@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { NotFoundCard } from '@/components/layout/not-found-card';
 
@@ -16,14 +16,7 @@ export default function NotFound() {
       </div>
       <div className="relative z-0 w-full max-w-[440px]">
         <div className="mb-6 flex justify-center">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={96}
-            height={96}
-            className="h-auto w-[96px] object-contain"
-            priority
-          />
+          <BrandMark width={96} alt="WorkWise" priority />
         </div>
         <NotFoundCard />
       </div>

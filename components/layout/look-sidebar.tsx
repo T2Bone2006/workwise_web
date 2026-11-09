@@ -1,7 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Brain, ChevronLeft, ChevronsUpDown, Eye, Gift, Globe } from 'lucide-react';
@@ -151,7 +151,7 @@ export function LookSidebar({
     return (
       <div className={cn('flex h-full flex-col', isMobile ? 'w-full' : 'w-[216px] shrink-0')}>
         <div className="flex shrink-0 items-center gap-2.5 px-5 pt-5 pb-1">
-          <Image src="/brand/mark-tile.png" alt="" width={32} height={32} className="size-8 shrink-0 object-contain" />
+          <BrandMark width={34} />
           <div className={cn('min-w-0', FADE(expanded))} aria-hidden={!expanded}>
             <p className="text-[15px] leading-tight font-semibold">WorkWise</p>
             {tenantName ? (

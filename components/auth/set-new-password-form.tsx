@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
@@ -123,14 +123,7 @@ export function SetNewPasswordForm({ variant }: SetNewPasswordFormProps) {
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
       <CardHeader className="space-y-1 text-center">
         <div className="mb-6 flex justify-center">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
+          <BrandMark width={120} alt="WorkWise" priority />
         </div>
         <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}

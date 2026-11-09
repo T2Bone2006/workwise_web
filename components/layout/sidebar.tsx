@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import { ChevronLeft, Brain, Eye, Gift, Globe } from 'lucide-react';
 import type { TenantFeatures } from '@/lib/data/tenant-features';
 import { AddLiteCard } from './add-lite-card';
@@ -150,14 +150,8 @@ function ClassicSidebar({
           !isMobile && collapsed ? 'justify-center px-0' : 'gap-3 px-3'
         )}
       >
-        <div className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-accent/20">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={28}
-            height={28}
-            className="object-contain"
-          />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+          <BrandMark width={32} alt="WorkWise" />
         </div>
         <span
           className={cn(

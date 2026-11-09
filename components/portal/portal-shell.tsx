@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { leaveTo } from '@/lib/navigation/leave-to';
@@ -132,7 +132,7 @@ function PortalFrame({
   return (
     <div className={cn('flex h-full shrink-0 flex-col', className)}>
       <div className="flex shrink-0 items-center gap-2.5 px-5 pt-5 pb-1">
-        <Image src="/brand/mark-tile.png" alt="" width={32} height={32} className="size-8 shrink-0 object-contain" />
+        <BrandMark width={34} />
         <div className="min-w-0">
           <p className="text-[15px] leading-tight font-semibold">WorkWise</p>
           <p className="truncate text-[11px] text-muted-foreground">Customer portal</p>

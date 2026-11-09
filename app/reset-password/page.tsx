@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import Image from 'next/image';
+import { BrandMark } from '@/components/brand/brand-mark';
 import { useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import {
@@ -140,14 +140,7 @@ function ResetPasswordContent() {
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
       <CardHeader className="space-y-1 text-center">
         <div className="flex justify-center mb-6">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
+          <BrandMark width={120} alt="WorkWise" priority />
         </div>
         <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -259,14 +252,7 @@ function ResetPasswordLoadingCard() {
     <Card className="glass-card backdrop-blur-xl border-white/10 transition-all duration-300 dark:backdrop-blur-2xl dark:border-white/[0.06]">
       <CardHeader className="space-y-1 text-center">
         <div className="flex justify-center mb-6">
-          <Image
-            src="/brand/mark-tile.png"
-            alt="WorkWise"
-            width={120}
-            height={120}
-            className="h-auto w-[120px] object-contain"
-            priority
-          />
+          <BrandMark width={120} alt="WorkWise" priority />
         </div>
         <CardTitle className="text-2xl font-semibold tracking-tight">
           Reset your password
