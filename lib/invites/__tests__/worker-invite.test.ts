@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { businessSetupSchema } from '@/lib/validations/business-setup';
-import { inviteKindFor, isEmailExistsError, parseInviteKind } from '@/lib/invites/worker-invite';
+import {
+  existingLoginEmailPlan,
+  inviteKindFor,
+  isEmailExistsError,
+  parseInviteKind,
+  workerEmailChangeFollowUp,
+} from '@/lib/invites/worker-invite';
 
 describe('inviteKindFor', () => {
   it('sends the set-up invite to subcontractors only', () => {
@@ -34,6 +40,34 @@ describe('isEmailExistsError', () => {
     expect(isEmailExistsError(null)).toBe(false);
     expect(isEmailExistsError({ message: 'Rate limit exceeded' })).toBe(false);
     expect(isEmailExistsError({ code: 'over_email_send_rate_limit' })).toBe(false);
+  });
+});
+
+describe('existingLoginEmailPlan', () => {
+  it('keeps the login when the invite is resent to the same address', () => {
+    expect(existingLoginEmailPlan('rs@loxuk.com', 'rs@loxuk.com', 'user-1', 'user-1')).toBe('unchanged');
+    expect(existingLoginEmailPlan(' RS@loxuk.com ', 'rs@loxuk.com', 'user-1', 'user-1')).toBe('unchanged');
+  });
+
+  it('renames that same login when the address on the invite changes', () => {
+    expect(existingLoginEmailPlan('rs@loxuk.com', 'info@loxuk.com', null, 'user-1')).toBe('rename');
+    expect(existingLoginEmailPlan('rs@loxuk.com', 'info@loxuk.com', 'user-1', 'user-1')).toBe('rename');
+  });
+
+  it('refuses a new address that already belongs to someone else', () => {
+    expect(existingLoginEmailPlan('rs@loxuk.com', 'info@loxuk.com', 'user-2', 'user-1')).toBe('blocked');
+  });
+});
+
+describe('workerEmailChangeFollowUp', () => {
+  it('sends a fresh invite only while the worker has not accepted', () => {
+    expect(workerEmailChangeFollowUp('pending')).toBe('invite');
+  });
+
+  it('tells an accepted or deactivated worker that their sign-in address moved', () => {
+    expect(workerEmailChangeFollowUp('accepted')).toBe('notice');
+    expect(workerEmailChangeFollowUp('deactivated')).toBe('notice');
+    expect(workerEmailChangeFollowUp(null)).toBe('notice');
   });
 });
 

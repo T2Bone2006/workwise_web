@@ -5,8 +5,16 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { workerSchema } from '@/lib/validations/worker';
 import { buildWorkerInviteEmail } from '@/lib/emails/worker-invite';
 import { buildWorkerBusinessInviteEmail } from '@/lib/emails/worker-business-invite';
+import { buildWorkerSignInEmailChangedEmail } from '@/lib/emails/worker-sign-in-email-changed';
 import { reconcileForWorker } from '@/lib/billing/worker-discount';
-import { parseInviteKind } from '@/lib/invites/worker-invite';
+import {
+  EMAIL_EXISTS_MESSAGE,
+  EMAIL_REQUIRED_FOR_LOGIN_MESSAGE,
+  existingLoginEmailPlan,
+  isEmailExistsError,
+  parseInviteKind,
+  workerEmailChangeFollowUp,
+} from '@/lib/invites/worker-invite';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { postcodeToLatLng } from '@/lib/utils/postcode';
@@ -149,7 +157,7 @@ export async function updateWorker(workerId: string, formData: FormData) {
 
   const { data: existing } = await supabase
     .from('workers')
-    .select('id, primary_tenant_id, email, invite_status')
+    .select('id, primary_tenant_id, email, invite_status, user_id')
     .eq('id', workerId)
     .single();
 
@@ -192,6 +200,31 @@ export async function updateWorker(workerId: string, formData: FormData) {
     updatePayload.home_lng = home_lng;
   }
 
+  // The address on the worker is the address they sign in with. Move that login
+  // before saving. Saving first, then inviting the new address, used to create a
+  // second login and leave the password on the old one.
+  const oldEmail = (existing.email ?? '').trim().toLowerCase();
+  const newEmailForLogin = (validated.email ?? '').trim().toLowerCase();
+  const emailChanged = Boolean(newEmailForLogin) && newEmailForLogin !== oldEmail;
+  if (existing.user_id && !newEmailForLogin && oldEmail) {
+    return { success: false, error: EMAIL_REQUIRED_FOR_LOGIN_MESSAGE };
+  }
+  let loginAdmin: ReturnType<typeof createAdminClient> | null = null;
+  let renamedLogin = false;
+  if (existing.user_id && emailChanged) {
+    try {
+      loginAdmin = createAdminClient();
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : 'Server configuration error',
+      };
+    }
+    const aligned = await alignExistingWorkerLogin(loginAdmin, existing.user_id, newEmailForLogin);
+    if (!aligned.ok) return { success: false, error: aligned.error };
+    renamedLogin = aligned.loginRenamed;
+  }
+
   const { error } = await supabase
     .from('workers')
     .update(updatePayload)
@@ -200,16 +233,21 @@ export async function updateWorker(workerId: string, formData: FormData) {
 
   if (error) {
     console.error('Update worker error:', error);
+    if (renamedLogin && loginAdmin && existing.user_id) {
+      await alignExistingWorkerLogin(loginAdmin, existing.user_id, oldEmail);
+    }
     return { success: false, error: error.message };
   }
 
   // A worker who hasn't accepted yet is waiting on an email at the old address: changing it
-  // sends a fresh invitation to the new one (the old link stops working).
+  // sends a fresh invitation to the new one (the old link stops working). Anyone who already
+  // has a password is emailed that the sign-in address moved and the password did not.
   let inviteResentTo: string | null = null;
   let inviteResendError: string | null = null;
-  const newEmail = validated.email?.trim().toLowerCase() ?? '';
-  const oldEmail = (existing.email ?? '').trim().toLowerCase();
-  if (existing.invite_status === 'pending' && newEmail && newEmail !== oldEmail) {
+  let signInEmailMovedTo: string | null = null;
+  let signInEmailNoticeError: string | null = null;
+  const newEmail = newEmailForLogin;
+  if (emailChanged && workerEmailChangeFollowUp(existing.invite_status) === 'invite') {
     const { data: openInvite } = await supabase
       .from('worker_invites')
       .select('id')
@@ -224,11 +262,38 @@ export async function updateWorker(workerId: string, formData: FormData) {
       if (resent.success) inviteResentTo = newEmail;
       else inviteResendError = resent.error ?? 'Could not send the new invitation';
     }
+  } else if (renamedLogin && newEmail) {
+    signInEmailMovedTo = newEmail;
+    const { data: tenantData } = await supabase
+      .from('tenants')
+      .select('name')
+      .eq('id', userData.tenant_id)
+      .single();
+    const { subject, html } = buildWorkerSignInEmailChangedEmail({
+      workerName: validated.full_name,
+      tenantName: tenantData?.name ?? 'WorkWise',
+      email: newEmail,
+    });
+    try {
+      const { error: noticeError } = await resend.emails.send({
+        from: FROM_EMAIL,
+        to: newEmail,
+        subject,
+        html,
+      });
+      if (noticeError) {
+        console.error('[updateWorker] sign-in email notice:', noticeError);
+        signInEmailNoticeError = 'Failed to email them about the new sign-in address.';
+      }
+    } catch (e) {
+      console.error('[updateWorker] sign-in email notice:', e);
+      signInEmailNoticeError = 'Failed to email them about the new sign-in address.';
+    }
   }
 
   revalidatePath('/workers');
   revalidatePath(`/workers/${workerId}`);
-  return { success: true, inviteResentTo, inviteResendError };
+  return { success: true, inviteResentTo, inviteResendError, signInEmailMovedTo, signInEmailNoticeError };
 }
 
 export async function updateWorkerAutoAssign(workerId: string, exclude: boolean) {
@@ -366,6 +431,54 @@ async function revokeWorkerInviteImpl(inviteId: string) {
   return { success: true };
 }
 
+/**
+ * Keep a worker's one login on the address saved on their record.
+ * Renaming confirms the new address immediately so sign-in uses it, and the
+ * password stays. Another account that already has the address blocks the change.
+ */
+async function alignExistingWorkerLogin(
+  admin: SupabaseClient,
+  userId: string,
+  emailNorm: string,
+): Promise<{ ok: true; loginRenamed: boolean } | { ok: false; error: string; loginRenamed: false }> {
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data.user) {
+    console.error('[alignExistingWorkerLogin] getUserById:', error);
+    return { ok: false, error: 'The login for this worker could not be found.', loginRenamed: false };
+  }
+
+  const ownerId = await findAuthUserIdByEmail(admin, emailNorm);
+  const plan = existingLoginEmailPlan(data.user.email, emailNorm, ownerId, userId);
+  if (plan === 'blocked') {
+    return { ok: false, error: EMAIL_EXISTS_MESSAGE, loginRenamed: false };
+  }
+  if (plan === 'unchanged') return { ok: true, loginRenamed: false };
+
+  const previousEmail = data.user.email ?? '';
+  const { error: renameError } = await admin.auth.admin.updateUserById(userId, {
+    email: emailNorm,
+    email_confirm: true,
+  });
+  if (renameError) {
+    console.error('[alignExistingWorkerLogin] rename:', renameError);
+    return { ok: false, error: renameError.message, loginRenamed: false };
+  }
+
+  const { error: profileError } = await admin
+    .from('users')
+    .update({ email: emailNorm, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (profileError) {
+    console.error('[alignExistingWorkerLogin] profile email:', profileError);
+    if (previousEmail) {
+      await admin.auth.admin.updateUserById(userId, { email: previousEmail, email_confirm: true });
+    }
+    return { ok: false, error: profileError.message, loginRenamed: false };
+  }
+
+  return { ok: true, loginRenamed: true };
+}
+
 export async function resendWorkerInvite(inviteId: string) {
   const tenantId = await getOwnerTenantId();
   if (!tenantId) return { success: false, error: 'No tenant found' };
@@ -395,7 +508,7 @@ export async function resendWorkerInvite(inviteId: string) {
 
   const { data: worker, error: workerError } = await supabase
     .from('workers')
-    .select('id, full_name, email, primary_tenant_id')
+    .select('id, full_name, email, primary_tenant_id, user_id')
     .eq('id', invite.worker_id)
     .single();
 
@@ -414,20 +527,42 @@ export async function resendWorkerInvite(inviteId: string) {
     .eq('id', tenantId)
     .single();
 
-  const { error: generateError } = await admin.auth.admin.generateLink({
-    type: 'invite',
-    email: emailNorm,
-    options: {
-      data: {
-        full_name: worker.full_name,
-        primary_tenant_id: tenantId,
+  // The worker already has a login. Invite that same login. generateLink on a
+  // new address creates a second one and leaves the password on the first.
+  if (worker.user_id) {
+    const aligned = await alignExistingWorkerLogin(admin, worker.user_id, emailNorm);
+    if (!aligned.ok) return { success: false, error: aligned.error };
+  } else {
+    const { data: inviteData, error: generateError } = await admin.auth.admin.generateLink({
+      type: 'invite',
+      email: emailNorm,
+      options: {
+        data: {
+          full_name: worker.full_name,
+          primary_tenant_id: tenantId,
+        },
       },
-    },
-  });
+    });
 
-  if (generateError) {
-    console.error('[resendWorkerInvite] generateLink:', generateError);
-    return { success: false, error: generateError.message };
+    if (generateError) {
+      console.error('[resendWorkerInvite] generateLink:', generateError);
+      return {
+        success: false,
+        error: isEmailExistsError(generateError) ? EMAIL_EXISTS_MESSAGE : generateError.message,
+      };
+    }
+
+    const createdUserId = inviteData?.user?.id ?? null;
+    if (createdUserId) {
+      const { error: linkError } = await admin
+        .from('workers')
+        .update({ user_id: createdUserId })
+        .eq('id', worker.id);
+      if (linkError) {
+        console.error('[resendWorkerInvite] link user_id:', linkError);
+        return { success: false, error: linkError.message };
+      }
+    }
   }
 
   const { error: deleteInviteError } = await admin

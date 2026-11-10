@@ -9,6 +9,8 @@ function makeAdmin(script: {
   worker?: Record<string, unknown> | null;
   rpc?: { error: { code?: string; message: string } | null };
   updateUserError?: unknown;
+  authEmail?: string;
+  authLookupError?: unknown;
 }) {
   const ops: Op[] = [];
   const answer = (table: string, method: string): Result => {
@@ -45,6 +47,13 @@ function makeAdmin(script: {
     },
     auth: {
       admin: {
+        getUserById: (id: string) => {
+          ops.push({ table: 'auth', method: 'getUserById', args: [id] });
+          return Promise.resolve({
+            data: { user: { id, email: script.authEmail ?? 'sam@example.com' } },
+            error: script.authLookupError ?? null,
+          });
+        },
         updateUserById: (id: string, attrs: unknown) => {
           ops.push({ table: 'auth', method: 'updateUserById', args: [id, attrs] });
           return Promise.resolve({ error: script.updateUserError ?? null });
@@ -104,6 +113,15 @@ describe('POST /api/invite/confirm', () => {
     current = makeAdmin({ invite: invite() });
     const res = await post({ token: 't', password: 'longenough1' });
     expect((await res.json()).kind).toBe('employee');
+  });
+
+  it('refuses when the invite address is not the login, before setting the password', async () => {
+    current = makeAdmin({ invite: invite('employee'), authEmail: 'rs@loxuk.com' });
+    const res = await post({ token: 't', password: 'longenough1' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/doesn't match the email on the login/);
+    expect(current.ops.some((o) => o.method === 'updateUserById')).toBe(false);
+    expect(current.ops.some((o) => o.table === 'worker_invites' && o.method === 'update')).toBe(false);
   });
 
   it('refuses a set-up invite without a business name, before setting the password', async () => {

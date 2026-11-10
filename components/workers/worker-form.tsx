@@ -189,15 +189,22 @@ export function WorkerForm({ mode, tenantId, tenantSkills, worker }: WorkerFormP
     setPendingForm(null);
     const resentTo = (result as { inviteResentTo?: string | null }).inviteResentTo;
     const resendError = (result as { inviteResendError?: string | null }).inviteResendError;
+    const signInEmailMovedTo = (result as { signInEmailMovedTo?: string | null }).signInEmailMovedTo;
+    const signInEmailNoticeError = (result as { signInEmailNoticeError?: string | null }).signInEmailNoticeError;
     toast.success(
       mode === 'create'
         ? 'Worker created'
         : resentTo
           ? `Worker updated. A new invitation has gone to ${resentTo}.`
-          : 'Worker updated'
+          : signInEmailMovedTo
+            ? `Worker updated. They now sign in with ${signInEmailMovedTo}. Their password is unchanged.`
+            : 'Worker updated'
     );
     if (resendError) {
       toast.error(`Saved, but the new invitation didn't send: ${resendError}. Use Resend invite on their page.`);
+    }
+    if (signInEmailNoticeError) {
+      toast.error(signInEmailNoticeError);
     }
     await leaveTo('/workers');
   }

@@ -1,6 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
-import { BUSINESS_NAME_MESSAGE, INVITE_INVALID_MESSAGE, parseInviteKind } from '@/lib/invites/worker-invite';
+import {
+  BUSINESS_NAME_MESSAGE,
+  INVITE_INVALID_MESSAGE,
+  LOGIN_EMAIL_MISMATCH_MESSAGE,
+  parseInviteKind,
+} from '@/lib/invites/worker-invite';
 import { businessSetupSchema } from '@/lib/validations/business-setup';
 
 export async function POST(req: Request) {
@@ -82,6 +87,18 @@ export async function POST(req: Request) {
 
   const userId = worker.user_id;
   const now = new Date().toISOString();
+
+  const { data: login, error: loginError } = await adminClient.auth.admin.getUserById(userId);
+  if (loginError || !login?.user) {
+    console.error('[invite/confirm] getUserById:', loginError);
+    return NextResponse.json({ error: 'Failed to set password' }, { status: 500 });
+  }
+  const loginEmail = login.user.email?.trim().toLowerCase() ?? '';
+  const inviteEmail = String(record.email ?? '').trim().toLowerCase();
+  if (!loginEmail || loginEmail !== inviteEmail) {
+    console.error('[invite/confirm] login email does not match invite:', userId);
+    return NextResponse.json({ error: LOGIN_EMAIL_MISMATCH_MESSAGE }, { status: 400 });
+  }
 
   const { error: updateError } = await adminClient.auth.admin.updateUserById(userId, {
     password,
