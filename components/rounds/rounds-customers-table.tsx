@@ -433,7 +433,7 @@ export function RoundsCustomersTable({
                 id="customer-search"
                 value={search}
                 onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Name, phone, email…"
+                placeholder="Name, phone, email, address…"
                 className="pl-9"
                 aria-label="Search customers"
               />

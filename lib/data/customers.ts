@@ -284,9 +284,9 @@ export async function getCustomersForTenantList(
       query = query.eq('type', filters.type);
     }
     if (filters.search?.trim()) {
-      const term = `%${filters.search.trim()}%`;
+      const term = `%${filters.search.replace(/[,()*%]/g, ' ').replace(/\s+/g, ' ').trim()}%`;
       query = query.or(
-        `name.ilike.${term},email.ilike.${term},phone.ilike.${term}`
+        `name.ilike.${term},email.ilike.${term},phone.ilike.${term},billing_address.ilike.${term}`
       );
     }
 

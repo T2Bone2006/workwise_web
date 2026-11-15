@@ -220,8 +220,30 @@ export async function getRoundsCustomers(
 
     const search = filters.search?.trim();
     if (search) {
-      const term = `%${search}%`;
-      query = query.or(`name.ilike.${term},email.ilike.${term},phone.ilike.${term}`);
+      // Commas/brackets would break the PostgREST filter string, so swap them for spaces.
+      const term = `%${search.replace(/[,()*%]/g, ' ').replace(/\s+/g, ' ').trim()}%`;
+      // Service addresses live on the agreements, so find customers whose agreement address/postcode matches too.
+      const { data: addressHits } = await supabase
+        .from('service_agreements')
+        .select('customer_id')
+        .eq('tenant_id', tenantId)
+        .or(`address.ilike.${term},postcode.ilike.${term}`)
+        .limit(1000);
+      const addressIds = [
+        ...new Set(
+          (addressHits ?? [])
+            .map((hit) => (hit as { customer_id?: unknown }).customer_id)
+            .filter((id): id is string => typeof id === 'string'),
+        ),
+      ];
+      const clauses = [
+        `name.ilike.${term}`,
+        `email.ilike.${term}`,
+        `phone.ilike.${term}`,
+        `billing_address.ilike.${term}`,
+      ];
+      if (addressIds.length > 0) clauses.push(`id.in.(${addressIds.join(',')})`);
+      query = query.or(clauses.join(','));
     }
 
     const { data, error } = await query;

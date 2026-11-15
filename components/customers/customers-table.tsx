@@ -310,7 +310,7 @@ export function CustomersTable({
                 <div className="relative flex-1 min-w-[180px] sm:max-w-[260px]">
                   <Search className="absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-gray-400" />
                   <Input
-                    placeholder="Name, email, phone..."
+                    placeholder="Name, email, phone, address..."
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     className="pl-9 pr-9"
