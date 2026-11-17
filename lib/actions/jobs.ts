@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { getOwnerTenantId } from '@/lib/auth/require-owner';
 import { assertCancellationInstant } from '@/lib/jobs/cancellation-time';
+import { cancelJobsInDb } from '@/lib/jobs/cancel-jobs';
+import { sendOutJobsInDb } from '@/lib/jobs/send-out-jobs';
 import {
   getJobsForExport,
   type ExportJobRow,
@@ -22,8 +24,6 @@ import { buildFullAddressString, resolveJobCoordinates } from '@/lib/utils/geoco
 import { detectSkills } from '@/lib/detect-skills';
 import { getTenantSkills, getTenantSkillsById } from '@/lib/actions/skills';
 import { logUserEdit } from '@/lib/services/ai-logger';
-import { notifyWorkersOfSentJobs } from '@/lib/jobs/notify-sent-jobs';
-import { toSentJob, type SentJob } from '@/lib/jobs/worker-job-alert';
 import { getConnectionsForTenant } from '@/lib/data/network';
 import { getAssignableWorkers } from '@/lib/actions/workers';
 import { dispatchJobToNetwork, handleNetworkJobDeclined } from '@/lib/actions/network';
@@ -696,21 +696,29 @@ export async function updateJobStatus(
       return { success: false, error: `Cannot change status from ${currentStatus} to ${newStatus}.` };
     }
 
-    let cancelledAt: string | null = null;
     if (newStatus === 'cancelled') {
       const checked = assertCancellationInstant(options?.cancelledAt ?? '');
       if (!checked.ok) return { success: false, error: checked.error };
-      cancelledAt = checked.iso;
+      const { data: { user } } = await supabase.auth.getUser();
+      const result = await cancelJobsInDb(supabase, {
+        tenantId,
+        userId: user?.id ?? null,
+        jobs: [{ id: jobId, status: currentStatus }],
+        cancelledAt: checked.iso,
+      });
+      if (result.cancelledIds.length === 0) {
+        return { success: false, error: result.error ?? 'Failed to update status.' };
+      }
+      revalidatePath('/jobs');
+      revalidatePath('/dashboard');
+      revalidatePath(`/jobs/${jobId}`);
+      return { success: true };
     }
 
     const updates: Record<string, unknown> = {
       status: newStatus,
       updated_at: new Date().toISOString(),
     };
-    if (newStatus === 'cancelled') {
-      // Drop it off an active round. Regular jobs already have a null position.
-      updates.route_position = null;
-    }
     if (newStatus === 'completed') {
       updates.completed_at = new Date().toISOString();
     }
@@ -759,12 +767,11 @@ export async function updateJobStatus(
         job_id: jobId,
         from_status: currentStatus,
         to_status: newStatus,
-        // A cancellation keeps the time the office chose, not the moment they clicked.
-        created_at: cancelledAt ?? recordedAt,
+        created_at: recordedAt,
         changed_by_user_id: user?.id ?? null,
         changed_by_worker_id: null,
-        notes: cancelledAt ? 'Cancelled' : null,
-        metadata: cancelledAt ? { cancelled_at: cancelledAt, recorded_at: recordedAt } : {},
+        notes: null,
+        metadata: {},
       });
 
     if (historyError) {
@@ -1727,77 +1734,17 @@ export async function sendPendingJobsToWorkers(
     }
 
     const supabase = await createClient();
-    let query = supabase
-      .from('jobs')
-      .select(
-        'id, reference_number, assigned_worker_id, postcode, scheduled_date, scheduled_time, customers(name)',
-      )
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending_send')
-      .not('assigned_worker_id', 'is', null);
-    if (jobIds) {
-      query = query.in('id', jobIds);
-    }
-    const { data: jobs, error: listError } = await query;
-
-    if (listError) {
-      console.error('[sendPendingJobsToWorkers] list', listError);
-      return { success: false, error: listError.message ?? 'Failed to load jobs.' };
-    }
-
-    const list = jobs ?? [];
-    if (list.length === 0) {
-      return { success: false, error: 'No jobs ready to send.' };
-    }
-
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const userId = user?.id ?? null;
-    const now = new Date().toISOString();
-    let sent = 0;
-    const sentJobs: SentJob[] = [];
-
-    for (const job of list) {
-      const { error: upErr } = await supabase
-        .from('jobs')
-        .update({ status: 'assigned', updated_at: now })
-        .eq('id', job.id)
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending_send');
-
-      if (upErr) {
-        console.error('[sendPendingJobsToWorkers] update', upErr);
-        continue;
-      }
-
-      const { error: histErr } = await supabase.from('job_status_history').insert({
-        job_id: job.id,
-        from_status: 'pending_send',
-        to_status: 'assigned',
-        created_at: now,
-        changed_by_user_id: userId,
-        changed_by_worker_id: null,
-        notes: 'Sent to worker',
-        metadata: {},
-      });
-
-      if (histErr) {
-        console.error('[sendPendingJobsToWorkers] history', histErr);
-      }
-
-      const sentJob = toSentJob(job as Parameters<typeof toSentJob>[0]);
-      if (sentJob) sentJobs.push(sentJob);
-      sent += 1;
-    }
-
-    await notifyWorkersOfSentJobs({ tenantId, jobs: sentJobs });
+    const result = await sendOutJobsInDb(supabase, { tenantId, userId: user?.id ?? null, jobIds });
+    if (!result.ok) return { success: false, error: result.error };
 
     revalidatePath('/jobs');
-    for (const job of list) {
-      revalidatePath(`/jobs/${job.id}`);
+    for (const id of result.jobIds) {
+      revalidatePath(`/jobs/${id}`);
     }
-    return { success: true, sent };
+    return { success: true, sent: result.sent };
   } catch (err) {
     console.error('[sendPendingJobsToWorkers]', err);
     return {
@@ -1819,9 +1766,7 @@ export async function sendJobToWorker(jobId: string): Promise<SendJobToWorkerRes
     const supabase = await createClient();
     const { data: job, error: fetchError } = await supabase
       .from('jobs')
-      .select(
-        'id, reference_number, assigned_worker_id, status, postcode, scheduled_date, scheduled_time, customers(name)',
-      )
+      .select('id, assigned_worker_id, status')
       .eq('id', jobId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -1834,40 +1779,11 @@ export async function sendJobToWorker(jobId: string): Promise<SendJobToWorkerRes
       return { success: false, error: 'This job is not waiting to be sent to a worker.' };
     }
 
-    const now = new Date().toISOString();
-    const { error: upErr } = await supabase
-      .from('jobs')
-      .update({ status: 'assigned', updated_at: now })
-      .eq('id', jobId)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending_send');
-
-    if (upErr) {
-      console.error('[sendJobToWorker] update', upErr);
-      return { success: false, error: upErr.message ?? 'Failed to update job.' };
-    }
-
     const {
       data: { user },
     } = await supabase.auth.getUser();
-
-    const { error: histErr } = await supabase.from('job_status_history').insert({
-      job_id: jobId,
-      from_status: 'pending_send',
-      to_status: 'assigned',
-      created_at: now,
-      changed_by_user_id: user?.id ?? null,
-      changed_by_worker_id: null,
-      notes: 'Sent to worker',
-      metadata: {},
-    });
-
-    if (histErr) {
-      console.error('[sendJobToWorker] history', histErr);
-    }
-
-    const sentJob = toSentJob(job as Parameters<typeof toSentJob>[0]);
-    await notifyWorkersOfSentJobs({ tenantId, jobs: sentJob ? [sentJob] : [] });
+    const result = await sendOutJobsInDb(supabase, { tenantId, userId: user?.id ?? null, jobIds: [jobId] });
+    if (!result.ok) return { success: false, error: result.error };
 
     revalidatePath('/jobs');
     revalidatePath(`/jobs/${jobId}`);

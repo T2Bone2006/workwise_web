@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { countSegments } from '@/lib/messaging/gsm';
 import {
   WORKER_JOB_TEXT_ALLOWANCE,
+  cancelAlertEmail,
+  cancelAlertSms,
   groupSentJobs,
   jobAlertEmail,
   jobAlertSms,
@@ -10,6 +12,8 @@ import {
   shouldTextJobAlert,
   toSentJob,
   ukMobileForAlert,
+  updateAlertEmail,
+  updateAlertSms,
   type SentJob,
 } from '@/lib/jobs/worker-job-alert';
 
@@ -82,6 +86,26 @@ describe('job alert wording', () => {
     const long = jobAlertSms(`${'Locksmith '.repeat(20)}`, 12);
     expect(countSegments(long).segments).toBe(1);
     expect(long).toBe('12 new jobs. Open the app.');
+  });
+
+  it('words a cancellation so the worker knows not to attend, one text segment', () => {
+    const { subject, html } = cancelAlertEmail({ businessName: 'RS Locksmiths', jobs: [job()] });
+    expect(subject).toBe('Job cancelled by RS Locksmiths');
+    expect(html).toContain("You don't need to attend it.");
+    expect(html).toContain('15 Oct, 09:00 · SW1A 1AA · Jane Smith');
+    const many = cancelAlertEmail({ businessName: 'RS Locksmiths', jobs: [job(), job({ id: 'job-2' })] });
+    expect(many.subject).toBe('2 jobs cancelled by RS Locksmiths');
+    expect(cancelAlertSms('RS Locksmiths', 1)).toBe('RS Locksmiths: 1 job cancelled. Open the app.');
+    expect(countSegments(cancelAlertSms(`${'Locksmith '.repeat(20)}`, 12)).segments).toBe(1);
+  });
+
+  it('words a change so the worker checks the new details, one text segment', () => {
+    const { subject, html } = updateAlertEmail({ businessName: 'RS Locksmiths', jobs: [job({ scheduledDate: '2026-11-18', scheduledTime: '09:00:00' })] });
+    expect(subject).toBe('Job changed by RS Locksmiths');
+    expect(html).toContain('18 Nov, 09:00 · SW1A 1AA · Jane Smith');
+    expect(updateAlertEmail({ businessName: 'RS', jobs: [job(), job({ id: 'b' })] }).subject).toBe('2 jobs changed by RS');
+    expect(updateAlertSms('RS Locksmiths', 3)).toBe('RS Locksmiths: 3 jobs changed. Open the app.');
+    expect(countSegments(updateAlertSms(`${'Locksmith '.repeat(20)}`, 12)).segments).toBe(1);
   });
 
   it('texts a UK mobile only, and emails unless they turned email off', () => {

@@ -140,6 +140,7 @@ export const findJobs = defineTool({
   status: 'Looking through your jobs',
   schema: z.object({
     query: z.string().max(80).optional().describe('Reference, address, postcode, customer or job wording.'),
+    references: z.array(z.string().max(40)).max(40).optional().describe('A pasted list of job references to match exactly (e.g. a customer\'s cancellation list). Gives not_found for any that match nothing.'),
     status: z.array(z.enum(JOB_STATUSES)).max(9).optional(),
     worker_id: z.string().uuid().optional(),
     customer_id: z.string().uuid().optional(),
@@ -169,13 +170,18 @@ export const findJobs = defineTool({
       q = q.or(clauses.join(','));
     }
 
+    const wanted = [...new Set((input.references ?? []).map((r) => searchTerm(r)).filter(Boolean))];
+    if (wanted.length > 0) q = q.or(wanted.map((r) => `reference_number.ilike.${r}`).join(','));
+
     const dated = Boolean(input.from || input.to);
     q = dated
       ? q.order('scheduled_date', { ascending: true }).order('scheduled_time', { ascending: true, nullsFirst: false })
       : q.order('created_at', { ascending: false });
-    const { data, error, count } = await q.limit(30);
+    const { data, error, count } = await q.limit(wanted.length > 0 ? 60 : 30);
     if (error) return toolError('Could not read jobs.');
     const jobs = ((data ?? []) as Raw[]).map((r) => briefJob(r, ctx.today));
+    const found = new Set(jobs.map((j) => j.reference.toLowerCase()));
+    const notFound = wanted.filter((r) => !found.has(r.toLowerCase()));
 
     const cards: AssistantCard[] = [];
     if (input.show && jobs.length > 0) {
@@ -186,7 +192,7 @@ export const findJobs = defineTool({
         footer: (count ?? jobs.length) > MAX_CARD_ROWS ? `${(count ?? jobs.length) - MAX_CARD_ROWS} more not shown` : undefined,
       });
     }
-    return ok({ total_matching: count ?? jobs.length, showing: jobs.length, jobs }, { cards });
+    return ok({ total_matching: count ?? jobs.length, showing: jobs.length, jobs, ...(wanted.length > 0 ? { not_found: notFound } : {}) }, { cards });
   },
 });
 

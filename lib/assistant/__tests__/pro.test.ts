@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignJobs, emailJobOutcome, rescheduleJobs, setJobPriority } from '@/lib/assistant/actions/pro';
+import { assignJobs, cancelJobs, emailJobOutcome, rescheduleJobs, sendOutJobs, setJobPriority } from '@/lib/assistant/actions/pro';
 import { covers, type AssistantCtx } from '@/lib/assistant/caller';
 import { buildSystemPrompt, contextLine } from '@/lib/assistant/prompt';
 import { anthropicTools, toolsFor } from '@/lib/assistant/registry';
@@ -76,6 +76,8 @@ describe('the Pro prompt and tool set', () => {
       'reschedule_jobs',
       'set_job_priority',
       'email_job_outcome',
+      'cancel_jobs',
+      'send_out_jobs',
     ]);
     const both = toolsFor({ rounds: true, lite: false, pro: true }).map((t) => t.name);
     expect(new Set(both).size).toBe(both.length);
@@ -228,5 +230,58 @@ describe('set_job_priority and email_job_outcome', () => {
     if (!good.ok) return;
     expect(good.preview.lines).toEqual(['To: customer@example.com', 'RS-1001 · Not completed · 12 High Street, BS1 1AA', 'Your note: Sorry about that']);
     expect(good.preview.confirmLabel).toBe('Send email');
+  });
+});
+
+describe('cancel_jobs', () => {
+  it('cancels jobs that have not started and lists the ones it leaves alone', async () => {
+    const ctx = ctxWith({ jobs: [job(), job({ id: B, reference_number: 'RS-1002', status: 'in_progress' })] });
+    const r = await cancelJobs.prepare(ctx, { job_ids: [A, B] });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.preview.title).toBe('Cancel 1 job');
+    expect(r.preview.lines).toHaveLength(1);
+    expect(r.preview.note).toContain('Left alone');
+    expect(r.preview.note).toContain('RS-1002 (In progress)');
+    expect(r.preview.note).toContain('cannot be undone');
+    expect((r.params as { jobs: Array<{ ref: string }> }).jobs.map((j) => j.ref)).toEqual(['RS-1001']);
+  });
+
+  it('refuses when nothing on the list can be cancelled from here', async () => {
+    const done = await cancelJobs.prepare(ctxWith({ jobs: [job({ status: 'completed' })] }), { job_ids: [A] });
+    expect(done.ok).toBe(false);
+    const gone = await cancelJobs.prepare(ctxWith({ jobs: [job({ status: 'cancelled' })] }), { job_ids: [A] });
+    expect(gone.ok).toBe(false);
+  });
+
+  it('records the time the cancellation came in, and wants a day and a time together', async () => {
+    const ctx = ctxWith({ jobs: [job()] });
+    const stated = await cancelJobs.prepare(ctx, { job_ids: [A], received_date: '2026-11-04', received_time: '16:46' });
+    expect(stated.ok).toBe(true);
+    if (!stated.ok) return;
+    expect((stated.params as { cancelledAt: string }).cancelledAt).toBe('2026-11-04T16:46:00.000Z');
+    expect(stated.preview.note).toContain('4 Nov 2026, 16:46');
+    const half = await cancelJobs.prepare(ctx, { job_ids: [A], received_date: '2026-11-04' });
+    expect(half.ok).toBe(false);
+    const future = await cancelJobs.prepare(ctx, { job_ids: [A], received_date: '2099-01-01', received_time: '09:00' });
+    expect(future.ok).toBe(false);
+  });
+});
+
+describe('send_out_jobs', () => {
+  it('sends only jobs that are Ready to send and say the worker is told', async () => {
+    const ctx = ctxWith({ jobs: [job({ status: 'pending_send', assigned_worker_id: W, worker: { id: W, full_name: 'Dave Jones' } }), job({ id: B, reference_number: 'RS-1002' })] });
+    const r = await sendOutJobs.prepare(ctx, { job_ids: [A, B] });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.preview.title).toBe('Send out 1 job');
+    expect(r.preview.note).toContain('told once');
+    expect(r.preview.note).toContain('RS-1002 (Not assigned)');
+    expect((r.params as { jobIds: string[] }).jobIds).toEqual([A]);
+  });
+
+  it('refuses jobs with no worker or already sent', async () => {
+    expect((await sendOutJobs.prepare(ctxWith({ jobs: [job()] }), { job_ids: [A] })).ok).toBe(false);
+    expect((await sendOutJobs.prepare(ctxWith({ jobs: [job({ status: 'assigned', assigned_worker_id: W })] }), { job_ids: [A] })).ok).toBe(false);
   });
 });

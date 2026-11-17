@@ -5,9 +5,15 @@ import { FROM_EMAIL, resend } from '@/lib/resend';
 import { sendText } from '@/lib/messaging/provider';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { TenantSettings } from '@/lib/data/settings-types';
-import { sendJobsAssignedPushToWorker } from '@/lib/services/worker-push';
+import {
+  sendJobsAssignedPushToWorker,
+  sendJobsCancelledPushToWorker,
+  sendJobsUpdatedPushToWorker,
+} from '@/lib/services/worker-push';
 import {
   WORKER_ALERT_SENDER,
+  cancelAlertEmail,
+  cancelAlertSms,
   groupSentJobs,
   jobAlertEmail,
   jobAlertSms,
@@ -15,6 +21,8 @@ import {
   shouldEmailJobAlert,
   shouldTextJobAlert,
   ukMobileForAlert,
+  updateAlertEmail,
+  updateAlertSms,
   workerJobTextAllowance,
   type SentJob,
 } from '@/lib/jobs/worker-job-alert';
@@ -41,6 +49,46 @@ export async function notifyWorkersOfSentJobs(args: {
   jobs: readonly SentJob[];
   db?: Admin;
 }): Promise<void> {
+  return notifyWorkers('sent', args);
+}
+
+/**
+ * The same, for jobs the office cancelled after the worker was told: one email and one
+ * app notification per worker, a text only if they turned texts on. Never throws.
+ */
+export async function notifyWorkersOfCancelledJobs(args: {
+  tenantId: string;
+  jobs: readonly SentJob[];
+  db?: Admin;
+}): Promise<void> {
+  return notifyWorkers('cancelled', args);
+}
+
+/**
+ * The same, for jobs the office changed after the worker was told (a new date, new details):
+ * one email and one app notification per worker, a text only if they turned texts on. Never throws.
+ */
+export async function notifyWorkersOfChangedJobs(args: {
+  tenantId: string;
+  jobs: readonly SentJob[];
+  db?: Admin;
+}): Promise<void> {
+  return notifyWorkers('updated', args);
+}
+
+type AlertKind = 'sent' | 'cancelled' | 'updated';
+
+/** The words and the app notification for each kind of alert; the sending rules are the same. */
+const CONTENT = {
+  sent: { sms: jobAlertSms, email: jobAlertEmail, push: sendJobsAssignedPushToWorker },
+  cancelled: { sms: cancelAlertSms, email: cancelAlertEmail, push: sendJobsCancelledPushToWorker },
+  updated: { sms: updateAlertSms, email: updateAlertEmail, push: sendJobsUpdatedPushToWorker },
+} as const;
+
+async function notifyWorkers(
+  kind: AlertKind,
+  args: { tenantId: string; jobs: readonly SentJob[]; db?: Admin },
+): Promise<void> {
   if (args.jobs.length === 0) return;
 
   let db: Admin;
@@ -66,6 +114,7 @@ export async function notifyWorkersOfSentJobs(args: {
       const worker = byId.get(group[0]!.workerId);
       if (!worker) continue;
       await alertWorker({
+        kind,
         db,
         tenantId: args.tenantId,
         businessName: tenant.name,
@@ -81,6 +130,7 @@ export async function notifyWorkersOfSentJobs(args: {
 }
 
 async function alertWorker(args: {
+  kind: AlertKind;
   db: Admin;
   tenantId: string;
   businessName: string;
@@ -103,7 +153,7 @@ async function alertWorker(args: {
       tenantId: args.tenantId,
       workerId: args.worker.id,
       to: mobile,
-      body: jobAlertSms(args.businessName, args.jobs.length),
+      body: CONTENT[args.kind].sms(args.businessName, args.jobs.length),
       allowance: args.allowance ?? 0,
     });
   }
@@ -116,7 +166,7 @@ async function alertWorker(args: {
       allowanceUsedUp,
     })
   ) {
-    const message = jobAlertEmail({ businessName: args.businessName, jobs: args.jobs });
+    const message = CONTENT[args.kind].email({ businessName: args.businessName, jobs: args.jobs });
     try {
       const { error } = await resend.emails.send({
         from: FROM_EMAIL,
@@ -132,7 +182,7 @@ async function alertWorker(args: {
 
   if (!args.pushEnabled) return;
   try {
-    await sendJobsAssignedPushToWorker({
+    await CONTENT[args.kind].push({
       token: args.worker.expo_push_token,
       jobs: args.jobs.map((job) => ({ jobId: job.id, referenceNumber: job.referenceNumber })),
     });

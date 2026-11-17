@@ -103,7 +103,7 @@ export function londonDayBoundsUtc(ymd: Ymd): { startIso: string; endIso: string
 }
 
 /** Convert a Europe/London wall-clock date+time to a UTC Date. */
-function londonWallTimeToUtc(
+export function londonWallTimeToUtc(
   ymd: Ymd,
   hour: number,
   minute: number,

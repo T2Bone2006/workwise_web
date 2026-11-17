@@ -56,3 +56,53 @@ export async function sendJobsAssignedPushToWorker(params: {
     },
   ]);
 }
+
+/** One notification for every job in this cancellation. A single job opens that job when tapped. */
+export async function sendJobsCancelledPushToWorker(params: {
+  token: string | null;
+  jobs: readonly { jobId: string; referenceNumber: string }[];
+}): Promise<void> {
+  const token = params.token?.trim() ?? '';
+  const jobs = params.jobs;
+  if (!token || jobs.length === 0) return;
+
+  const only = jobs.length === 1 ? jobs[0] : null;
+  await sendExpoPushMessages([
+    {
+      to: token,
+      title: only ? 'Job cancelled' : `${jobs.length} jobs cancelled`,
+      body: only
+        ? `${only.referenceNumber} has been cancelled. You don't need to attend it.`
+        : "Open the app to see what's left.",
+      data: only
+        ? { jobId: only.jobId, job_id: only.jobId, type: 'job_cancelled' }
+        : { type: 'job_cancelled' },
+      sound: 'default',
+    },
+  ]);
+}
+
+/** One notification for every job changed in this approval. A single job opens that job when tapped. */
+export async function sendJobsUpdatedPushToWorker(params: {
+  token: string | null;
+  jobs: readonly { jobId: string; referenceNumber: string }[];
+}): Promise<void> {
+  const token = params.token?.trim() ?? '';
+  const jobs = params.jobs;
+  if (!token || jobs.length === 0) return;
+
+  const only = jobs.length === 1 ? jobs[0] : null;
+  await sendExpoPushMessages([
+    {
+      to: token,
+      title: only ? 'Job changed' : `${jobs.length} jobs changed`,
+      body: only
+        ? `${only.referenceNumber} has new details. Open the app to check.`
+        : 'Open the app to check the new details.',
+      data: only
+        ? { jobId: only.jobId, job_id: only.jobId, type: 'job_updated' }
+        : { type: 'job_updated' },
+      sound: 'default',
+    },
+  ]);
+}

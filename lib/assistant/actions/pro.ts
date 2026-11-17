@@ -6,8 +6,10 @@ import type { AssistantCtx } from '@/lib/assistant/caller';
 import { asText, dayLabel } from '@/lib/assistant/format';
 import { STATUS_LABEL, asStatus } from '@/lib/assistant/tools/read-pro';
 import { assignWorkerToJobIds } from '@/lib/jobs/assign-worker-to-jobs';
+import { cancelJobsInDb } from '@/lib/jobs/cancel-jobs';
+import { assertCancellationInstant, formatCancellationStamp } from '@/lib/jobs/cancellation-time';
 import { canAssignWorkerInline } from '@/lib/jobs/worker-assignment-status';
-import { isValidYmd } from '@/lib/rounds/dates';
+import { isValidYmd, londonWallTimeToUtc } from '@/lib/rounds/dates';
 
 const ymd = z.string().refine(isValidYmd, 'Use YYYY-MM-DD');
 const jobIds = z.array(z.string().uuid()).min(1).max(25);
@@ -311,4 +313,135 @@ export const emailJobOutcome = defineAction({
   },
 });
 
-export const PRO_ACTIONS = [assignJobs, rescheduleJobs, setJobPriority, emailJobOutcome];
+// ---------------------------------------------------------------------------
+
+/**
+ * Only work that hasn't started is cancelled from here. A job in progress, paused, not completed
+ * or done is cancelled on its own job page, where the office can see what happened first.
+ */
+const CANCELLABLE_HERE = ['pending', 'pending_send', 'assigned', 'declined'] as const;
+const canCancelHere = (status: string) => (CANCELLABLE_HERE as readonly string[]).includes(status);
+
+type CancelParams = { jobs: Array<{ id: string; ref: string; status: string }>; cancelledAt: string; stated: boolean };
+
+export const cancelJobs = defineAction({
+  name: 'cancel_jobs',
+  description:
+    'Propose cancelling one or more jobs that have not started (not assigned, ready to send, sent to a worker or declined). Jobs that are in progress, paused, not completed, done or already cancelled are left alone and listed on the card. For a customer\'s cancellation list, find the jobs with find_jobs references first. If they say when the cancellation reached the office (e.g. "came in Wednesday at 4:46pm"), pass received_date and received_time (UK time); otherwise leave both out and it is recorded as now. Cancelling cannot be undone.',
+  product: 'pro',
+  status: 'Getting the cancellation ready',
+  schema: z.object({
+    job_ids: jobIds,
+    received_date: ymd.optional().describe('The day the cancellation reached the office.'),
+    received_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM').optional().describe('The time it reached the office, 24-hour UK time. Needed with received_date.'),
+  }),
+  async prepare(ctx, input) {
+    if (Boolean(input.received_date) !== Boolean(input.received_time)) {
+      return { ok: false, error: 'Give both the day and the time the cancellation came in, or neither.' };
+    }
+    const stated = Boolean(input.received_date && input.received_time);
+    const when = stated
+      ? londonWallTimeToUtc(input.received_date as string as Parameters<typeof londonWallTimeToUtc>[0], Number(input.received_time!.slice(0, 2)), Number(input.received_time!.slice(3, 5)), 0).toISOString()
+      : new Date().toISOString();
+    const checked = assertCancellationInstant(when);
+    if (!checked.ok) return { ok: false, error: checked.error };
+
+    const jobs = await loadJobs(ctx, input.job_ids);
+    if (!jobs) return { ok: false, error: JOBS_GONE };
+    const todo = jobs.filter((j) => canCancelHere(j.status));
+    const left = jobs.filter((j) => !canCancelHere(j.status));
+    if (todo.length === 0) {
+      return { ok: false, error: `Nothing to cancel from here: ${left.map((j) => `${j.ref} (${STATUS_LABEL[asStatus(j.status)]})`).join(', ')}. Started, finished or already cancelled jobs are changed on their own job page.` };
+    }
+    const toldWorkers = new Set(todo.filter((j) => j.status === 'assigned' && j.workerId).map((j) => j.workerId));
+    const notes = [
+      ...(left.length > 0 ? [`Left alone (started, finished or already cancelled): ${left.map((j) => `${j.ref} (${STATUS_LABEL[asStatus(j.status)]})`).join(', ')}.`] : []),
+      `Recorded as cancelled ${stated ? `at ${formatCancellationStamp(checked.iso)}` : 'now'}.`,
+      toldWorkers.size > 0
+        ? `${toldWorkers.size === 1 ? 'The worker who has' : `${toldWorkers.size} workers who have`} these jobs ${toldWorkers.size === 1 ? 'is' : 'are'} told they're cancelled (email and app notification, and a text if they turned texts on). This cannot be undone.`
+        : 'No worker has been sent these, so nobody is messaged. This cannot be undone.',
+    ];
+    return {
+      ok: true,
+      params: { jobs: todo.map((j) => ({ id: j.id, ref: j.ref, status: j.status })), cancelledAt: checked.iso, stated } satisfies CancelParams,
+      preview: {
+        title: `Cancel ${plural(todo.length, 'job')}`,
+        lines: cap(todo.map((j) => `${j.ref} · ${STATUS_LABEL[asStatus(j.status)]}${j.address ? ` · ${j.address}` : ''}${j.date ? ` · ${dayAndTime(j.date, j.time)}` : ''}`), todo.length),
+        confirmLabel: todo.length === 1 ? 'Cancel it' : `Cancel ${todo.length}`,
+        tone: 'rose',
+        note: notes.join(' '),
+        href: '/jobs',
+      },
+    };
+  },
+  async execute(ctx, p: CancelParams): Promise<Executed> {
+    const checked = assertCancellationInstant(p.cancelledAt);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    // Things change between the card and the tap: look again, and only cancel what is still where we saw it.
+    const jobs = await loadJobs(ctx, p.jobs.map((j) => j.id));
+    if (!jobs) return { ok: false, error: JOBS_GONE };
+    const eligible = jobs.filter((j) => canCancelHere(j.status));
+    const result = await cancelJobsInDb(ctx.db, {
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      jobs: eligible.map((j) => ({ id: j.id, status: j.status })),
+      cancelledAt: checked.iso,
+      via: 'assistant',
+    });
+    const cancelled = result.cancelledIds.length;
+    const left = jobs.filter((j) => !result.cancelledIds.includes(j.id)).map((j) => j.ref);
+    if (cancelled === 0) return { ok: false, error: 'None of them could be cancelled: they may have started or changed since. Nothing was changed.' };
+    return {
+      ok: true,
+      result: `Cancelled ${plural(cancelled, 'job')}.${left.length > 0 ? ` Left ${left.join(', ')} alone: ${left.length === 1 ? 'it has' : 'they have'} changed.` : ''}`,
+      href: '/jobs',
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+
+type SendOutParams = { jobIds: string[]; refs: string[] };
+
+export const sendOutJobs = defineAction({
+  name: 'send_out_jobs',
+  description:
+    'Propose sending jobs that are "Ready to send" (a worker is picked) out to their workers: each worker is told once by email and app notification, and by text if they turned texts on. Only for Ready to send jobs; give a job to a worker first with assign_jobs. Look up job_ids first. Sending cannot be undone.',
+  product: 'pro',
+  status: 'Getting the send-out ready',
+  schema: z.object({ job_ids: jobIds }),
+  async prepare(ctx, input) {
+    const jobs = await loadJobs(ctx, input.job_ids);
+    if (!jobs) return { ok: false, error: JOBS_GONE };
+    const ready = jobs.filter((j) => j.status === 'pending_send' && j.workerId);
+    const left = jobs.filter((j) => !ready.includes(j));
+    if (ready.length === 0) {
+      return { ok: false, error: `None of those are Ready to send: ${left.map((j) => `${j.ref} (${STATUS_LABEL[asStatus(j.status)]})`).join(', ')}. A job needs a worker first.` };
+    }
+    const workers = new Set(ready.map((j) => j.workerId));
+    return {
+      ok: true,
+      params: { jobIds: ready.map((j) => j.id), refs: ready.map((j) => j.ref) } satisfies SendOutParams,
+      preview: {
+        title: `Send out ${plural(ready.length, 'job')}`,
+        lines: cap(ready.map((j) => `${j.ref} · ${j.workerName ?? 'worker'}${j.date ? ` · ${dayAndTime(j.date, j.time)}` : ''}`), ready.length),
+        confirmLabel: 'Send out',
+        tone: 'sky',
+        note: [
+          `${workers.size === 1 ? 'The worker is' : `${workers.size} workers are`} told once: an email and app notification, and a text if they turned texts on. This cannot be undone.`,
+          left.length > 0 ? `Not sent (not Ready to send): ${left.map((j) => `${j.ref} (${STATUS_LABEL[asStatus(j.status)]})`).join(', ')}.` : '',
+        ].filter(Boolean).join(' '),
+        href: '/jobs',
+      },
+    };
+  },
+  async execute(ctx, p: SendOutParams): Promise<Executed> {
+    // Loaded here, not at the top: it pulls in the mail client, which needs its API key the moment it is imported.
+    const { sendOutJobsInDb } = await import('@/lib/jobs/send-out-jobs');
+    const r = await sendOutJobsInDb(ctx.db, { tenantId: ctx.tenantId, userId: ctx.userId, jobIds: p.jobIds, via: 'assistant' });
+    if (!r.ok) return { ok: false, error: r.error === 'No jobs ready to send.' ? 'None of them are Ready to send any more, so nothing was sent.' : r.error };
+    return { ok: true, result: `Sent out ${plural(r.sent, 'job')}. The ${r.sent === 1 ? 'worker has' : 'workers have'} been told.`, href: '/jobs' };
+  },
+});
+
+export const PRO_ACTIONS = [assignJobs, rescheduleJobs, setJobPriority, emailJobOutcome, cancelJobs, sendOutJobs];

@@ -142,6 +142,76 @@ export function jobAlertEmail(input: {
   return { subject, html };
 }
 
+export function cancelAlertSubject(businessName: string, count: number): string {
+  const business = businessName.trim() || 'Your office';
+  if (count === 1) return `Job cancelled by ${business}`;
+  return `${count} jobs cancelled by ${business}`;
+}
+
+/** One GSM-7 segment, like the new-job text. */
+export function cancelAlertSms(businessName: string, count: number): string {
+  const jobs = count === 1 ? '1 job cancelled' : `${count} jobs cancelled`;
+  const name = toGsm7(businessName).trim();
+  const withName = name ? `${name}: ${jobs}. Open the app.` : `${jobs}. Open the app.`;
+  if (countSegments(withName).segments === 1) return withName;
+  return `${jobs}. Open the app.`;
+}
+
+export function cancelAlertEmail(input: {
+  businessName: string;
+  jobs: readonly SentJob[];
+}): { subject: string; html: string } {
+  const count = input.jobs.length;
+  const business = input.businessName.trim() || 'Your office';
+  const subject = cancelAlertSubject(business, count);
+  const sorted = sortJobs([...input.jobs]);
+  const shown = sorted.slice(0, MAX_EMAIL_LINES);
+  const extra = sorted.length - shown.length;
+  const items = shown.map((job) => `<li>${escapeHtml(jobAlertLine(job))}</li>`).join('');
+  const more = extra > 0 ? `<p>and ${extra} more. Open the app to see them all.</p>` : '';
+  const lead =
+    count === 1
+      ? `${escapeHtml(business)} has cancelled a job. You don't need to attend it.`
+      : `${escapeHtml(business)} has cancelled ${count} jobs. You don't need to attend them.`;
+  const html = `<p>${lead}</p><ul>${items}</ul>${more}<p>Open the WorkWise app to see what is left. You can turn these emails off in the app.</p>`;
+  return { subject, html };
+}
+
+export function updateAlertSubject(businessName: string, count: number): string {
+  const business = businessName.trim() || 'Your office';
+  if (count === 1) return `Job changed by ${business}`;
+  return `${count} jobs changed by ${business}`;
+}
+
+/** One GSM-7 segment, like the new-job text. */
+export function updateAlertSms(businessName: string, count: number): string {
+  const jobs = count === 1 ? '1 job changed' : `${count} jobs changed`;
+  const name = toGsm7(businessName).trim();
+  const withName = name ? `${name}: ${jobs}. Open the app.` : `${jobs}. Open the app.`;
+  if (countSegments(withName).segments === 1) return withName;
+  return `${jobs}. Open the app.`;
+}
+
+export function updateAlertEmail(input: {
+  businessName: string;
+  jobs: readonly SentJob[];
+}): { subject: string; html: string } {
+  const count = input.jobs.length;
+  const business = input.businessName.trim() || 'Your office';
+  const subject = updateAlertSubject(business, count);
+  const sorted = sortJobs([...input.jobs]);
+  const shown = sorted.slice(0, MAX_EMAIL_LINES);
+  const extra = sorted.length - shown.length;
+  const items = shown.map((job) => `<li>${escapeHtml(jobAlertLine(job))}</li>`).join('');
+  const more = extra > 0 ? `<p>and ${extra} more. Open the app to see them all.</p>` : '';
+  const lead =
+    count === 1
+      ? `${escapeHtml(business)} has changed a job you were sent. The new details are below.`
+      : `${escapeHtml(business)} has changed ${count} jobs you were sent. The new details are below.`;
+  const html = `<p>${lead}</p><ul>${items}</ul>${more}<p>Open the WorkWise app to check them. You can turn these emails off in the app.</p>`;
+  return { subject, html };
+}
+
 /**
  * Email goes when they left it on. It also goes when they asked for a text
  * and the month's allowance is used up, so that send is not silent.

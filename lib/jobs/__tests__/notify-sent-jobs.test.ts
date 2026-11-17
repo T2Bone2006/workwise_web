@@ -26,11 +26,25 @@ vi.mock('@/lib/resend', () => ({
 vi.mock('@/lib/messaging/provider', () => ({
   sendText: (payload: { to: string; body: string; sender?: string }) => sendText(payload),
 }));
+const pushCancelled = vi.fn<
+  (payload: { token: string | null; jobs: { jobId: string; referenceNumber: string }[] }) => Promise<void>
+>();
+const pushUpdated = vi.fn<
+  (payload: { token: string | null; jobs: { jobId: string; referenceNumber: string }[] }) => Promise<void>
+>();
 vi.mock('@/lib/services/worker-push', () => ({
+  sendJobsUpdatedPushToWorker: (payload: {
+    token: string | null;
+    jobs: { jobId: string; referenceNumber: string }[];
+  }) => pushUpdated(payload),
   sendJobsAssignedPushToWorker: (payload: {
     token: string | null;
     jobs: { jobId: string; referenceNumber: string }[];
   }) => push(payload),
+  sendJobsCancelledPushToWorker: (payload: {
+    token: string | null;
+    jobs: { jobId: string; referenceNumber: string }[];
+  }) => pushCancelled(payload),
 }));
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => {
@@ -38,7 +52,7 @@ vi.mock('@/lib/supabase/admin', () => ({
   },
 }));
 
-import { notifyWorkersOfSentJobs } from '@/lib/jobs/notify-sent-jobs';
+import { notifyWorkersOfCancelledJobs, notifyWorkersOfChangedJobs, notifyWorkersOfSentJobs } from '@/lib/jobs/notify-sent-jobs';
 
 type Row = Record<string, unknown>;
 
@@ -270,5 +284,61 @@ describe('notifyWorkersOfSentJobs', () => {
 
     expect(sendEmail).toHaveBeenCalledTimes(2);
     expect(sendText).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyWorkersOfCancelledJobs', () => {
+  beforeEach(() => {
+    sendEmail.mockReset();
+    sendText.mockReset();
+    push.mockReset();
+    pushCancelled.mockReset();
+    rpc.mockReset();
+    sendEmail.mockResolvedValue({ error: null });
+    push.mockResolvedValue(undefined);
+    pushCancelled.mockResolvedValue(undefined);
+    rpc.mockResolvedValue({ data: null, error: null });
+  });
+
+  it('sends one cancellation email and one cancellation push per worker, not the new-job ones', async () => {
+    const jobs = [1, 2, 3].map((n) => sent({ id: `j${n}`, referenceNumber: `WW-${n}` }));
+    await notifyWorkersOfCancelledJobs({ tenantId: 't1', jobs, db: dbFor() as never });
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail.mock.calls[0]?.[0]).toMatchObject({ to: 'dave@example.com', subject: '3 jobs cancelled by RS Locksmiths' });
+    expect(pushCancelled).toHaveBeenCalledTimes(1);
+    expect(pushCancelled.mock.calls[0]?.[0]).toMatchObject({ token: 'ExponentPushToken[dave]' });
+    expect(push).not.toHaveBeenCalled();
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for an empty list', async () => {
+    await notifyWorkersOfCancelledJobs({ tenantId: 't1', jobs: [], db: dbFor() as never });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(pushCancelled).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyWorkersOfChangedJobs', () => {
+  beforeEach(() => {
+    sendEmail.mockReset();
+    push.mockReset();
+    pushCancelled.mockReset();
+    pushUpdated.mockReset();
+    rpc.mockReset();
+    sendEmail.mockResolvedValue({ error: null });
+    pushUpdated.mockResolvedValue(undefined);
+    rpc.mockResolvedValue({ data: null, error: null });
+  });
+
+  it('sends one "changed" email and one "changed" push per worker', async () => {
+    const jobs = [1, 2].map((n) => sent({ id: `j${n}`, referenceNumber: `WW-${n}` }));
+    await notifyWorkersOfChangedJobs({ tenantId: 't1', jobs, db: dbFor() as never });
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail.mock.calls[0]?.[0]).toMatchObject({ to: 'dave@example.com', subject: '2 jobs changed by RS Locksmiths' });
+    expect(pushUpdated).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+    expect(pushCancelled).not.toHaveBeenCalled();
   });
 });
