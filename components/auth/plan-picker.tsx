@@ -165,7 +165,7 @@ function PlanTile({
           <p className={cn('mt-1 text-[12px]', selected ? 'text-white/80' : 'text-[#6E6A63] dark:text-[#93A3BA]')}>
             {founding ? (
               <>
-                {period} for life, after {trialDays} days free
+                {period}, after {trialDays} days free
               </>
             ) : (
               <>
@@ -197,7 +197,7 @@ function FoundingMeter({ placesLeft }: { placesLeft: number | null }) {
   return (
     <div className="rounded-xl bg-[#FFF6E0] px-3.5 py-3 dark:bg-[#F0A500]/10">
       <div className="flex items-baseline justify-between gap-3 text-[13px]">
-        <p className="font-semibold text-[#6B4100] dark:text-[#F5BC3A]">Founder price: half price for life</p>
+        <p className="font-semibold text-[#6B4100] dark:text-[#F5BC3A]">Founder price: half price for our first 200 customers</p>
         {shownLeft != null ? (
           <p className="flex-shrink-0 tabular-nums text-[#8A5300] dark:text-[#E9C77A]">{shownLeft} of 200 left</p>
         ) : (

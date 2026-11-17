@@ -162,7 +162,7 @@ function headlineFor(input: { plan: PlanKey; interval: BillingInterval; founder:
   const list = PLANS[plan].pence[interval];
   const period = interval === 'month' ? 'a month' : 'a year';
   const price = founder
-    ? `${formatPence(Math.round(list / 2))} ${period} for life (founder price)`
+    ? `${formatPence(Math.round(list / 2))} ${period} (founder price, our first 200 customers)`
     : `${formatPence(list)} ${period}`;
   return `${trialDays} days free, then ${price}. Cancel any time before then and you pay nothing.`;
 }

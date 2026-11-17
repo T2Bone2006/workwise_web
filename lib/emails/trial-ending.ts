@@ -13,7 +13,7 @@ export function buildTrialEndingEmail(p: {
   founder: boolean;
   settingsUrl: string;
 }): { subject: string; html: string; text: string } {
-  const founderLine = p.founder ? ' That is your founder price, half price for life.' : '';
+  const founderLine = p.founder ? ' That is your founder price, half the normal price.' : '';
   const text = [
     'Hi,',
     '',

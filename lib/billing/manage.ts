@@ -805,7 +805,7 @@ async function labelDiscount(discount: Stripe.Discount): Promise<{ label: string
   const couponName = coupon && typeof coupon !== 'string' ? coupon.name : null;
   const endsAt = iso(discount.end);
   if (couponId && couponId === process.env.STRIPE_COUPON_FOUNDER) {
-    return { label: 'Founder price: half price for life', endsAt: null, forLife: true };
+    return { label: 'Founder price: half price', endsAt: null, forLife: true };
   }
   if (couponName) return { label: couponName, endsAt };
   if (!couponId) return null;

@@ -97,10 +97,10 @@ describe('chooseSignupOffer', () => {
 
   it('uses the plan prices in the headlines', () => {
     expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: active, referred: false }).headline).toBe(
-      '30 days free, then £17.50 a month for life (founder price). Cancel any time before then and you pay nothing.'
+      '30 days free, then £17.50 a month (founder price, our first 200 customers). Cancel any time before then and you pay nothing.'
     );
     expect(chooseSignupOffer({ choice: choice('both', 'year'), founding: active, referred: true }).headline).toBe(
-      '60 days free, then £295 a year for life (founder price). Cancel any time before then and you pay nothing.'
+      '60 days free, then £295 a year (founder price, our first 200 customers). Cancel any time before then and you pay nothing.'
     );
     expect(chooseSignupOffer({ choice: choice('lite', 'month'), founding: ended, referred: false }).headline).toBe(
       '30 days free, then £35 a month. Cancel any time before then and you pay nothing.'

@@ -192,12 +192,12 @@ describe('getPlanSummary', () => {
     });
   });
 
-  it('labels the founder coupon as half price for life', async () => {
+  it('labels the founder coupon as half price', async () => {
     process.env.STRIPE_COUPON_FOUNDER = 'FOUNDER_50';
     wire(liveSub({ discounts: [{ id: 'di_f', end: null, source: { type: 'coupon', coupon: 'FOUNDER_50' } }] }));
     expect(await getPlanSummary(TENANT)).toMatchObject({
       kind: 'stripe',
-      discount: { label: 'Founder price: half price for life', endsAt: null, forLife: true },
+      discount: { label: 'Founder price: half price', endsAt: null, forLife: true },
     });
   });
 

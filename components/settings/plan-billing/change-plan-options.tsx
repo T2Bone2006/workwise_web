@@ -243,7 +243,7 @@ export function ChangePlanOptions({
   const period = yearlyTerm ? 'a year' : 'a month';
   const bothPence = paidPence('both', choice.interval, founder);
   const separatePence = paidPence('rounds', choice.interval, founder) + paidPence('lite', choice.interval, founder);
-  const bothPill = `Both for ${formatPence(bothPence)}, not ${formatPence(separatePence)}`;
+  const bothPill = `Both plans for ${formatPence(bothPence)} ${period}, save ${formatPence(separatePence - bothPence)}`;
   const addPrice = `+${formatPence(bothPence - paidPence(roundsOnly ? 'rounds' : 'lite', choice.interval, founder))}`;
 
   const addRounds = offers.find((o) => o.title === 'Add Rounds');

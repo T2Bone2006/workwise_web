@@ -2,7 +2,7 @@ import { PLANS, type PlanKey } from '@/lib/billing/plans';
 import { PRO_PLANS, type ProTier } from '@/lib/billing/pro-plans';
 
 export type ReferralSide =
-  | { family: 'rounds_lite'; plan: PlanKey; /** Pays the founder price (half) for life. */ founder?: boolean }
+  | { family: 'rounds_lite'; plan: PlanKey; /** Pays the founder price (half). */ founder?: boolean }
   | { family: 'pro'; tier: ProTier; interval: 'month' | 'year' };
 
 type ProSide = Extract<ReferralSide, { family: 'pro' }>;

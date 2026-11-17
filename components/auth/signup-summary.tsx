@@ -8,7 +8,7 @@ export function chargeLine(choice: PlanChoice, offer: SignupOfferView): string {
   const period = choice.interval === 'month' ? 'a month' : 'a year';
   const days = offer === 'referred' || offer === 'founder_referred' ? REFERRED_TRIAL_DAYS : TRIAL_DAYS;
   if (offer === 'founder' || offer === 'founder_referred') {
-    return `£0 today. ${days} days free, then ${formatPence(Math.round(list / 2))} ${period} for life.`;
+    return `£0 today. ${days} days free, then ${formatPence(Math.round(list / 2))} ${period} (founder price, our first 200 customers).`;
   }
   return `£0 today. ${days} days free, then ${formatPence(list)} ${period}.`;
 }
