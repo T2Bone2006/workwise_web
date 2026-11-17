@@ -34,6 +34,7 @@ const db = {
   tenants: [] as Row[],
   referrals: [] as Row[],
   subscriptions: [] as Row[],
+  founder_places: [] as Row[],
 };
 let failFinish = false;
 let paidInvoices: Stripe.Invoice[] = [];
@@ -199,6 +200,7 @@ function splitTop(raw: string): string[] {
 }
 
 function seed(plan: 'rounds' | 'lite' | 'both' | null, status = 'active') {
+  db.founder_places = [];
   db.tenants = [
     { id: REFERRER, name: 'A', stripe_customer_id: 'cus_referrer', closed_at: null },
     { id: REFERRED, name: 'B', stripe_customer_id: 'cus_referred', closed_at: null },
@@ -375,6 +377,29 @@ describe('onInvoicePaid', () => {
     expect(await onInvoicePaid({ ...half(), id: 'in_half_2' })).toEqual({ result: 'not_yet' });
     const paid = await onInvoicePaid(invoice({ id: 'in_month_3', subtotal: 3500, price: 'price_rounds_m' }));
     expect(paid).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+  });
+
+  it('does not reward on the £0 invoice that starts a free trial', async () => {
+    seed('rounds');
+    db.founder_places = [{ tenant_id: REFERRED, released_at: null }];
+    expect(await onInvoicePaid(invoice({ id: 'in_trial', subtotal: 3500, discount: 3500, price: 'price_rounds_m' }))).toEqual({
+      result: 'not_yet',
+    });
+  });
+
+  it('rewards on a founder friend\'s first paid £17.50 bill (half price is their full bill)', async () => {
+    seed('rounds');
+    db.founder_places = [{ tenant_id: REFERRED, released_at: null }];
+    const result = await onInvoicePaid(invoice({ id: 'in_f1', subtotal: 3500, discount: 1750, price: 'price_rounds_m' }));
+    expect(result).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 3500 });
+  });
+
+  it('pays a founder referrer one month of what they pay: £17.50', async () => {
+    seed('rounds');
+    db.subscriptions = [{ tenant_id: REFERRER, source: 'stripe', product: 'rounds', status: 'active', plan: 'rounds' }];
+    db.founder_places = [{ tenant_id: REFERRER, released_at: null }];
+    const result = await onInvoicePaid(invoice({ id: 'in_r1', subtotal: 3500, price: 'price_rounds_m' }));
+    expect(result).toEqual({ result: 'rewarded', referralId: REFERRAL, rewardPence: 1750 });
   });
 
   it('credits a yearly referee on the first invoice because £315 is already a full month', async () => {

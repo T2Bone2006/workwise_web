@@ -10,7 +10,6 @@ import { type PlanChoice } from '@/lib/billing/plans';
 import { signupCheckoutBody } from '@/lib/billing/signup-checkout';
 import {
   chooseSignupOffer,
-  fallbackAfterFoundingRefused,
   getFoundingStatus,
   isOwnReferral,
   REFERRAL_COOKIE,
@@ -44,12 +43,6 @@ function isAlreadyRegistered(message: string): boolean {
   return /already|exists|registered/i.test(message);
 }
 
-function isFoundingRefusal(err: unknown): boolean {
-  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
-  const param = err.param ?? '';
-  return param.startsWith('discounts') || err.code === 'coupon_expired' || err.code === 'resource_missing';
-}
-
 function isClosedCheckout(err: unknown): boolean {
   const message = err instanceof Error ? err.message.toLowerCase() : '';
   return message.includes('expired') || message.includes('complete');
@@ -71,7 +64,8 @@ async function maybeTestClock(stripe: Stripe, intentId: string): Promise<string 
 
 /**
  * Self-serve signup. Creates or resumes a pending signup and redirects to
- * Stripe Checkout. No trial. One coupon at Checkout (a referred friend's half-price second month is added by the webhook after the first invoice).
+ * Stripe Checkout. Free trial (30 days, 60 for a referred friend) with the card taken up front. A founder place
+ * (50% off for life) is claimed and its coupon attached by the webhook after Checkout, not here.
  */
 export async function startSignup(_prev: unknown, formData: FormData): Promise<SignupResult> {
   const parsed = signupSchema.safeParse({
@@ -113,7 +107,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
   }
   const referred = Boolean(referrer || partner);
 
-  let offer = chooseSignupOffer({
+  const offer = chooseSignupOffer({
     choice,
     founding: await getFoundingStatus(),
     referred,
@@ -233,20 +227,9 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
     }
 
     const appUrl = getAppUrl();
-    let session: Stripe.Checkout.Session;
-    try {
-      session = await stripe.checkout.sessions.create(
-        signupCheckoutBody({ customerId, intentId, choice, offer, appUrl })
-      );
-    } catch (err) {
-      if (offer.offer !== 'founding' || !isFoundingRefusal(err)) throw err;
-      offer = fallbackAfterFoundingRefused({ choice, referred });
-      const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intentId);
-      if (offerError) throw new Error(`signup_intents offer update failed intent=${intentId}`);
-      session = await stripe.checkout.sessions.create(
-        signupCheckoutBody({ customerId, intentId, choice, offer, appUrl })
-      );
-    }
+    const session: Stripe.Checkout.Session = await stripe.checkout.sessions.create(
+      signupCheckoutBody({ customerId, intentId, choice, offer, appUrl })
+    );
 
     if (!session.url) throw new Error(`checkout had no url intent=${intentId}`);
 

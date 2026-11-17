@@ -1,26 +1,16 @@
 import { SIDE_COLOUR } from '@/components/auth/auth-side-panel';
 import type { SignupOfferView } from '@/lib/billing/offers';
-import { formatPence, PLANS, type PlanChoice } from '@/lib/billing/plans';
+import { formatPence, PLANS, REFERRED_TRIAL_DAYS, TRIAL_DAYS, type PlanChoice } from '@/lib/billing/plans';
 
 /** What happens to their card, worded from the offer the server would apply. */
 export function chargeLine(choice: PlanChoice, offer: SignupOfferView): string {
-  const { month, year } = PLANS[choice.plan].pence;
-  if (offer === 'founding') {
-    const half = formatPence(Math.round(month / 2));
-    return `${half} today, ${half} next month, then ${formatPence(month)} a month.`;
+  const list = PLANS[choice.plan].pence[choice.interval];
+  const period = choice.interval === 'month' ? 'a month' : 'a year';
+  const days = offer === 'referred' || offer === 'founder_referred' ? REFERRED_TRIAL_DAYS : TRIAL_DAYS;
+  if (offer === 'founder' || offer === 'founder_referred') {
+    return `£0 today. ${days} days free, then ${formatPence(Math.round(list / 2))} ${period} for life.`;
   }
-  if (offer === 'free_then_half') {
-    const half = formatPence(Math.round(month / 2));
-    return `£0 today. Your first month is free, ${half} next month, then ${formatPence(month)} a month.`;
-  }
-  if (offer === 'free_month') {
-    return `£0 today. Your first month is free, then ${formatPence(month)} a month.`;
-  }
-  if (offer === 'month_off_year') {
-    return `${formatPence(year - month)} today, then ${formatPence(year)} a year.`;
-  }
-  const price = formatPence(PLANS[choice.plan].pence[choice.interval]);
-  return `${price} today, then ${price} ${choice.interval === 'month' ? 'a month' : 'a year'}.`;
+  return `£0 today. ${days} days free, then ${formatPence(list)} ${period}.`;
 }
 
 /** "What you'll pay" beside the details form. Display only; the server recomputes at submit. */
@@ -41,7 +31,7 @@ export function SignupSummary({ choice, offer }: { choice: PlanChoice; offer: Si
         {chargeLine(choice, offer)}
       </p>
       <p className="mt-2 text-[13px] leading-relaxed text-[#5E6B7D] dark:text-[#A9B6C8]">
-        Cancel any time from Settings.
+        Your card is only charged when the free trial ends. Cancel any time before then from Settings and you pay nothing.
       </p>
     </section>
   );

@@ -82,9 +82,9 @@ describe('resumePendingCheckout', () => {
     const body = sessionsCreate.mock.calls[0][0];
     expect(body.customer).toBe('cus_1');
     expect(body.line_items).toEqual([{ price: 'price_both_m', quantity: 1 }]);
-    expect(body.discounts).toEqual([{ coupon: 'FOUNDING50' }]);
-    expect(body.subscription_data.metadata).toMatchObject({ plan: 'both', interval: 'month', offer: 'founding' });
-    expect(body).not.toHaveProperty('trial_period_days');
+    expect(body.discounts).toBeUndefined();
+    expect(body.subscription_data.metadata).toMatchObject({ plan: 'both', interval: 'month', offer: 'founding', founder_requested: '1' });
+    expect(body.subscription_data.trial_period_days).toBe(30);
     expect(updates.some((row) => row.stripe_checkout_session_id === 'cs_new')).toBe(true);
   });
 

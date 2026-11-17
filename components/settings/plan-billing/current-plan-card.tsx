@@ -82,6 +82,7 @@ export function CurrentPlanCard({
   const [cancellingChange, setCancellingChange] = useState(false);
   const plan = PLANS[summary.choice.plan];
   const overdue = summary.status === 'past_due';
+  const trialing = summary.status === 'trialing';
   const ending = summary.cancelAtPeriodEnd;
   const ends = formatBillDate(summary.currentPeriodEnd);
   const nextWhen = summary.nextBill ? formatBillDate(summary.nextBill.date) : '';
@@ -141,6 +142,8 @@ export function CurrentPlanCard({
                 <Tag tone="amber" className="px-2.5 py-1">Payment overdue</Tag>
               ) : ending ? (
                 <Tag tone="slate" className="px-2.5 py-1">{ends ? `Ends ${ends}` : 'Ends soon'}</Tag>
+              ) : trialing ? (
+                <Tag tone="sky" className="px-2.5 py-1">Free trial</Tag>
               ) : (
                 <Tag tone="emerald" className="px-2.5 py-1">Active</Tag>
               )}
@@ -173,7 +176,9 @@ export function CurrentPlanCard({
               </>
             ) : summary.nextBill ? (
               <>
-                <p className="text-xs text-muted-foreground">Next bill</p>
+                <p className="text-xs text-muted-foreground">
+                  {trialing ? (ends ? `Free until ${ends}. Then you pay` : 'Free trial. Then you pay') : 'Next bill'}
+                </p>
                 <p className="mt-1 text-[28px] leading-tight font-semibold tabular-nums tracking-tight text-(--tone-rounds-solid)">
                   {formatPence(summary.nextBill.amountPence)}
                 </p>

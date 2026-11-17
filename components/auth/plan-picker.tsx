@@ -7,6 +7,8 @@ import {
   formatPence,
   PLAN_KEYS,
   PLANS,
+  REFERRED_TRIAL_DAYS,
+  TRIAL_DAYS,
   type BillingInterval,
   type PlanChoice,
   type PlanKey,
@@ -25,9 +27,9 @@ export const PLAN_LOOK: Record<PlanKey, { tagline: string; accent: string }> = {
   },
 };
 
-/** Founding half price applies to monthly plans while places last, or when the count is unknown. */
-export function showsFounding(interval: BillingInterval, founding: FoundingView): boolean {
-  return interval === 'month' && founding.active !== false;
+/** Founder half price (for life, monthly or yearly) applies while places last, or when the count is unknown. */
+export function showsFounding(_interval: BillingInterval, founding: FoundingView): boolean {
+  return founding.active !== false;
 }
 
 function bundleSaving(interval: BillingInterval): number {
@@ -100,7 +102,7 @@ function PlanTile({
   plan,
   interval,
   founding,
-  freeThenHalf,
+  trialDays,
   selected,
   onSelect,
   wide,
@@ -108,8 +110,8 @@ function PlanTile({
   plan: PlanKey;
   interval: BillingInterval;
   founding: boolean;
-  /** A referred friend on a monthly plan while founding runs: first month free, second half price. */
-  freeThenHalf: boolean;
+  /** Days free before the first charge: 30, or 60 for a referred friend. */
+  trialDays: number;
   selected: boolean;
   onSelect: () => void;
   wide?: boolean;
@@ -119,8 +121,8 @@ function PlanTile({
   const price = formatPence(info.pence[interval]);
   const period = interval === 'month' ? 'a month' : 'a year';
   const saving = plan === 'both' ? bundleSaving(interval) : 0;
-  const half = formatPence(Math.round(info.pence.month / 2));
-  const shown = freeThenHalf ? '£0' : founding ? half : price;
+  const half = formatPence(Math.round(info.pence[interval] / 2));
+  const shown = founding ? half : price;
 
   return (
     <label
@@ -161,18 +163,14 @@ function PlanTile({
         <div className="tabular-nums">
           <p className={cn('text-[26px] font-semibold leading-none tracking-[-0.03em]', !selected && tile.ink)}>{shown}</p>
           <p className={cn('mt-1 text-[12px]', selected ? 'text-white/80' : 'text-[#6E6A63] dark:text-[#93A3BA]')}>
-            {freeThenHalf ? (
+            {founding ? (
               <>
-                first month, then {half}, then <span className="sr-only">usually </span>
-                {price}
-              </>
-            ) : founding ? (
-              <>
-                first 2 months, then <span className="sr-only">usually </span>
-                {price}
+                {period} for life, after {trialDays} days free
               </>
             ) : (
-              period
+              <>
+                {period}, after {trialDays} days free
+              </>
             )}
           </p>
         </div>
@@ -193,13 +191,13 @@ function PlanTile({
 
 /** The founding offer, with the 200 places drawn as a bar. */
 function FoundingMeter({ placesLeft }: { placesLeft: number | null }) {
-  // The count and bar only show once places are going: "199 of 200 left" reads as nobody has joined.
-  const shownLeft = placesLeft != null && placesLeft < 100 ? placesLeft : null;
+  // The count and bar show as soon as the first place is taken ("199 of 200 left" shows there is demand).
+  const shownLeft = placesLeft != null && placesLeft < 200 ? placesLeft : null;
   const taken = shownLeft != null ? Math.max(0, Math.min(200, 200 - shownLeft)) : null;
   return (
     <div className="rounded-xl bg-[#FFF6E0] px-3.5 py-3 dark:bg-[#F0A500]/10">
       <div className="flex items-baseline justify-between gap-3 text-[13px]">
-        <p className="font-semibold text-[#6B4100] dark:text-[#F5BC3A]">Founding offer: half price for 2 months</p>
+        <p className="font-semibold text-[#6B4100] dark:text-[#F5BC3A]">Founder price: half price for life</p>
         {shownLeft != null ? (
           <p className="flex-shrink-0 tabular-nums text-[#8A5300] dark:text-[#E9C77A]">{shownLeft} of 200 left</p>
         ) : (
@@ -224,18 +222,18 @@ export function PlanPicker({
 }: {
   choice: PlanChoice;
   founding: FoundingView;
-  /** Arrived with a valid referral link: monthly shows free-then-half, not the founding meter. */
+  /** Arrived with a valid referral link: the free trial is 60 days, not 30. */
   referred?: boolean;
   onChange: (choice: PlanChoice) => void;
 }) {
   const withFounding = showsFounding(choice.interval, founding);
-  const freeThenHalf = referred && withFounding;
+  const trialDays = referred ? REFERRED_TRIAL_DAYS : TRIAL_DAYS;
 
   return (
     <div className="space-y-4">
       <IntervalSwitch interval={choice.interval} onChange={(interval) => onChange({ ...choice, interval })} />
 
-      {withFounding && !freeThenHalf ? <FoundingMeter placesLeft={founding.placesLeft} /> : null}
+      {withFounding ? <FoundingMeter placesLeft={founding.placesLeft} /> : null}
 
       <fieldset>
         <legend className="sr-only">Choose your plan</legend>
@@ -246,7 +244,7 @@ export function PlanPicker({
                 plan={plan}
                 interval={choice.interval}
                 founding={withFounding}
-                freeThenHalf={freeThenHalf}
+                trialDays={trialDays}
                 selected={choice.plan === plan}
                 onSelect={() => onChange({ ...choice, plan })}
                 wide={plan === 'both'}

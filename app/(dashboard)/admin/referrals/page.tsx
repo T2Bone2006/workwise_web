@@ -88,14 +88,14 @@ export default async function PartnerReferralsPage() {
     <div className="space-y-6">
       <PageGradientHeader
         title="Partner referrals"
-        subtitle="People with no WorkWise account. A Rounds or Lite signup that uses their code gets the free month. They earn 10% of what that business pays you for 12 months. You pay them yourself."
+        subtitle="People with no WorkWise account. A Rounds or Lite signup that uses their code gets a 60-day free trial instead of 30. They earn 10% of what that business pays you for 12 months. You pay them yourself."
       />
 
       <Card>
         <CardHeader>
           <CardTitle>Add someone</CardTitle>
           <CardDescription>
-            A short word they can say out loud, like SARAH. Customer referral codes still work when typed, and those pay a free month on that customer&apos;s bill instead of 10%.
+            A short word they can say out loud, like SARAH. Customer referral codes still work when typed, and those pay a month off that customer&apos;s bill instead of 10%.
           </CardDescription>
         </CardHeader>
         <CardContent>

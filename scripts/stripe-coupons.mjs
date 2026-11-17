@@ -1,4 +1,4 @@
-// Makes the five discount coupons in Stripe, each LIMITED to the three plan products
+// Makes the founder discount coupon in Stripe (FOUNDER_50: 50% off for life, first 200 businesses), each LIMITED to the three plan products
 // (WorkWise Rounds, WorkWise Lite, WorkWise Rounds + Lite), so the £10 Rounds team line is never
 // halved or free (Phase 9 D15). Stripe cannot edit a coupon's product limit afterwards, so a coupon that
 // exists without the limit is deleted and made again with the same ID and settings.
@@ -44,12 +44,10 @@ const PLAN_PRICE_ENVS = [
 ];
 const TEAM_PRICE_ENVS = ['STRIPE_PRICE_ROUNDS_TEAM_MONTHLY', 'STRIPE_PRICE_ROUNDS_TEAM_YEARLY'];
 
+// 2026-11-17: the founder offer is 50% off for life. The 200-place limit is counted in our database
+// (founder_places), not here, because a coupon can't hand a use back when a trial is cancelled.
 const COUPONS = [
-  { id: 'FOUNDING50', name: 'Founding offer', percent_off: 50, duration: 'repeating', duration_in_months: 2, max_redemptions: 200 },
-  { id: 'REFERRAL_MONTH', name: 'Referral: first month free', percent_off: 100, duration: 'once' },
-  { id: 'REFERRAL_SECOND_HALF', name: 'Second month half price', percent_off: 50, duration: 'once' },
-  { id: 'REFERRAL_YEAR_35', name: 'Referral: £35 off your first year', amount_off: 3500, currency: 'gbp', duration: 'once' },
-  { id: 'REFERRAL_YEAR_59', name: 'Referral: £59 off your first year', amount_off: 5900, currency: 'gbp', duration: 'once' },
+  { id: 'FOUNDER_50', name: 'Founder price: half price for life', percent_off: 50, duration: 'forever' },
 ];
 
 async function productOfPrice(envName) {
@@ -148,11 +146,7 @@ for (const want of COUPONS) {
 
 console.log('');
 const envLines = {
-  STRIPE_COUPON_FOUNDING: 'FOUNDING50',
-  STRIPE_COUPON_REFERRAL_MONTH: 'REFERRAL_MONTH',
-  STRIPE_COUPON_REFERRAL_SECOND_HALF: 'REFERRAL_SECOND_HALF',
-  STRIPE_COUPON_REFERRAL_YEAR_35: 'REFERRAL_YEAR_35',
-  STRIPE_COUPON_REFERRAL_YEAR_59: 'REFERRAL_YEAR_59',
+  STRIPE_COUPON_FOUNDER: 'FOUNDER_50',
 };
 for (const [name, id] of Object.entries(envLines)) {
   const set = process.env[name];

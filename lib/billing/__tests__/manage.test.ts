@@ -192,31 +192,16 @@ describe('getPlanSummary', () => {
     });
   });
 
-  it('labels founding, referral and other coupons', async () => {
-    const foundingEnd = Math.floor(Date.UTC(2026, 10, 14) / 1000);
-    wire(
-      liveSub({
-        discounts: [{ id: 'di_f', end: foundingEnd, source: { type: 'coupon', coupon: 'FOUNDING50' } }],
-      })
-    );
-    const founding = await getPlanSummary(TENANT);
-    expect(founding).toMatchObject({
+  it('labels the founder coupon as half price for life', async () => {
+    process.env.STRIPE_COUPON_FOUNDER = 'FOUNDER_50';
+    wire(liveSub({ discounts: [{ id: 'di_f', end: null, source: { type: 'coupon', coupon: 'FOUNDER_50' } }] }));
+    expect(await getPlanSummary(TENANT)).toMatchObject({
       kind: 'stripe',
-      discount: {
-        label: 'Founding offer: half price until 14 Nov',
-        endsAt: new Date(foundingEnd * 1000).toISOString(),
-      },
+      discount: { label: 'Founder price: half price for life', endsAt: null, forLife: true },
     });
+  });
 
-    wire(liveSub({ discounts: [{ id: 'di_m', end: null, source: { type: 'coupon', coupon: 'REFERRAL_MONTH' } }] }));
-    expect(await getPlanSummary(TENANT)).toMatchObject({ kind: 'stripe', discount: { label: 'First month free', endsAt: null } });
-
-    wire(liveSub({ discounts: [{ id: 'di_35', end: null, source: { type: 'coupon', coupon: 'REFERRAL_YEAR_35' } }] }));
-    expect(await getPlanSummary(TENANT)).toMatchObject({ kind: 'stripe', discount: { label: '£35 off your first year', endsAt: null } });
-
-    wire(liveSub({ discounts: [{ id: 'di_59', end: null, source: { type: 'coupon', coupon: 'REFERRAL_YEAR_59' } }] }));
-    expect(await getPlanSummary(TENANT)).toMatchObject({ kind: 'stripe', discount: { label: '£59 off your first year', endsAt: null } });
-
+  it('labels other coupons', async () => {
     wire(
       liveSub({
         discounts: [{ id: 'di_x', end: null, source: { type: 'coupon', coupon: { id: 'SAVE10', name: 'Spring sale' } } }],
@@ -476,6 +461,47 @@ describe('plan changes', () => {
     expect(JSON.stringify(params.phases[1])).not.toContain('di_old');
     expect(JSON.stringify(params.phases[1])).not.toContain('di_once');
     expect(JSON.stringify(params.phases[0])).not.toContain('FOUNDING50');
+  });
+
+  it('carries the founder discount (it never ends) onto the new plan, and keeps a free trial running', async () => {
+    process.env.STRIPE_COUPON_FOUNDER = 'FOUNDER_50';
+    wire(
+      bothSub({
+        schedule: null,
+        status: 'trialing',
+        trial_end: PERIOD_END,
+        discounts: [{ id: 'di_founder', end: null, source: { type: 'coupon', coupon: 'FOUNDER_50' } }],
+      })
+    );
+    const created = {
+      id: 'sched_new',
+      status: 'active',
+      current_phase: { start_date: 1_700_000_000, end_date: PERIOD_END },
+      phases: [{ start_date: 1_700_000_000, end_date: PERIOD_END, items: [{ price: 'price_both_m' }], discounts: [] }],
+    };
+    stripe.subscriptionSchedules.create.mockResolvedValue(created);
+    stripe.subscriptionSchedules.update.mockResolvedValue(created);
+
+    await expect(changePlan(TENANT, { plan: 'rounds', interval: 'month' }, 0, 'nonce-founder')).resolves.toEqual({ ok: true, applied: 'at_renewal' });
+    const [, params] = stripe.subscriptionSchedules.update.mock.calls[0];
+    expect(params.phases[0].trial_end).toBe(PERIOD_END);
+    expect(params.phases[0].discounts).toEqual([{ discount: 'di_founder' }]);
+    expect(params.phases[1].discounts).toEqual([{ discount: 'di_founder' }]);
+    expect(params.phases[1].trial_end).toBeUndefined();
+  });
+
+  it('does not add a trial to the first phase of a downgrade when the subscription is not trialing', async () => {
+    wire(bothSub({ schedule: null, discounts: [] }));
+    const created = {
+      id: 'sched_new',
+      status: 'active',
+      current_phase: { start_date: 1_700_000_000, end_date: PERIOD_END },
+      phases: [{ start_date: 1_700_000_000, end_date: PERIOD_END, items: [{ price: 'price_both_m' }], discounts: [] }],
+    };
+    stripe.subscriptionSchedules.create.mockResolvedValue(created);
+    stripe.subscriptionSchedules.update.mockResolvedValue(created);
+    await changePlan(TENANT, { plan: 'rounds', interval: 'month' }, 0, 'nonce-plain');
+    expect(stripe.subscriptionSchedules.update.mock.calls[0][1].phases[0].trial_end).toBeUndefined();
   });
 
   it('replaces a pending downgrade by updating the schedule that is already there', async () => {

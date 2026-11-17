@@ -43,7 +43,7 @@ export type PlanSummary =
       currentPeriodEnd: string;
       cancelAtPeriodEnd: boolean;
       nextBill: { date: string; amountPence: number } | null;
-      discount: { label: string; endsAt: string | null } | null;
+      discount: { label: string; endsAt: string | null; forLife?: boolean } | null;
       creditPence: number;
       pendingChange: { choice: PlanChoice; effectiveDate: string } | null;
       card: CardSummary | null;
@@ -87,6 +87,7 @@ function startsNewYear(from: PlanChoice, to: PlanChoice): boolean {
   return from.interval === 'month' && to.interval === 'year';
 }
 
+const YEARLY_AFTER_TRIAL = 'You can switch to yearly once your free trial has finished.';
 const YEARLY_AFTER_OFFER = 'You can switch to yearly once your current offer has finished.';
 const CANCEL_WAITING = "Cancel the change that's waiting, then you can upgrade.";
 const AMOUNT_CHANGED = 'The amount has changed. Please check it and confirm again.';
@@ -437,8 +438,10 @@ async function previewLoaded(loaded: Loaded, target: PlanChoice): Promise<Change
   if (kind === 'same' || kind === 'not_offered') return { ok: false, error: NOT_OFFERED };
   // Yearly is billed in full the moment they switch, so a half-price or free-month
   // offer still on the subscription would discount a whole year. Wait for it to end.
-  if (loaded.choice.interval === 'month' && target.interval === 'year' && hasActiveDiscount(loaded.subscription)) {
-    return { ok: false, error: YEARLY_AFTER_OFFER };
+  if (loaded.choice.interval === 'month' && target.interval === 'year') {
+    // Switching to yearly bills the year now, which would end a free trial early: wait until it is over.
+    if (loaded.subscription.status === 'trialing') return { ok: false, error: YEARLY_AFTER_TRIAL };
+    if (hasActiveDiscount(loaded.subscription)) return { ok: false, error: YEARLY_AFTER_OFFER };
   }
   const thenLabel = thenLabelFor(loaded.subscription, target);
   if (kind === 'up_now' && (await activeScheduleId(loaded.subscription))) {
@@ -487,8 +490,13 @@ function latestChargedPeriodEnd(preview: Stripe.Invoice): number | null {
 /** Any discount still on the subscription. An unexpanded id counts as active (fail closed). */
 function hasActiveDiscount(subscription: Stripe.Subscription): boolean {
   const nowSeconds = Date.now() / 1000;
+  const founderCoupon = process.env.STRIPE_COUPON_FOUNDER;
   return (subscription.discounts ?? []).some((entry) => {
     if (typeof entry === 'string') return true;
+    // The founder discount lasts for life and applies to a yearly plan too, so it never blocks switching.
+    const source = entry.source?.coupon;
+    const couponId = typeof source === 'string' ? source : source?.id;
+    if (founderCoupon && couponId === founderCoupon) return false;
     return entry.end == null || entry.end > nowSeconds;
   });
 }
@@ -529,6 +537,8 @@ async function applyDowngrade(loaded: Ready, target: PlanChoice, nonce: string):
           items: [{ price: loaded.priceId, quantity: 1 }, ...teamPhaseItems(loaded.subscription)],
           start_date: phase0.start_date,
           end_date: loaded.periodEnd,
+          // Without this the schedule would end a free trial the moment the downgrade is booked.
+          ...(loaded.subscription.status === 'trialing' && loaded.subscription.trial_end ? { trial_end: loaded.subscription.trial_end } : {}),
           discounts: phaseDiscounts(phase0, loaded.subscription),
           proration_behavior: 'none',
         },
@@ -609,7 +619,14 @@ function mapPhaseDiscounts(discounts: Stripe.SubscriptionSchedule.Phase.Discount
   return out;
 }
 
-/** Carry only a discount whose end is after this period. A null end is a one-time coupon. */
+function isFounderDiscount(discount: Stripe.Discount): boolean {
+  const founderCoupon = process.env.STRIPE_COUPON_FOUNDER;
+  const source = discount.source?.coupon;
+  const couponId = typeof source === 'string' ? source : source?.id;
+  return Boolean(founderCoupon) && couponId === founderCoupon;
+}
+
+/** Carry only a discount whose end is after this period (a null end is a one-time coupon), plus the founder discount, which never ends. */
 function carriedDiscounts(
   phase: Stripe.SubscriptionSchedule.Phase,
   subscription: Stripe.Subscription,
@@ -617,19 +634,20 @@ function carriedDiscounts(
 ): DiscountParam[] | '' {
   const out: DiscountParam[] = [];
   const seen = new Set<string>();
-  const add = (id: string, end: number | null) => {
-    if (end == null || end <= periodEnd) return;
+  // The founder discount has no end date (50% for life) and must follow the business onto the new plan.
+  const add = (id: string, end: number | null, forLife: boolean) => {
+    if (!forLife && (end == null || end <= periodEnd)) return;
     if (seen.has(id)) return;
     seen.add(id);
     out.push({ discount: id });
   };
   for (const discount of subscription.discounts ?? []) {
     if (typeof discount === 'string') continue;
-    add(discount.id, discount.end);
+    add(discount.id, discount.end, isFounderDiscount(discount));
   }
   for (const discount of phase.discounts ?? []) {
     if (!discount.discount || typeof discount.discount === 'string') continue;
-    add(discount.discount.id, discount.discount.end);
+    add(discount.discount.id, discount.discount.end, isFounderDiscount(discount.discount));
   }
   return out.length > 0 ? out : '';
 }
@@ -771,7 +789,7 @@ function cardSummary(paymentMethod: Stripe.PaymentMethod): CardSummary | null {
   };
 }
 
-export async function discountSummary(subscription: Stripe.Subscription): Promise<{ label: string; endsAt: string | null } | null> {
+export async function discountSummary(subscription: Stripe.Subscription): Promise<{ label: string; endsAt: string | null; forLife?: boolean } | null> {
   for (const entry of subscription.discounts ?? []) {
     if (typeof entry === 'string') continue;
     const summary = await labelDiscount(entry);
@@ -780,19 +798,14 @@ export async function discountSummary(subscription: Stripe.Subscription): Promis
   return null;
 }
 
-async function labelDiscount(discount: Stripe.Discount): Promise<{ label: string; endsAt: string | null } | null> {
+async function labelDiscount(discount: Stripe.Discount): Promise<{ label: string; endsAt: string | null; forLife?: boolean } | null> {
   const coupon = discount.source?.coupon;
   const couponId = idOf(coupon);
   const couponName = coupon && typeof coupon !== 'string' ? coupon.name : null;
   const endsAt = iso(discount.end);
-  if (couponId && couponId === process.env.STRIPE_COUPON_FOUNDING) {
-    const until = discount.end ? dayMonth(discount.end) : null;
-    return { label: until ? `Founding offer: half price until ${until}` : 'Founding offer: half price', endsAt };
+  if (couponId && couponId === process.env.STRIPE_COUPON_FOUNDER) {
+    return { label: 'Founder price: half price for life', endsAt: null, forLife: true };
   }
-  if (couponId && couponId === process.env.STRIPE_COUPON_REFERRAL_MONTH) return { label: 'First month free', endsAt };
-  if (couponId && couponId === process.env.STRIPE_COUPON_REFERRAL_SECOND_HALF) return { label: 'Second month half price', endsAt };
-  if (couponId && couponId === process.env.STRIPE_COUPON_REFERRAL_YEAR_35) return { label: '£35 off your first year', endsAt };
-  if (couponId && couponId === process.env.STRIPE_COUPON_REFERRAL_YEAR_59) return { label: '£59 off your first year', endsAt };
   if (couponName) return { label: couponName, endsAt };
   if (!couponId) return null;
   try {

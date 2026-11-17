@@ -27,7 +27,7 @@ export default async function AddLitePage() {
   }
 
   const foundingLine =
-    summary?.kind === 'stripe' && summary.discount?.label.startsWith('Founding') ? summary.discount.label : null;
+    summary?.kind === 'stripe' && summary.discount?.forLife ? 'Your founder price (half price for life) applies to Lite too.' : null;
 
   let offer: AddLiteOffer | null = null;
   let loadError: string | null = null;

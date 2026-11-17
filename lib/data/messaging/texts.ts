@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TEXT_PACKS, summariseTexts, type TextPackKey } from '@/lib/messaging/credits';
 import { londonMonth } from '@/lib/messaging/london-time';
+import { textAllowanceFor } from '@/lib/messaging/text-allowance';
 
 export type TextUsage = ReturnType<typeof summariseTexts> & {
   month: string;
@@ -22,7 +23,7 @@ export async function getTextUsage(
   if (error) throw new Error(error.message);
 
   return {
-    ...summariseTexts(data, month),
+    ...summariseTexts(data, month, await textAllowanceFor(supabase, tenantId)),
     month,
     packs: TEXT_PACKS.map((pack) => ({
       key: pack.key,

@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe } from '@/lib/stripe/client';
 import { isBillingInterval, isPlanKey, type PlanChoice } from '@/lib/billing/plans';
-import { chooseSignupOffer, fallbackAfterFoundingRefused, getFoundingStatus } from '@/lib/billing/offers';
+import { chooseSignupOffer, getFoundingStatus } from '@/lib/billing/offers';
 import { isProTier, type ProChoice } from '@/lib/billing/pro-plans';
 import { buildProCheckoutBody } from '@/lib/billing/pro-checkout';
 import { signupCheckoutBody } from '@/lib/billing/signup-checkout';
@@ -18,12 +18,6 @@ type PendingIntent = {
 };
 
 export type ResumeCheckout = { kind: 'url'; url: string } | { kind: 'signup' } | { kind: 'dashboard' };
-
-function isFoundingRefusal(err: unknown): boolean {
-  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
-  const param = err.param ?? '';
-  return param.startsWith('discounts') || err.code === 'coupon_expired' || err.code === 'resource_missing';
-}
 
 function isClosedCheckout(err: unknown): boolean {
   const message = err instanceof Error ? err.message.toLowerCase() : '';
@@ -81,23 +75,13 @@ async function openPlan(
   }
   const choice: PlanChoice = { plan: intent.product, interval: intent.billing_interval };
   const referred = Boolean(intent.referrer_tenant_id);
-  let offer = chooseSignupOffer({ choice, founding: await getFoundingStatus(), referred });
-  try {
-    const session = await stripe.checkout.sessions.create(
-      signupCheckoutBody({ customerId: intent.stripe_customer_id, intentId: intent.id, choice, offer, appUrl })
-    );
-    const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intent.id);
-    if (offerError) throw new Error(`signup_intents offer update failed intent=${intent.id}`);
-    return session;
-  } catch (err) {
-    if (offer.offer !== 'founding' || !isFoundingRefusal(err)) throw err;
-    offer = fallbackAfterFoundingRefused({ choice, referred });
-    const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intent.id);
-    if (offerError) throw new Error(`signup_intents offer update failed intent=${intent.id}`);
-    return stripe.checkout.sessions.create(
-      signupCheckoutBody({ customerId: intent.stripe_customer_id, intentId: intent.id, choice, offer, appUrl })
-    );
-  }
+  const offer = chooseSignupOffer({ choice, founding: await getFoundingStatus(), referred });
+  const session = await stripe.checkout.sessions.create(
+    signupCheckoutBody({ customerId: intent.stripe_customer_id, intentId: intent.id, choice, offer, appUrl })
+  );
+  const { error: offerError } = await admin.from('signup_intents').update({ offer: offer.offer }).eq('id', intent.id);
+  if (offerError) throw new Error(`signup_intents offer update failed intent=${intent.id}`);
+  return session;
 }
 
 async function openPro(stripe: Stripe, intent: PendingIntent, appUrl: string): Promise<Stripe.Checkout.Session> {

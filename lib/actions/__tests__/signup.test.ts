@@ -178,60 +178,49 @@ async function run(fields: Record<string, string> = {}) {
 }
 
 describe('startSignup', () => {
-  it('applies the founding coupon to a new monthly signup', async () => {
+  it('sends a 30-day trial with the card up front and asks for a founder place', async () => {
     await run();
     expect(sessionsCreate).toHaveBeenCalledTimes(1);
-    expect(sessionsCreate.mock.calls[0][0].discounts).toEqual([{ coupon: 'FOUNDING50' }]);
-    expect(sessionsCreate.mock.calls[0][0].line_items).toEqual([{ price: 'price_rounds_m', quantity: 1 }]);
-    expect(JSON.stringify(sessionsCreate.mock.calls)).not.toContain('trial_period_days');
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.subscription_data.trial_period_days).toBe(30);
+    expect(body.payment_method_collection).toBe('always');
+    expect(body.discounts).toBeUndefined();
+    expect(body.subscription_data.metadata).toMatchObject({ offer: 'founding', founder_requested: '1', trial_days: '30' });
+    expect(body.line_items).toEqual([{ price: 'price_rounds_m', quantity: 1 }]);
   });
 
-  it('gives a referred yearly bundle £59 off and still records the referrer during founding', async () => {
+  it('gives a referred yearly bundle a 60-day trial and a founder request, and records the referrer', async () => {
     lookupReferrer.mockResolvedValue({ tenantId: 'ten_ref', businessName: 'Clearview', code: 'ABCD2345' });
     await run({ plan: 'both', interval: 'year', ref: 'ABCD2345' });
-    expect(sessionsCreate.mock.calls[0][0].discounts).toEqual([{ coupon: 'REFERRAL_YEAR_59' }]);
-    expect(sessionsCreate.mock.calls[0][0].line_items).toEqual([{ price: 'price_both_y', quantity: 1 }]);
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.subscription_data.trial_period_days).toBe(60);
+    expect(body.discounts).toBeUndefined();
+    expect(body.line_items).toEqual([{ price: 'price_both_y', quantity: 1 }]);
     expect(inserted).toMatchObject({
       product: 'both',
       billing_interval: 'year',
       referral_code: 'ABCD2345',
       referrer_tenant_id: 'ten_ref',
-      offer: 'month_off_year',
+      offer: 'founding',
     });
   });
 
-  it('gives a referred monthly trader a free month, then half price, while founding runs', async () => {
+  it('gives a referred monthly trader a 60-day trial', async () => {
     lookupReferrer.mockResolvedValue({ tenantId: 'ten_ref', businessName: 'Clearview', code: 'ABCD2345' });
     await run({ ref: 'ABCD2345' });
     const body = sessionsCreate.mock.calls[0][0];
-    expect(body.discounts).toEqual([{ coupon: 'REFERRAL_MONTH' }]);
-    expect(body.subscription_data.metadata).toMatchObject({ offer: 'free_month', second_month_half: '1' });
-    expect(inserted).toMatchObject({ offer: 'free_month', referrer_tenant_id: 'ten_ref' });
+    expect(body.subscription_data.trial_period_days).toBe(60);
+    expect(body.subscription_data.metadata.second_month_half).toBeUndefined();
+    expect(inserted).toMatchObject({ offer: 'founding', referrer_tenant_id: 'ten_ref' });
   });
 
-  it('keeps the plain founding offer for someone who was not referred', async () => {
+  it('once the 200 places are gone, the trial is still 30 days but no founder place is asked for', async () => {
+    getFoundingStatus.mockResolvedValue({ active: false, placesLeft: 0, places: 200 });
     await run({});
     const body = sessionsCreate.mock.calls[0][0];
-    expect(body.discounts).toEqual([{ coupon: 'FOUNDING50' }]);
-    expect(body.subscription_data.metadata.second_month_half).toBeUndefined();
-    expect(inserted).toMatchObject({ offer: 'founding' });
-  });
-
-  it('retries once without a discount when Stripe refuses the founding coupon', async () => {
-    sessionsCreate
-      .mockRejectedValueOnce(
-        new Stripe.errors.StripeInvalidRequestError({
-          type: 'invalid_request_error',
-          message: 'No such coupon',
-          param: 'discounts[0][coupon]',
-          code: 'resource_missing',
-        })
-      )
-      .mockResolvedValueOnce({ id: 'cs_retry', url: 'https://checkout.test/pay' });
-    await run({});
-    expect(sessionsCreate).toHaveBeenCalledTimes(2);
-    expect(sessionsCreate.mock.calls[1][0].discounts).toBeUndefined();
-    expect(updates.some((row) => row.offer === 'none')).toBe(true);
+    expect(body.subscription_data.trial_period_days).toBe(30);
+    expect(body.subscription_data.metadata).toMatchObject({ offer: 'none', founder_requested: '0' });
+    expect(inserted).toMatchObject({ offer: 'none' });
   });
 
   it('expires the open Checkout when the same email resumes', async () => {
@@ -264,33 +253,31 @@ describe('startSignup', () => {
     expect(inserted).toMatchObject({
       referral_code: 'ABCD2345',
       referrer_tenant_id: 'ten_ref',
-      offer: 'free_month',
+      offer: 'founding',
     });
     expect(inserted).not.toHaveProperty('partner_id');
   });
 
-  it('gives a partner code the free month and does not credit a WorkWise customer', async () => {
+  it('gives a partner code the 60-day trial and does not credit a WorkWise customer', async () => {
     lookupPartner.mockResolvedValue({ id: 'par_1', name: 'Sarah', code: 'SARAH' });
     await run({ ref: 'sarah' });
     expect(lookupReferrer).not.toHaveBeenCalled();
     const body = sessionsCreate.mock.calls[0][0];
-    expect(body.discounts).toEqual([{ coupon: 'REFERRAL_MONTH' }]);
-    expect(body.subscription_data.metadata).toMatchObject({ offer: 'free_month', second_month_half: '1' });
+    expect(body.subscription_data.trial_period_days).toBe(60);
     expect(inserted).toMatchObject({
       referral_code: null,
       referrer_tenant_id: null,
       partner_id: 'par_1',
-      offer: 'free_month',
+      offer: 'founding',
     });
   });
 
-  it('after founding, a partner code is a free month then full price', async () => {
+  it('after the founder places are gone, a partner code is a 60-day trial then full price', async () => {
     getFoundingStatus.mockResolvedValue({ active: false, placesLeft: 0, places: 200 });
     lookupPartner.mockResolvedValue({ id: 'par_1', name: 'Sarah', code: 'SARAH' });
     await run({ ref: 'SARAH' });
     const body = sessionsCreate.mock.calls[0][0];
-    expect(body.discounts).toEqual([{ coupon: 'REFERRAL_MONTH' }]);
-    expect(body.subscription_data.metadata.second_month_half).toBeUndefined();
+    expect(body.subscription_data.trial_period_days).toBe(60);
     expect(inserted).toMatchObject({ partner_id: 'par_1', offer: 'free_month' });
   });
 
@@ -309,11 +296,5 @@ describe('startSignup', () => {
     expect(lookupPartner).not.toHaveBeenCalled();
     expect(inserted).toMatchObject({ referrer_tenant_id: 'ten_ref' });
     expect(inserted).not.toHaveProperty('partner_id');
-  });
-
-  it('never sends a trial', async () => {
-    await run({ plan: 'both', interval: 'year' });
-    expect(JSON.stringify(sessionsCreate.mock.calls)).not.toContain('trial_period_days');
-    expect(JSON.stringify(customersCreate.mock.calls)).not.toContain('trial_period_days');
   });
 });

@@ -52,18 +52,9 @@ const initialState = {
 const NOTE_CLASS =
   'flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-sm leading-relaxed';
 
-function ReferralBanner({ name, choice, offer }: { name: string; choice: PlanChoice; offer: SignupOfferView }) {
+function ReferralBanner({ name, offer }: { name: string; choice?: PlanChoice; offer: SignupOfferView }) {
   let text: string | null = null;
-  if (offer === 'free_month') text = `${name} gave you a free month.`;
-  if (offer === 'free_then_half') {
-    text = `${name} gave you a free month, then half price for your second.`;
-  }
-  if (offer === 'month_off_year') {
-    text = `${name} gave you ${formatPence(PLANS[choice.plan].pence.month)} off your first year.`;
-  }
-  if (offer === 'founding') {
-    text = `${name} sent you here. You're getting our founding offer instead: half price for 2 months.`;
-  }
+  if (offer === 'referred' || offer === 'founder_referred') text = `${name} sent you here: you get 60 days free instead of 30.`;
   if (!text) return null;
   return (
     <div

@@ -2,7 +2,7 @@ import { PLANS, type PlanKey } from '@/lib/billing/plans';
 import { PRO_PLANS, type ProTier } from '@/lib/billing/pro-plans';
 
 export type ReferralSide =
-  | { family: 'rounds_lite'; plan: PlanKey }
+  | { family: 'rounds_lite'; plan: PlanKey; /** Pays the founder price (half) for life. */ founder?: boolean }
   | { family: 'pro'; tier: ProTier; interval: 'month' | 'year' };
 
 type ProSide = Extract<ReferralSide, { family: 'pro' }>;
@@ -16,13 +16,15 @@ export function paidValuePence(invoice: {
   return invoice.subtotal - off;
 }
 
-/** One month's list price of this side's plan, in pence (as listed). */
+/** One month of this side's plan at the price THEY pay, in pence: list price, or half for a founder. */
 export function monthlyListPence(side: ReferralSide): number {
-  return side.family === 'pro' ? PRO_PLANS[side.tier].pence.month : PLANS[side.plan].pence.month;
+  if (side.family === 'pro') return PRO_PLANS[side.tier].pence.month;
+  const list = PLANS[side.plan].pence.month;
+  return side.founder ? Math.round(list / 2) : list;
 }
 
 /**
- * Both sides Rounds/Lite: one month of the REFERRER's own plan (Phase 7 D5, unchanged).
+ * Both sides Rounds/Lite: one month of the REFERRER's own plan at the price the referrer pays (half for a founder).
  * Either side Pro: the cheaper of the two sides' monthly list prices (D11). Always a positive integer.
  */
 export function rewardPence(input: { referrer: ReferralSide; referred: ReferralSide }): number {

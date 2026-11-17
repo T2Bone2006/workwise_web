@@ -2,7 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ENTITLED_STATUSES } from '@/lib/data/tenant-products';
-import { TEXT_ALLOWANCE_PER_MONTH } from '@/lib/messaging/credits';
+import { textAllowanceFor } from '@/lib/messaging/text-allowance';
 import { countSegments, toGsm7 } from '@/lib/messaging/gsm';
 import { londonMonth } from '@/lib/messaging/london-time';
 import { activeProvider, sendText } from '@/lib/messaging/provider';
@@ -385,7 +385,7 @@ async function deliver(admin: SupabaseClient, row: TextRow, now: Date): Promise<
     const { data: billedFrom, error: creditError } = await admin.rpc('claim_text_credits', {
       p_tenant_id: row.tenant_id,
       p_segments: segments,
-      p_allowance: TEXT_ALLOWANCE_PER_MONTH,
+      p_allowance: await textAllowanceFor(admin, row.tenant_id),
     });
     if (creditError) {
       await mark(admin, row.id, { status: 'failed', error: 'credits' });

@@ -6,7 +6,8 @@ import { creditTextPackFromSession } from '@/lib/messaging/text-packs';
 import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
 import { ensureWidgetClient, syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
 import { onInvoicePaid, onSubscriptionEnded } from '@/lib/billing/referrals';
-import { onFirstInvoicePaid } from '@/lib/billing/second-month';
+import { claimFounderPlace, releaseFounderPlaceIfTrialEnded } from '@/lib/billing/founder-place';
+import { onTrialWillEnd } from '@/lib/stripe/trial-ending';
 import { trackSignupPaid } from '@/lib/analytics/server';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,7 @@ export const runtime = 'nodejs';
  *   customer.subscription.created / updated / deleted
  *   invoice.paid
  *   invoice.payment_failed
+ *   customer.subscription.trial_will_end (the 3-days-before reminder email)
  */
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -83,7 +85,11 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
         const tenantId = session.metadata?.tenant_id;
         if (tenantId) await ensureWidgetClient(tenantId);
       } else if (session.mode === 'subscription') {
-        await provisionFromCheckoutSession(session);
+        const tenantId = await provisionFromCheckoutSession(session);
+        // A founder place (50% off for life) is claimed here, then the coupon goes on. Throws so Stripe retries.
+        const subscriptionRef = session.subscription;
+        const subscriptionId = typeof subscriptionRef === 'string' ? subscriptionRef : subscriptionRef?.id;
+        if (subscriptionId) await claimFounderPlace({ subscriptionId, tenantId });
         // HeyCatch: the business now exists, so this is the moment a sign-up is real. Never throws.
         if (session.client_reference_id) await trackSignupPaid(session.client_reference_id);
         // Stripe can send invoice.paid for the first invoice before this event, when the
@@ -104,6 +110,7 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
     case 'customer.subscription.deleted': {
       await syncSubscription(event.data.object);
       await onSubscriptionEnded(event.data.object);
+      await releaseFounderPlaceIfTrialEnded(event.data.object);
       return;
     }
     case 'invoice.paid': {
@@ -111,7 +118,6 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const subscriptionId = invoiceSubscriptionId(invoice);
       if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(subscriptionId));
       await onInvoicePaid(invoice);
-      await onFirstInvoicePaid(invoice);
       return;
     }
     case 'invoice.payment_failed': {
@@ -121,6 +127,7 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
     }
     case 'customer.subscription.trial_will_end': {
       await syncSubscription(event.data.object);
+      await onTrialWillEnd(event.data.object);
       return;
     }
     default:

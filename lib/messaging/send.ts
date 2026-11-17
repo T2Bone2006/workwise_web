@@ -7,7 +7,7 @@ import {
   type Channel,
   type MessageKind,
 } from '@/lib/messaging/channel';
-import { TEXT_ALLOWANCE_PER_MONTH } from '@/lib/messaging/credits';
+import { textAllowanceFor } from '@/lib/messaging/text-allowance';
 import { sendEmailFallbackForMessage } from '@/lib/messaging/email-fallback';
 import { countSegments } from '@/lib/messaging/gsm';
 import {
@@ -279,7 +279,7 @@ export async function sendCustomerMessage(
           {
             p_tenant_id: input.tenantId,
             p_segments: segments,
-            p_allowance: TEXT_ALLOWANCE_PER_MONTH,
+            p_allowance: await textAllowanceFor(admin, input.tenantId),
           },
         );
 
@@ -880,7 +880,7 @@ export async function retryFailedTexts(
         const { data: billedFrom, error: creditError } = await admin.rpc('claim_text_credits', {
           p_tenant_id: row.tenant_id,
           p_segments: segments,
-          p_allowance: TEXT_ALLOWANCE_PER_MONTH,
+          p_allowance: await textAllowanceFor(admin, row.tenant_id),
         });
         const from = typeof billedFrom === 'string' ? billedFrom : String(billedFrom ?? '');
         if (creditError || from === 'none') {

@@ -22,8 +22,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 }));
 import {
   chooseSignupOffer,
-  couponIdFor,
-  fallbackAfterFoundingRefused,
+  founderCouponId,
   FOUNDING_PLACES,
   lookupReferrer,
   normaliseReferralCode,
@@ -52,108 +51,60 @@ describe('normaliseReferralCode', () => {
 });
 
 describe('chooseSignupOffer', () => {
-  const foundingStates = [
-    ['active', active],
-    ['ended', ended],
-    ['unknown', unknown],
-  ] as const;
-  const plans: PlanKey[] = ['rounds', 'both'];
-
-  it('covers monthly and yearly, founding on or off, referred or not', () => {
-    for (const plan of plans) {
-      for (const [label, founding] of foundingStates) {
-        for (const referred of [true, false]) {
-          const monthly = chooseSignupOffer({ choice: choice(plan, 'month'), founding, referred });
-          const yearly = chooseSignupOffer({ choice: choice(plan, 'year'), founding, referred });
-
-          if (label === 'ended') {
-            expect(monthly.offer).toBe(referred ? 'free_month' : 'none');
-            expect(monthly.secondMonthHalf).toBe(false);
-          } else if (referred) {
-            // Referred during founding: month 1 free, month 2 half price (added after the first invoice).
-            expect(monthly.offer).toBe('free_month');
-            expect(monthly.couponEnv).toBe('STRIPE_COUPON_REFERRAL_MONTH');
-            expect(monthly.secondMonthHalf).toBe(true);
-            expect(offerView(monthly)).toBe('free_then_half');
-          } else {
-            expect(monthly.offer).toBe('founding');
-            expect(monthly.couponEnv).toBe('STRIPE_COUPON_FOUNDING');
-            expect(monthly.secondMonthHalf).toBe(false);
-          }
-          if (referred) {
-            expect(yearly.offer).toBe('month_off_year');
-            expect(yearly.couponEnv).toBe(
-              plan === 'both' ? 'STRIPE_COUPON_REFERRAL_YEAR_59' : 'STRIPE_COUPON_REFERRAL_YEAR_35'
-            );
-          } else {
-            expect(yearly.offer).toBe('none');
-            expect(yearly.headline).toBeNull();
-          }
-        }
+  it('gives everyone a 30-day trial, and 60 days to a referred friend', () => {
+    for (const plan of ['rounds', 'lite', 'both'] as PlanKey[]) {
+      for (const interval of ['month', 'year'] as BillingInterval[]) {
+        expect(chooseSignupOffer({ choice: choice(plan, interval), founding: active, referred: false }).trialDays).toBe(30);
+        expect(chooseSignupOffer({ choice: choice(plan, interval), founding: active, referred: true }).trialDays).toBe(60);
       }
     }
   });
 
+  it('asks for a founder place while places last, or when the count is unknown, monthly and yearly', () => {
+    for (const interval of ['month', 'year'] as BillingInterval[]) {
+      for (const founding of [active, unknown]) {
+        const offer = chooseSignupOffer({ choice: choice('rounds', interval), founding, referred: false });
+        expect(offer).toMatchObject({ offer: 'founding', founder: true });
+        expect(offerView(offer)).toBe('founder');
+      }
+      const gone = chooseSignupOffer({ choice: choice('rounds', interval), founding: ended, referred: false });
+      expect(gone).toMatchObject({ offer: 'none', founder: false });
+      expect(offerView(gone)).toBe('trial');
+    }
+  });
+
+  it('keeps the referral in the offer view and the stored offer', () => {
+    const both = chooseSignupOffer({ choice: choice('lite', 'month'), founding: active, referred: true });
+    expect(offerView(both)).toBe('founder_referred');
+    expect(both.offer).toBe('founding');
+    const afterFounding = chooseSignupOffer({ choice: choice('lite', 'month'), founding: ended, referred: true });
+    expect(afterFounding.offer).toBe('free_month');
+    expect(offerView(afterFounding)).toBe('referred');
+  });
+
   it('uses the plan prices in the headlines', () => {
-    const rounds = chooseSignupOffer({ choice: choice('rounds', 'month'), founding: active, referred: true });
-    expect(rounds.headline).toBe(
-      'Your first month is free, your second is half price (£17.50), then £35 a month.'
+    expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: active, referred: false }).headline).toBe(
+      '30 days free, then £17.50 a month for life (founder price). Cancel any time before then and you pay nothing.'
     );
-
-    const free = chooseSignupOffer({ choice: choice('lite', 'month'), founding: ended, referred: true });
-    expect(free.headline).toBe('Your first month is free, then £35 a month.');
-
-    const year = chooseSignupOffer({ choice: choice('rounds', 'year'), founding: active, referred: true });
-    expect(year.headline).toBe('£35 off your first year: £315 today, then £350 a year.');
-
-    const both = chooseSignupOffer({ choice: choice('both', 'year'), founding: ended, referred: true });
-    expect(both.headline).toBe('£59 off your first year: £531 today, then £590 a year.');
-
-    const bothFounding = chooseSignupOffer({ choice: choice('both', 'month'), founding: unknown, referred: false });
-    const bothReferred = chooseSignupOffer({ choice: choice('both', 'month'), founding: unknown, referred: true });
-    expect(bothReferred.headline).toBe(
-      'Your first month is free, your second is half price (£29.50), then £59 a month.'
+    expect(chooseSignupOffer({ choice: choice('both', 'year'), founding: active, referred: true }).headline).toBe(
+      '60 days free, then £295 a year for life (founder price). Cancel any time before then and you pay nothing.'
     );
-    expect(bothFounding.headline).toBe(
-      'Founding offer: half price for your first 2 months (£29.50), then £59 a month.'
+    expect(chooseSignupOffer({ choice: choice('lite', 'month'), founding: ended, referred: false }).headline).toBe(
+      '30 days free, then £35 a month. Cancel any time before then and you pay nothing.'
     );
   });
 });
 
-describe('fallbackAfterFoundingRefused', () => {
-  it('drops founding and keeps a referral discount when there is one', () => {
-    expect(fallbackAfterFoundingRefused({ choice: choice('rounds', 'month'), referred: true }).offer).toBe('free_month');
-    expect(fallbackAfterFoundingRefused({ choice: choice('rounds', 'month'), referred: false }).offer).toBe('none');
-    expect(fallbackAfterFoundingRefused({ choice: choice('both', 'year'), referred: true }).couponEnv).toBe(
-      'STRIPE_COUPON_REFERRAL_YEAR_59'
-    );
-    expect(fallbackAfterFoundingRefused({ choice: choice('lite', 'year'), referred: false })).toEqual({
-      offer: 'none',
-      secondMonthHalf: false,
-      couponEnv: null,
-      headline: null,
-    });
+describe('founderCouponId', () => {
+  it('reads the env var and throws when it is missing', () => {
+    const previous = process.env.STRIPE_COUPON_FOUNDER;
+    process.env.STRIPE_COUPON_FOUNDER = 'FOUNDER_50';
+    expect(founderCouponId()).toBe('FOUNDER_50');
+    delete process.env.STRIPE_COUPON_FOUNDER;
+    expect(() => founderCouponId()).toThrow('Missing STRIPE_COUPON_FOUNDER');
+    if (previous !== undefined) process.env.STRIPE_COUPON_FOUNDER = previous;
   });
 });
-
-describe('couponIdFor', () => {
-  it('returns null when there is no coupon and throws when the env is missing', () => {
-    expect(couponIdFor({ offer: 'none', secondMonthHalf: false, couponEnv: null, headline: null })).toBeNull();
-    const previous = process.env.STRIPE_COUPON_FOUNDING;
-    delete process.env.STRIPE_COUPON_FOUNDING;
-    expect(() =>
-      couponIdFor({
-        offer: 'founding',
-        secondMonthHalf: false,
-        couponEnv: 'STRIPE_COUPON_FOUNDING',
-        headline: 'x',
-      })
-    ).toThrow('Missing STRIPE_COUPON_FOUNDING');
-    if (previous === undefined) delete process.env.STRIPE_COUPON_FOUNDING;
-    else process.env.STRIPE_COUPON_FOUNDING = previous;
-  });
-});
-
 
 describe('lookupReferrer', () => {
   beforeEach(() => {

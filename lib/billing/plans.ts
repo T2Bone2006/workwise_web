@@ -21,6 +21,15 @@ export const PLANS: Record<PlanKey, PlanInfo> = {
   both: { key: 'both', label: 'Rounds + Lite', products: ['rounds', 'lite'], pence: { month: 5900, year: 59000 } },
 };
 
+/** Free trial before the first charge: 30 days, or 60 for a friend who came through a referral (30 + one extra month). */
+export const TRIAL_DAYS = 30;
+export const REFERRED_TRIAL_DAYS = 60;
+
+/** Founder price: half the list price, for life. */
+export function founderPence(plan: PlanKey, interval: BillingInterval): number {
+  return Math.round(PLANS[plan].pence[interval] / 2);
+}
+
 export const PLAN_KEYS: readonly PlanKey[] = ['rounds', 'lite', 'both'];
 
 const INTERVALS: readonly BillingInterval[] = ['month', 'year'];

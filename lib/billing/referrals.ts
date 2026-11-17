@@ -40,9 +40,11 @@ export function planPaidValuePence(invoice: Stripe.Invoice): number {
     }, 0);
 }
 
-/** Pure. True when the invoice is paid and planPaidValuePence ≥ monthlyPence(plan). */
-export function invoiceQualifies(invoice: Stripe.Invoice, plan: PlanKey): boolean {
-  return invoice.status === 'paid' && planPaidValuePence(invoice) >= monthlyPence(plan);
+/** Pure. True when the invoice is paid and planPaidValuePence ≥ one month at the price this business should pay
+ *  (half the list price for a founder). The £0 invoice that starts a free trial never qualifies. */
+export function invoiceQualifies(invoice: Stripe.Invoice, plan: PlanKey, founder = false): boolean {
+  const expected = founder ? Math.round(monthlyPence(plan) / 2) : monthlyPence(plan);
+  return invoice.status === 'paid' && planPaidValuePence(invoice) >= expected;
 }
 
 /** For the panel (step 16). Service-role read filtered by referrer_tenant_id = tenantId
@@ -170,7 +172,7 @@ function referredSideFromRows(rows: SubRow[]): ReferralSide | null {
 
 /** Did the referred business pay enough full bills? Reads Stripe fresh (never trusts the event alone) and counts distinct invoices. */
 async function referredQualifies(invoice: Stripe.Invoice, customerId: string, referred: ReferralSide): Promise<boolean> {
-  if (referred.family === 'rounds_lite') return invoiceQualifies(invoice, referred.plan);
+  if (referred.family === 'rounds_lite') return invoiceQualifies(invoice, referred.plan, referred.founder === true);
   if (invoice.status !== 'paid') return false;
   const listed = await getStripe().invoices.list({ customer: customerId, status: 'paid', limit: 24 });
   const ids = new Set<string>();
@@ -236,7 +238,11 @@ export async function onInvoicePaid(invoice: Stripe.Invoice): Promise<Outcome> {
   const referred: ReferralSide | null =
     proFromPrice ??
     (planFromPrice ? { family: 'rounds_lite', plan: planFromPrice } : await referredSide(admin, tenant.id));
-  if (!referred || !(await referredQualifies(invoice, customerId, referred))) {
+  const referredPays: ReferralSide | null =
+    referred && referred.family === 'rounds_lite' && (await holdsFounderPlace(admin, tenant.id))
+      ? { ...referred, founder: true }
+      : referred;
+  if (!referredPays || !(await referredQualifies(invoice, customerId, referredPays))) {
     logReferral(row.id, 'not_yet');
     return { result: 'not_yet' };
   }
@@ -258,7 +264,7 @@ export async function onInvoicePaid(invoice: Stripe.Invoice): Promise<Outcome> {
     return { result: 'void', reason: 'referrer_no_live_plan' };
   }
 
-  const rewardPence = rewardFor({ referrer: referrer.side, referred });
+  const rewardPence = rewardFor({ referrer: referrer.side, referred: referredPays });
   const cutoff = new Date(Date.now() - STALE_MS).toISOString();
   const { data: claimed, error: claimError } = await admin
     .from('referrals')
@@ -421,6 +427,22 @@ async function referredSide(admin: Admin, tenantId: string): Promise<ReferralSid
   return referredSideFromRows((data ?? []) as SubRow[]);
 }
 
+/** True when this business holds a founder place (50% off for life). A read problem counts as "no": it only
+ *  decides how much a referral reward is worth, and is logged so it can be looked at. */
+async function holdsFounderPlace(admin: Admin, tenantId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('founder_places')
+    .select('tenant_id')
+    .eq('tenant_id', tenantId)
+    .is('released_at', null)
+    .maybeSingle();
+  if (error) {
+    console.warn('[referrals] founder place lookup failed');
+    return false;
+  }
+  return Boolean(data);
+}
+
 async function liveReferrer(admin: Admin, tenantId: string): Promise<{ customerId: string; side: ReferralSide } | null> {
   const { data: tenant, error } = await admin
     .from('tenants')
@@ -442,6 +464,9 @@ async function liveReferrer(admin: Admin, tenantId: string): Promise<{ customerI
   }
   const side = referredSideFromRows(rows);
   if (!side) return null;
+  if (side.family === 'rounds_lite' && (await holdsFounderPlace(admin, tenantId))) {
+    return { customerId: tenant.stripe_customer_id, side: { ...side, founder: true } };
+  }
   return { customerId: tenant.stripe_customer_id, side };
 }
 

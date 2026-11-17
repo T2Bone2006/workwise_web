@@ -18,9 +18,7 @@ export function referralTotals(referrals: ReferralRow[]) {
   };
 }
 
-/** What the friend gets. Founding active or unknown: first month free, second half price. */
-export function friendOfferLine(foundingActive: boolean | null): string {
-  return foundingActive === false
-    ? 'They get their first month free (or a month off if they go yearly).'
-    : 'They get their first month free and their second at half price (or a month off if they go yearly).';
+/** What the friend gets: a 60-day free trial instead of 30. */
+export function friendOfferLine(_foundingActive?: boolean | null): string {
+  return 'They get 60 days free instead of 30, then pay as normal.';
 }

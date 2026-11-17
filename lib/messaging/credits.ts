@@ -1,5 +1,8 @@
 export const TEXT_ALLOWANCE_PER_MONTH = 100;
 
+/** Texts included while a business is still on its free trial (Rounds / Lite). Keeps a trial from costing us 100 texts. */
+export const TRIAL_TEXT_ALLOWANCE = 50;
+
 // The keys are stable ids stored on past purchases and in the database check, not the pack size.
 export const TEXT_PACKS = [
   {
@@ -34,6 +37,7 @@ export type TextBalanceRow = {
 export function summariseTexts(
   row: TextBalanceRow | null,
   currentMonth: string,
+  allowancePerMonth: number = TEXT_ALLOWANCE_PER_MONTH,
 ): {
   freeUsed: number;
   freeLeft: number;
@@ -41,7 +45,7 @@ export function summariseTexts(
   totalLeft: number;
   allowance: number;
 } {
-  const allowance = TEXT_ALLOWANCE_PER_MONTH;
+  const allowance = allowancePerMonth;
   if (row == null) {
     return {
       freeUsed: 0,
