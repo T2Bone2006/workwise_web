@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getAppUrl, getStripe } from '@/lib/stripe/client';
 import { isBillingInterval, isPlanKey, type PlanChoice } from '@/lib/billing/plans';
-import { chooseSignupOffer, getFoundingStatus } from '@/lib/billing/offers';
+import { chooseSignupOffer, getFoundingStatusFresh } from '@/lib/billing/offers';
 import { isProTier, type ProChoice } from '@/lib/billing/pro-plans';
 import { buildProCheckoutBody } from '@/lib/billing/pro-checkout';
 import { signupCheckoutBody } from '@/lib/billing/signup-checkout';
@@ -75,7 +75,7 @@ async function openPlan(
   }
   const choice: PlanChoice = { plan: intent.product, interval: intent.billing_interval };
   const referred = Boolean(intent.referrer_tenant_id);
-  const offer = chooseSignupOffer({ choice, founding: await getFoundingStatus(), referred });
+  const offer = chooseSignupOffer({ choice, founding: await getFoundingStatusFresh(), referred });
   const session = await stripe.checkout.sessions.create(
     signupCheckoutBody({ customerId: intent.stripe_customer_id, intentId: intent.id, choice, offer, appUrl })
   );

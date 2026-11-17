@@ -96,6 +96,7 @@ function StripePlan({ summary, referral, teamBilling }: { summary: StripePlanSum
           offerActive={summary.status === 'trialing' || (summary.discount !== null && !summary.discount.forLife)}
           offerLabel={summary.status === 'trialing' ? 'free trial' : (summary.discount?.label ?? null)}
           offerEndsAt={summary.status === 'trialing' ? summary.currentPeriodEnd : (summary.discount?.endsAt ?? null)}
+          founder={summary.discount?.forLife === true}
           run={run}
         />
       )}

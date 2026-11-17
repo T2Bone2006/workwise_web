@@ -50,6 +50,19 @@ describe('normaliseReferralCode', () => {
   });
 });
 
+describe("chooseSignupOffer: the founder coupon on Stripe's own page", () => {
+  const fresh = { ...active, fresh: true };
+  it('is shown on Checkout only when the count was just read and places are left', () => {
+    expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: fresh, referred: false }).couponAtCheckout).toBe(true);
+    expect(chooseSignupOffer({ choice: choice('both', 'year'), founding: fresh, referred: true }).couponAtCheckout).toBe(true);
+  });
+  it('is not shown from the 10-minute cached count, when the count is unknown, or when places are gone', () => {
+    expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: active, referred: false }).couponAtCheckout).toBe(false);
+    expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: unknown, referred: false }).couponAtCheckout).toBe(false);
+    expect(chooseSignupOffer({ choice: choice('rounds', 'month'), founding: { ...ended, fresh: true }, referred: false }).couponAtCheckout).toBe(false);
+  });
+});
+
 describe('chooseSignupOffer', () => {
   it('gives everyone a 30-day trial, and 60 days to a referred friend', () => {
     for (const plan of ['rounds', 'lite', 'both'] as PlanKey[]) {

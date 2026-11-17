@@ -11,6 +11,7 @@ import {
   PLANS,
   priceIdFor,
   priceLabel,
+  founderPriceLabel,
   type PlanChoice,
 } from '@/lib/billing/plans';
 import {
@@ -667,7 +668,7 @@ async function enrich(loaded: Ready): Promise<PlanSummary> {
     subscriptionId: subscription.id,
     choice,
     status: subscription.status as 'active' | 'past_due' | 'trialing' | 'incomplete',
-    priceLabel: priceLabel(choice),
+    priceLabel: discount?.forLife ? founderPriceLabel(choice) : priceLabel(choice),
     currentPeriodEnd: loaded.periodEnd ? new Date(loaded.periodEnd * 1000).toISOString() : '',
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
     nextBill,

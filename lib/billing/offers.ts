@@ -31,7 +31,13 @@ export type FoundingStatus = {
   active: boolean | null; // null = couldn't ask Stripe (show the offer, no count)
   placesLeft: number | null;
   places: number; // 200
+  /** True when the count was read from the database just now (not the 10-minute cache). */
+  fresh?: boolean;
 };
+
+/** A few more than 200 can end up holding a place: someone who was SHOWN the half price on Stripe's page keeps it
+ *  even if the last places went while they were typing their card. This is how many such people we allow for. */
+export const FOUNDER_GRACE = 25;
 
 async function readFoundingPlaces(): Promise<FoundingStatus> {
   const admin = createAdminClient();
@@ -42,6 +48,17 @@ async function readFoundingPlaces(): Promise<FoundingStatus> {
 }
 
 const cachedFoundingStatus = unstable_cache(readFoundingPlaces, ['founding-status'], { revalidate: 600 });
+
+/** Same count, read straight from the database. Used when a Checkout is opened, so the half price is only shown on
+ *  Stripe's page while places really are left. On any error: unknown, so no coupon is shown (it is attached after
+ *  the place is claimed instead). */
+export async function getFoundingStatusFresh(): Promise<FoundingStatus> {
+  try {
+    return { ...(await readFoundingPlaces()), fresh: true };
+  } catch {
+    return { ...UNKNOWN_FOUNDING };
+  }
+}
 
 /** Places left = 200 minus the founder places in use (founder_places, released when a trial is cancelled).
  *  Cached 10 min with next/cache unstable_cache(['founding-status'], { revalidate: 600 }). Errors are not
@@ -124,6 +141,8 @@ export type SignupOffer = {
   trialDays: number;
   /** True when this sign-up should try to claim a founder place (50% off for life) once the trial starts. */
   founder: boolean;
+  /** True when the founder coupon goes on the Checkout itself, so Stripe's page shows the half price. */
+  couponAtCheckout: boolean;
   referred: boolean;
   headline: string;
 };
@@ -158,6 +177,7 @@ export function chooseSignupOffer(input: { choice: PlanChoice; founding: Foundin
     offer: founder ? 'founding' : referred ? 'free_month' : 'none',
     trialDays,
     founder,
+    couponAtCheckout: founder && foundingStatus.active === true && foundingStatus.fresh === true,
     referred,
     headline: headlineFor({ plan: choice.plan, interval: choice.interval, founder, trialDays }),
   };

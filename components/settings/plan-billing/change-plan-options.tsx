@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ArrowUpRight, CalendarClock, Check, Lock, PiggyBank, Route, Sparkles, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { classifyChange, formatPence, PLANS, priceLabel, type PlanChoice } from '@/lib/billing/plans';
+import { classifyChange, formatPence, paidPence, priceLabel, type PlanChoice } from '@/lib/billing/plans';
 import { cn } from '@/lib/utils';
 import { formatBillDate, type PlanActionRun } from './current-plan-card';
 import { ChangePlanDialog } from './change-plan-dialog';
@@ -30,7 +30,7 @@ function renewal(periodEnd: string): string {
  * The yearly line compares twelve monthly prices with the yearly price (the
  * card's "instead of £420" wording). The confirm dialog shows Stripe's preview only.
  */
-export function offersFor(choice: PlanChoice, periodEnd: string, offerActive = false): PlanOffer[] {
+export function offersFor(choice: PlanChoice, periodEnd: string, offerActive = false, founder = false): PlanOffer[] {
   const offers: PlanOffer[] = [];
   const when = renewal(periodEnd);
   const { plan, interval } = choice;
@@ -38,7 +38,7 @@ export function offersFor(choice: PlanChoice, periodEnd: string, offerActive = f
   if (plan === 'rounds' || plan === 'lite') {
     const target: PlanChoice = { plan: 'both', interval };
     if (classifyChange(choice, target) === 'up_now') {
-      const delta = PLANS.both.pence[interval] - PLANS[plan].pence[interval];
+      const delta = paidPence('both', interval, founder) - paidPence(plan, interval, founder);
       const addingLite = plan === 'rounds';
       offers.push({
         target,
@@ -56,8 +56,8 @@ export function offersFor(choice: PlanChoice, periodEnd: string, offerActive = f
   if (interval === 'month') {
     const target: PlanChoice = { plan, interval: 'year' };
     if (classifyChange(choice, target) === 'up_now') {
-      const year = PLANS[plan].pence.year;
-      const twelveMonths = PLANS[plan].pence.month * 12;
+      const year = paidPence(plan, 'year', founder);
+      const twelveMonths = paidPence(plan, 'month', founder) * 12;
       offers.push({
         target,
         title: 'Switch to yearly',
@@ -220,6 +220,7 @@ export function ChangePlanOptions({
   offerActive = false,
   offerLabel = null,
   offerEndsAt = null,
+  founder = false,
   run,
 }: {
   choice: PlanChoice;
@@ -229,19 +230,21 @@ export function ChangePlanOptions({
   offerActive?: boolean;
   offerLabel?: string | null;
   offerEndsAt?: string | null;
+  /** On the founder price (half price for life): every figure on the cards is the half price. */
+  founder?: boolean;
   run: PlanActionRun;
 }) {
   const roundsOnly = choice.plan === 'rounds';
   const yearlyTerm = choice.interval === 'year';
-  const offers = offersFor(choice, periodEnd, offerActive).filter((offer) => !(roundsOnly && offer.title === 'Add Lite'));
+  const offers = offersFor(choice, periodEnd, offerActive, founder).filter((offer) => !(roundsOnly && offer.title === 'Add Lite'));
   const [picked, setPicked] = useState<{ offer: PlanOffer; nonce: string } | null>(null);
   if (!roundsOnly && offers.length === 0) return null;
 
   const period = yearlyTerm ? 'a year' : 'a month';
-  const bothPence = PLANS.both.pence[choice.interval];
-  const separatePence = PLANS.rounds.pence[choice.interval] + PLANS.lite.pence[choice.interval];
+  const bothPence = paidPence('both', choice.interval, founder);
+  const separatePence = paidPence('rounds', choice.interval, founder) + paidPence('lite', choice.interval, founder);
   const bothPill = `Both for ${formatPence(bothPence)}, not ${formatPence(separatePence)}`;
-  const addPrice = `+${formatPence(bothPence - PLANS[roundsOnly ? 'rounds' : 'lite'].pence[choice.interval])}`;
+  const addPrice = `+${formatPence(bothPence - paidPence(roundsOnly ? 'rounds' : 'lite', choice.interval, founder))}`;
 
   const addRounds = offers.find((o) => o.title === 'Add Rounds');
   const yearly = offers.find((o) => o.title === 'Switch to yearly');
@@ -251,8 +254,8 @@ export function ChangePlanOptions({
 
   const yearlyFigures = yearly
     ? {
-        yearPence: PLANS[choice.plan].pence.year,
-        twelvePence: PLANS[choice.plan].pence.month * 12,
+        yearPence: paidPence(choice.plan, 'year', founder),
+        twelvePence: paidPence(choice.plan, 'month', founder) * 12,
       }
     : null;
   const endsOn = shortDate(offerEndsAt);

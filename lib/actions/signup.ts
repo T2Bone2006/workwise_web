@@ -10,7 +10,7 @@ import { type PlanChoice } from '@/lib/billing/plans';
 import { signupCheckoutBody } from '@/lib/billing/signup-checkout';
 import {
   chooseSignupOffer,
-  getFoundingStatus,
+  getFoundingStatusFresh,
   isOwnReferral,
   REFERRAL_COOKIE,
 } from '@/lib/billing/offers';
@@ -109,7 +109,7 @@ export async function startSignup(_prev: unknown, formData: FormData): Promise<S
 
   const offer = chooseSignupOffer({
     choice,
-    founding: await getFoundingStatus(),
+    founding: await getFoundingStatusFresh(),
     referred,
   });
 

@@ -64,6 +64,16 @@ export function priceLabel(choice: PlanChoice): string {
   return `${formatPence(PLANS[choice.plan].pence[choice.interval])} ${period}`;
 }
 
+/** What a plan costs this business: the founder's half price for life, or the list price. */
+export function paidPence(plan: PlanKey, interval: BillingInterval, founder: boolean): number {
+  return founder ? founderPence(plan, interval) : PLANS[plan].pence[interval];
+}
+
+export function founderPriceLabel(choice: PlanChoice): string {
+  const period = choice.interval === 'month' ? 'a month' : 'a year';
+  return `${formatPence(founderPence(choice.plan, choice.interval))} ${period}`;
+}
+
 /** One month's price of a plan (used for the referral credit and the referee's yearly coupon). */
 export function monthlyPence(plan: PlanKey): number {
   return PLANS[plan].pence.month;

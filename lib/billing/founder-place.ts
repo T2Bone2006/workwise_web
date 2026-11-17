@@ -2,7 +2,7 @@ import 'server-only';
 import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe/client';
-import { founderCouponId, FOUNDING_PLACES } from '@/lib/billing/offers';
+import { founderCouponId, FOUNDER_GRACE, FOUNDING_PLACES } from '@/lib/billing/offers';
 
 /** Set on the subscription once we have decided: '1' = holds a founder place (coupon attached), '0' = none left. */
 export const FOUNDER_PLACE_META = 'founder_place';
@@ -26,23 +26,31 @@ function discountSourceCoupon(entry: Stripe.Discount | string): string | null {
  */
 export async function claimFounderPlace(input: { subscriptionId: string; tenantId: string }): Promise<FounderClaimResult> {
   const stripe = getStripe();
-  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
+  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId, { expand: ['discounts'] });
   if (subscription.metadata?.founder_requested !== '1') return { result: 'not_requested' };
   if (subscription.metadata?.[FOUNDER_PLACE_META] === '1') return { result: 'already_decided' };
   if (subscription.metadata?.[FOUNDER_PLACE_META] === '0') return { result: 'already_decided' };
 
+  const shownAtCheckout = subscription.metadata?.founder_coupon_shown === '1';
   const admin = createAdminClient();
   const { data, error } = await admin.rpc('claim_founder_place', {
     p_tenant_id: input.tenantId,
     p_subscription_id: input.subscriptionId,
-    p_limit: FOUNDING_PLACES,
+    // Someone shown the half price on Stripe's page keeps it even if the last places went meanwhile.
+    p_limit: shownAtCheckout ? FOUNDING_PLACES + FOUNDER_GRACE : FOUNDING_PLACES,
   });
   if (error || typeof data !== 'string') throw new Error('claim_founder_place failed');
 
   if (data === 'full' || data === 'used') {
+    // No place after all: take the founder coupon off if Checkout had put it on (only possible past the grace).
+    const couponId = founderCouponId();
+    const others = (subscription.discounts ?? []).flatMap((entry) =>
+      typeof entry === 'string' || discountSourceCoupon(entry) === couponId ? [] : [{ discount: entry.id }],
+    );
+    const hadCoupon = (subscription.discounts ?? []).some((entry) => discountSourceCoupon(entry) === couponId);
     await stripe.subscriptions.update(
       input.subscriptionId,
-      { metadata: { [FOUNDER_PLACE_META]: '0' } },
+      { metadata: { [FOUNDER_PLACE_META]: '0' }, ...(hadCoupon ? { discounts: others.length > 0 ? others : '' } : {}) },
       { idempotencyKey: `founder-none-${input.subscriptionId}` },
     );
     console.warn(`[founder] no place sub=${input.subscriptionId} reason=${data}`);

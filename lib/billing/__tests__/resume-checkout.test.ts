@@ -39,7 +39,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 
 vi.mock('@/lib/billing/offers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/billing/offers')>('@/lib/billing/offers');
-  return { ...actual, getFoundingStatus: (...args: unknown[]) => getFoundingStatus(...args) };
+  return { ...actual, getFoundingStatusFresh: (...args: unknown[]) => getFoundingStatus(...args) };
 });
 
 const PRICE_ENV: Record<string, string> = {

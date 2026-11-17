@@ -86,7 +86,7 @@ vi.mock('@/lib/billing/offers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/billing/offers')>('@/lib/billing/offers');
   return {
     ...actual,
-    getFoundingStatus: (...args: unknown[]) => getFoundingStatus(...args),
+    getFoundingStatusFresh: (...args: unknown[]) => getFoundingStatus(...args),
     lookupReferrer: (...args: unknown[]) => lookupReferrer(...args),
     isOwnReferral: (...args: unknown[]) => isOwnReferral(...args),
   };
@@ -187,6 +187,24 @@ describe('startSignup', () => {
     expect(body.discounts).toBeUndefined();
     expect(body.subscription_data.metadata).toMatchObject({ offer: 'founding', founder_requested: '1', trial_days: '30' });
     expect(body.line_items).toEqual([{ price: 'price_rounds_m', quantity: 1 }]);
+  });
+
+  it("puts the founder coupon on Checkout (so Stripe's page shows half price) when places were just confirmed free", async () => {
+    process.env.STRIPE_COUPON_FOUNDER = 'FOUNDER_50';
+    getFoundingStatus.mockResolvedValue({ active: true, placesLeft: 150, places: 200, fresh: true });
+    await run();
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.discounts).toEqual([{ coupon: 'FOUNDER_50' }]);
+    expect('allow_promotion_codes' in body).toBe(false);
+    expect(body.subscription_data.metadata).toMatchObject({ founder_requested: '1', founder_coupon_shown: '1' });
+  });
+
+  it('puts no coupon on Checkout when the places are gone, even if the count was read just now', async () => {
+    getFoundingStatus.mockResolvedValue({ active: false, placesLeft: 0, places: 200, fresh: true });
+    await run();
+    const body = sessionsCreate.mock.calls[0][0];
+    expect(body.discounts).toBeUndefined();
+    expect(body.subscription_data.metadata).toMatchObject({ founder_requested: '0', founder_coupon_shown: '0' });
   });
 
   it('gives a referred yearly bundle a 60-day trial and a founder request, and records the referrer', async () => {

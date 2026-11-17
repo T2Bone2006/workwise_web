@@ -75,6 +75,45 @@ describe('claimFounderPlace', () => {
   });
 });
 
+describe('claimFounderPlace: shown the half price on Checkout', () => {
+  const shown = (extra: Record<string, unknown> = {}) =>
+    sub({ metadata: { founder_requested: '1', founder_coupon_shown: '1' }, discounts: [{ id: 'di_1', source: { coupon: { id: 'FOUNDER_50' } } }], ...extra });
+
+  it('allows a few past 200 (they were shown the price) and does not add the coupon a second time', async () => {
+    stripe.subscriptions.retrieve.mockResolvedValue(shown());
+    rpc.mockResolvedValue({ data: 'claimed', error: null });
+    await claimFounderPlace({ subscriptionId: 'sub_1', tenantId: 'ten_1' });
+    expect(rpc).toHaveBeenCalledWith('claim_founder_place', { p_tenant_id: 'ten_1', p_subscription_id: 'sub_1', p_limit: 225 });
+    expect(stripe.subscriptions.update.mock.calls[0][1].discounts).toEqual([{ discount: 'di_1' }]);
+    expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith('sub_1', { expand: ['discounts'] });
+  });
+
+  it('takes the founder coupon off (keeping any other discount) if there is no place even within the grace', async () => {
+    stripe.subscriptions.retrieve.mockResolvedValue(
+      shown({ discounts: [{ id: 'di_1', source: { coupon: { id: 'FOUNDER_50' } } }, { id: 'di_2', source: { coupon: 'OTHER' } }] }),
+    );
+    rpc.mockResolvedValue({ data: 'full', error: null });
+    await expect(claimFounderPlace({ subscriptionId: 'sub_1', tenantId: 'ten_1' })).resolves.toEqual({ result: 'full' });
+    const params = stripe.subscriptions.update.mock.calls[0][1];
+    expect(params.metadata).toEqual({ founder_place: '0' });
+    expect(params.discounts).toEqual([{ discount: 'di_2' }]);
+  });
+
+  it('clears the discounts entirely when the founder coupon was the only one', async () => {
+    stripe.subscriptions.retrieve.mockResolvedValue(shown());
+    rpc.mockResolvedValue({ data: 'full', error: null });
+    await claimFounderPlace({ subscriptionId: 'sub_1', tenantId: 'ten_1' });
+    expect(stripe.subscriptions.update.mock.calls[0][1].discounts).toBe('');
+  });
+
+  it('keeps the normal 200 limit when no price was shown on Checkout', async () => {
+    stripe.subscriptions.retrieve.mockResolvedValue(sub());
+    rpc.mockResolvedValue({ data: 'claimed', error: null });
+    await claimFounderPlace({ subscriptionId: 'sub_1', tenantId: 'ten_1' });
+    expect(rpc.mock.calls[0][1].p_limit).toBe(200);
+  });
+});
+
 describe('releaseFounderPlaceIfTrialEnded', () => {
   const base = { metadata: { founder_place: '1' }, customer: 'cus_1', trial_end: 2_000_000 };
 
