@@ -24,6 +24,7 @@ import {
   UserPlus,
   Group,
   Ungroup,
+  Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -130,6 +131,7 @@ const STANDARD_COLUMN_KEYS = new Set<string>([
   'status',
   'skills',
   'created_at',
+  'from_partner',
 ]);
 function isStandardColumn(id: string): boolean {
   return STANDARD_COLUMN_KEYS.has(id);
@@ -148,6 +150,20 @@ const STATUS_TOOLTIPS: Record<JobStatus | 'accepted', string> = {
   declined: 'Worker declined this job.',
   cancelled: 'Cancelled; will not be completed.',
 };
+
+/** The partner a job was sent to, shown where the worker would be: they are the one doing it. */
+function NetworkPartner({ name }: { name: string | null }) {
+  const partner = name ?? 'Network partner';
+  return (
+    <span
+      className="inline-flex max-w-[11rem] items-center gap-1.5 text-sm"
+      title={`Sent to ${partner} through your network`}
+    >
+      <Share2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate">{partner}</span>
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: JobStatus | null }) {
   if (!status) return <span className="text-muted-foreground">—</span>;
@@ -344,6 +360,8 @@ interface JobsTableProps {
    * where the feature isn't offered (portal, day view).
    */
   fieldGroups?: FieldGroup[];
+  /** Active network partners. With two or more, a "From" column can be shown. */
+  networkPartnerCount?: number;
   /**
    * Spreadsheet headers on this customer's imported jobs. The portal column
    * picker offers them as extra columns. Omitted on the office list, which
@@ -379,6 +397,7 @@ export function JobsTable({
   fieldFilterValuesByField,
   initialVisibleColumns,
   fieldGroups = [],
+  networkPartnerCount = 0,
   importHeaders = [],
   workers,
   basePath = '/jobs',
@@ -477,7 +496,9 @@ export function JobsTable({
     }
     return out;
   }, [visibleColumns, fieldGroups]);
-  const standardColumnCount = [...visibleColumns].filter((c) => isStandardColumn(c)).length;
+  const standardColumnCount = [...visibleColumns].filter(
+    (c) => isStandardColumn(c) && (c !== 'from_partner' || networkPartnerCount >= 2)
+  ).length;
   const visibleColumnCount = standardColumnCount + fieldColumns.length;
 
   // Spreadsheet columns not in any field yet. They sit at the bottom of the
@@ -1339,6 +1360,7 @@ export function JobsTable({
                       visibleColumns={visibleColumns}
                       onToggle={toggleColumn}
                       fieldGroups={fieldGroups}
+                      showFromColumn={networkPartnerCount >= 2}
                       otherHeaders={showOfficeTools ? otherHeaders : undefined}
                       onOpen={loadOtherHeaders}
                       importHeaders={isPortalView ? importHeaders : undefined}
@@ -1358,6 +1380,8 @@ export function JobsTable({
                       totalCount={totalCount}
                       filters={initialFilters}
                       selectedIds={Array.from(selectedIds)}
+                      fieldGroups={fieldGroups}
+                      visibleColumnIds={Array.from(visibleColumns)}
                     />
                   )}
                 </div>
@@ -1898,6 +1922,9 @@ export function JobsTable({
                         {visibleColumns.has('worker') && (
                           <TableHead className="text-muted-foreground">Worker</TableHead>
                         )}
+                        {networkPartnerCount >= 2 && visibleColumns.has('from_partner') && (
+                          <TableHead className="text-muted-foreground">From</TableHead>
+                        )}
                         {visibleColumns.has('scheduled') && (
                           <TableHead className="text-muted-foreground">
                             <button
@@ -2193,10 +2220,12 @@ export function JobsTable({
                             <TableCell
                               onClick={(e) => {
                                 // Stop the row's navigate-to-detail click when using the picker.
-                                if (canAssignWorkerInline(rowStatus)) e.stopPropagation();
+                                if (canAssignWorkerInline(rowStatus) && job.network?.direction !== 'sent') e.stopPropagation();
                               }}
                             >
-                              {canAssignWorkerInline(rowStatus) && workers.length > 0 ? (
+                              {job.network?.direction === 'sent' ? (
+                                <NetworkPartner name={job.network.partnerName} />
+                              ) : canAssignWorkerInline(rowStatus) && workers.length > 0 ? (
                                 <SearchableSelect
                                   options={workerOptions}
                                   value={job.assigned_worker_id ?? ''}
@@ -2227,6 +2256,15 @@ export function JobsTable({
                               )}
                             </TableCell>
                           )}
+                          {networkPartnerCount >= 2 && visibleColumns.has('from_partner') && (
+                            <TableCell className="text-muted-foreground">
+                              {job.network?.direction === 'received' ? (
+                                (job.network.partnerName ?? 'Network partner')
+                              ) : (
+                                <span className="text-muted-foreground/70">—</span>
+                              )}
+                            </TableCell>
+                          )}
                           {visibleColumns.has('scheduled') && (
                             <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                               {formatScheduledDateTime(
@@ -2243,7 +2281,7 @@ export function JobsTable({
                           )}
                           {visibleColumns.has('status') && (
                             <TableCell className="whitespace-normal">
-                              {rowStatus === 'pending_send' && showOfficeTools ? (
+                              {rowStatus === 'pending_send' && showOfficeTools && job.network?.direction !== 'sent' ? (
                                 <SendJobBadge
                                   workerName={job.worker_name ?? null}
                                   sending={sendingSingleId === job.id}

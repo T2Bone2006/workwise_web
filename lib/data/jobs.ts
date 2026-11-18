@@ -63,6 +63,12 @@ export interface JobsFilters {
   sort_dir?: 'asc' | 'desc';
 }
 
+/** A job that crossed the business network. `sent`: you sent it to a partner. `received`: a partner sent it to you. */
+export interface JobNetworkInfo {
+  direction: 'sent' | 'received';
+  partnerName: string | null;
+}
+
 export interface JobRow {
   id: string;
   tenant_id: string;
@@ -93,6 +99,10 @@ export interface JobRow {
   /** Group this job travels with (see job_groups); null/undefined = ungrouped. */
   job_group_id?: string | null;
   job_group_label?: string | null;
+  /** Set when this job was sent to, or received from, a network partner. */
+  network_dispatch_id?: string | null;
+  /** Filled by attachNetworkInfo: who the partner is and which way the job went. */
+  network?: JobNetworkInfo | null;
   /**
    * When `status` is cancelled: the time the office chose, from
    * `job_status_history.created_at`. Absent on other statuses.
@@ -408,6 +418,7 @@ function mapJobRow(
     source_fields: sourceFields,
     job_group_id: (row.job_group_id as string | null) ?? null,
     job_group_label: jobGroup?.label ?? null,
+    network_dispatch_id: (row.network_dispatch_id as string | null) ?? null,
   };
 
   if (filters?.search?.trim()) {
@@ -539,6 +550,7 @@ export async function getJobsForTenant(
       mapJobRow(row as Record<string, unknown>, filters, groups)
     );
     await attachCancellationTimes(supabase, jobs);
+    await attachNetworkInfo(supabase, tenantId, jobs);
 
     return {
       jobs,
@@ -636,6 +648,50 @@ export async function getJobsForExport(
 }
 
 const EXPORT_HISTORY_CHUNK = 150;
+
+/**
+ * Marks the jobs on this page that crossed the business network, with the partner's name.
+ * Any failure leaves the rows untagged: the jobs list must never break because of this.
+ */
+export async function attachNetworkInfo(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  tenantId: string,
+  jobs: JobRow[]
+): Promise<void> {
+  try {
+    const ids = [...new Set(jobs.map((job) => job.network_dispatch_id).filter((id): id is string => Boolean(id)))];
+    if (ids.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('network_job_dispatches')
+      .select(
+        `id, originating_tenant_id, receiving_tenant_id,
+         originating_tenant:tenants!network_job_dispatches_originating_tenant_id_fkey(name),
+         receiving_tenant:tenants!network_job_dispatches_receiving_tenant_id_fkey(name)`
+      )
+      .in('id', ids);
+    if (error || !Array.isArray(data)) {
+      if (error) console.error('[attachNetworkInfo]', error.message);
+      return;
+    }
+
+    const byId = new Map<string, JobNetworkInfo>();
+    for (const row of data as Array<Record<string, unknown>>) {
+      const sent = row.originating_tenant_id === tenantId;
+      const partner = (sent ? row.receiving_tenant : row.originating_tenant) as { name?: string } | null;
+      byId.set(row.id as string, {
+        direction: sent ? 'sent' : 'received',
+        partnerName: partner?.name ?? null,
+      });
+    }
+    for (const job of jobs) {
+      if (job.network_dispatch_id) job.network = byId.get(job.network_dispatch_id) ?? null;
+    }
+  } catch (err) {
+    console.error('[attachNetworkInfo]', err instanceof Error ? err.name : 'Error');
+  }
+}
 
 /** Fills `cancelled_at` for cancelled rows on this page from status history. */
 async function attachCancellationTimes(

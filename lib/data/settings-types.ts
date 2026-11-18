@@ -118,7 +118,9 @@ export type JobsListColumnKey =
   | 'priority'
   | 'status'
   | 'skills'
-  | 'created_at';
+  | 'created_at'
+  /** Which network partner sent the job. Only offered to businesses with two or more active network partners. */
+  | 'from_partner';
 
 export const JOBS_LIST_COLUMNS: Array<{ key: JobsListColumnKey; label: string }> = [
   { key: 'customer', label: 'Customer' },
@@ -130,6 +132,7 @@ export const JOBS_LIST_COLUMNS: Array<{ key: JobsListColumnKey; label: string }>
   { key: 'status', label: 'Status' },
   { key: 'skills', label: 'Skills' },
   { key: 'created_at', label: 'Created' },
+  { key: 'from_partner', label: 'From' },
 ];
 
 const JOBS_LIST_COLUMN_KEYS = new Set(JOBS_LIST_COLUMNS.map((c) => c.key));

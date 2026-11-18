@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { toExportRow, type CustomerExportRow } from '@/lib/customers/export-csv';
 import { sendsInvoice } from '@/lib/payments/terms';
 import {
   mergeFieldsWithHeaders,
@@ -259,6 +260,76 @@ export interface CustomersListFilters {
 const PAGE_SIZE = 50;
 
 /**
+ * Every active customer matching the list's search, type and sort, for the export: not just the page on screen.
+ * Capped at `limit` (the caller passes the export ceiling).
+ */
+export async function getCustomersForExport(
+  tenantId: string,
+  filters: CustomersListFilters,
+  limit: number
+): Promise<{ customers: CustomerExportRow[]; error: Error | null }> {
+  try {
+    const supabase = await createClient();
+    let query = supabase
+      .from('customers_with_job_counts')
+      .select('id, name, type, email, phone, job_count')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+    query = applyCustomerListFilters(query, filters).range(0, Math.max(1, limit) - 1);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[getCustomersForExport]', error);
+      return { customers: [], error: new Error(error.message ?? 'Failed to load customers') };
+    }
+    const customers = (Array.isArray(data) ? data : []).map((row: Record<string, unknown>) =>
+      toExportRow({
+        id: String(row.id),
+        name: (row.name as string) ?? '',
+        type: (row.type as string) ?? 'individual',
+        email: (row.email as string | null) ?? null,
+        phone: (row.phone as string | null) ?? null,
+        job_count: typeof row.job_count === 'number' ? row.job_count : 0,
+      })
+    );
+    return { customers, error: null };
+  } catch (err) {
+    console.error('[getCustomersForExport]', err);
+    return { customers: [], error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
+
+/** Search, type and sort for the customers list. Shared by the page and the export so they cannot drift apart. */
+function applyCustomerListFilters(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filters: CustomersListFilters
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+    if (filters.type) {
+      query = query.eq('type', filters.type);
+    }
+    if (filters.search?.trim()) {
+      const term = `%${filters.search.replace(/[,()*%]/g, ' ').replace(/\s+/g, ' ').trim()}%`;
+      query = query.or(
+        `name.ilike.${term},email.ilike.${term},phone.ilike.${term},billing_address.ilike.${term}`
+      );
+    }
+
+    const sortCol = filters.sort ?? 'name';
+    const sortAsc = filters.sort_dir !== 'desc';
+    if (sortCol === 'email') {
+      query = query.order('email', { ascending: sortAsc, nullsFirst: false });
+    } else if (sortCol === 'jobs') {
+      query = query.order('job_count', { ascending: sortAsc, nullsFirst: false });
+    } else {
+      query = query.order('name', { ascending: sortAsc, nullsFirst: false });
+    }
+
+  return query;
+}
+
+/**
  * Paginated active customers with job counts (via customers_with_job_counts view).
  * Requires `is_active` on the view (see migration customers_with_job_counts_is_active).
  */
@@ -280,25 +351,7 @@ export async function getCustomersForTenantList(
       .eq('tenant_id', tenantId)
       .eq('is_active', true);
 
-    if (filters.type) {
-      query = query.eq('type', filters.type);
-    }
-    if (filters.search?.trim()) {
-      const term = `%${filters.search.replace(/[,()*%]/g, ' ').replace(/\s+/g, ' ').trim()}%`;
-      query = query.or(
-        `name.ilike.${term},email.ilike.${term},phone.ilike.${term},billing_address.ilike.${term}`
-      );
-    }
-
-    const sortCol = filters.sort ?? 'name';
-    const sortAsc = filters.sort_dir !== 'desc';
-    if (sortCol === 'email') {
-      query = query.order('email', { ascending: sortAsc, nullsFirst: false });
-    } else if (sortCol === 'jobs') {
-      query = query.order('job_count', { ascending: sortAsc, nullsFirst: false });
-    } else {
-      query = query.order('name', { ascending: sortAsc, nullsFirst: false });
-    }
+    query = applyCustomerListFilters(query, filters);
 
     query = query.range(from, to);
 

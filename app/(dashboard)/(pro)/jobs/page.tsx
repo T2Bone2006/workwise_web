@@ -29,6 +29,7 @@ import { JobsPageErrorToast } from '@/components/jobs/jobs-page-error-toast';
 import { DeclinedJobsBanner } from '@/components/jobs/declined-jobs-banner';
 import { PageGradientHeader } from '@/components/layout/page-gradient-header';
 import { getTenantProducts } from '@/lib/data/tenant-products';
+import { getConnectionsForTenant } from '@/lib/data/network';
 import { getTenantLook } from '@/lib/data/tenant-look';
 import { getDeclinedJobs } from '@/lib/data/dashboard';
 import { getProNeeds } from '@/lib/data/pro-home';
@@ -207,6 +208,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       declinedJobs,
       proNeeds,
       earlyJobs,
+      connectionsResult,
     ] = await Promise.all([
       getUnassignedJobsCountForTenant(tenantId),
       getJobsStatusSummary(tenantId),
@@ -222,7 +224,12 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       newLook ? getDeclinedJobs(tenantId) : Promise.resolve([]),
       newLook ? getProNeeds(tenantId, format(new Date(), 'yyyy-MM-dd')) : Promise.resolve(null),
       needsBatchLookup ? Promise.resolve(null) : getJobsForTenant(tenantId, baseJobsFilters),
+      getConnectionsForTenant(tenantId),
     ]);
+    // A "From" column only helps when jobs can come from more than one partner.
+    const networkPartnerCount = connectionsResult.error
+      ? 0
+      : connectionsResult.connections.filter((c) => c.status === 'active').length;
 
     const fieldFilterOptions = [
       ...SYSTEM_FILTER_FIELDS.map((f) => ({
@@ -301,6 +308,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           fieldFilterValuesByField={fieldFilterValuesByField}
           initialVisibleColumns={visibleColumns}
           fieldGroups={fieldGroups}
+          networkPartnerCount={networkPartnerCount}
           workers={workers.map((w) => ({ id: w.id, full_name: w.full_name }))}
         />
       </div>

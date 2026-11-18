@@ -15,6 +15,9 @@ import { todayInLondon } from '@/lib/rounds/dates';
 import { buildCustomerInviteEmail } from '@/lib/emails/customer-invite';
 import { getTenantNameForCurrentUser } from '@/lib/data/tenant';
 import { getOwnerTenantId } from '@/lib/auth/require-owner';
+import { getCustomersForExport, type CustomersListFilters } from '@/lib/data/customers';
+import type { CustomerExportRow } from '@/lib/customers/export-csv';
+import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 import { resend, FROM_EMAIL } from '@/lib/resend';
 import { revalidatePath } from 'next/cache';
 import { contactChoiceToColumn } from '@/lib/messaging/channel';
@@ -1321,4 +1324,24 @@ export async function updateCustomerWorkerFields(
 
   revalidatePath(`/customers/${customerId}`);
   return { success: true };
+}
+
+export type ExportCustomersResult =
+  | { success: true; customers: CustomerExportRow[]; capped: boolean }
+  | { success: false; error: string };
+
+/** Every customer matching the list's search and type filters (all pages), for "Export all". */
+export async function exportCustomersAction(
+  filters: Pick<CustomersListFilters, 'search' | 'type' | 'sort' | 'sort_dir'>
+): Promise<ExportCustomersResult> {
+  try {
+    const tenantId = await getOwnerTenantId();
+    if (!tenantId) return { success: false, error: 'No tenant assigned.' };
+    const { customers, error } = await getCustomersForExport(tenantId, filters, EXPORT_MAX_ROWS);
+    if (error) return { success: false, error: error.message };
+    return { success: true, customers, capped: customers.length >= EXPORT_MAX_ROWS };
+  } catch (err) {
+    console.error('[exportCustomersAction]', err);
+    return { success: false, error: 'Unable to export customers.' };
+  }
 }

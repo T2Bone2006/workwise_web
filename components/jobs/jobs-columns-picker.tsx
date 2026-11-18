@@ -33,6 +33,8 @@ interface JobsColumnsPickerProps {
    * standard columns. The portal has no named fields and no Settings page.
    */
   importHeaders?: string[];
+  /** Offer the "From" column (which network partner sent a job). Only worth it with two or more partners. */
+  showFromColumn?: boolean;
 }
 
 /**
@@ -49,10 +51,10 @@ export function JobsColumnsPicker({
   otherHeaders,
   onOpen,
   importHeaders = [],
+  showFromColumn = false,
 }: JobsColumnsPickerProps) {
-  const columns = allowedColumns
-    ? JOBS_LIST_COLUMNS.filter((c) => allowedColumns.includes(c.key))
-    : JOBS_LIST_COLUMNS;
+  const offered = JOBS_LIST_COLUMNS.filter((c) => c.key !== 'from_partner' || showFromColumn);
+  const columns = allowedColumns ? offered.filter((c) => allowedColumns.includes(c.key)) : offered;
   const [showOther, setShowOther] = React.useState(false);
   const offersFields = otherHeaders !== undefined;
 

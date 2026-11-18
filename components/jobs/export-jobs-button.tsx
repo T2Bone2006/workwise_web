@@ -22,7 +22,15 @@ import {
 import type { JobRow, JobsFilters, ExportJobRow } from '@/lib/data/jobs';
 import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 import { getJobsForExportAction } from '@/lib/actions/jobs';
-import { JOB_STATUS_DISPLAY } from '@/lib/job-status-display';
+import type { FieldGroup } from '@/lib/jobs/field-groups';
+import {
+  EXPORT_COLUMNS,
+  buildSheetModel,
+  exportKeysForTable,
+  groupIdsForTable,
+  parseCustomAmount,
+  type ExportableRow,
+} from '@/lib/jobs/export-columns';
 
 interface ExportJobsButtonProps {
   jobs: JobRow[];
@@ -30,37 +38,13 @@ interface ExportJobsButtonProps {
   filters: JobsFilters;
   /** Checked row IDs on the current page (for the Selected scope). */
   selectedIds?: string[];
+  /** The business's named fields (see Settings → Job fields). Each can be exported as one column. */
+  fieldGroups?: FieldGroup[];
+  /** Ids of the columns the table is showing, so the export opens matching it. */
+  visibleColumnIds?: string[];
 }
 
 /** Full export rows always come from the server so lifecycle timestamps are present. */
-type ExportableRow = ExportJobRow;
-
-function formatDateForExport(value: string | null | undefined): string {
-  if (!value) return '';
-
-  const source = value.length <= 10 ? `${value}T12:00:00` : value;
-  const date = new Date(source);
-  if (Number.isNaN(date.getTime())) return '';
-
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = String(date.getFullYear());
-  return `${day}/${month}/${year}`;
-}
-
-function formatDateTimeForExport(value: string | null | undefined): string {
-  if (!value) return '';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = String(date.getFullYear());
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
-}
 
 function formatTodayForFilename(): string {
   const now = new Date();
@@ -69,41 +53,6 @@ function formatTodayForFilename(): string {
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
-
-const EXPORT_COLUMNS: {
-  key: string;
-  label: string;
-  get: (job: ExportableRow) => string;
-}[] = [
-  { key: 'reference_number', label: 'Job Ref', get: (j) => j.reference_number ?? '' },
-  { key: 'customer_name', label: 'Customer', get: (j) => j.customer_name ?? '' },
-  { key: 'address', label: 'Address', get: (j) => j.address ?? '' },
-  { key: 'postcode', label: 'Postcode', get: (j) => j.postcode ?? '' },
-  { key: 'job_description', label: 'Job Type', get: (j) => j.job_description ?? '' },
-  {
-    key: 'status',
-    label: 'Status',
-    get: (j) => (j.status ? (JOB_STATUS_DISPLAY[j.status]?.label ?? j.status) : ''),
-  },
-  {
-    key: 'status_set_at',
-    label: 'Status set at',
-    get: (j) => formatDateTimeForExport(j.status_set_at),
-  },
-  { key: 'worker_name', label: 'Assigned To', get: (j) => j.worker_name ?? 'Unassigned' },
-  { key: 'scheduled_date', label: 'Scheduled Date', get: (j) => formatDateForExport(j.scheduled_date) },
-  {
-    key: 'start_time',
-    label: 'Start Time',
-    get: (j) => formatDateTimeForExport(j.started_at ?? j.arrived_at),
-  },
-  {
-    key: 'completed_at',
-    label: 'Completed at',
-    get: (j) => formatDateTimeForExport(j.completed_at),
-  },
-  { key: 'completion_notes', label: 'Completion Notes', get: (j) => j.completion_notes ?? '' },
-];
 
 type Scope = 'page' | 'all' | 'custom' | 'selected';
 
@@ -151,24 +100,13 @@ function groupRowsByCustomer(rows: ExportableRow[]): Array<{
   return order.map((key) => groups.get(key)!);
 }
 
-function sourceFieldKeysForGroup(rows: ExportableRow[]): string[] {
-  const keys = new Set<string>();
-  for (const job of rows) {
-    const fields = job.source_fields ?? {};
-    for (const key of Object.keys(fields)) {
-      if (key.trim()) keys.add(key);
-    }
-  }
-  return [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-}
-
 async function buildAndDownloadWorkbook(
   rows: ExportableRow[],
   columnKeys: string[],
+  exportedGroups: FieldGroup[],
   opts: { fileName: string; sheetName?: string }
 ) {
   const systemColumns = EXPORT_COLUMNS.filter((c) => columnKeys.includes(c.key));
-  const systemLabels = new Set(systemColumns.map((c) => c.label));
   const XLSX = await import('xlsx');
   const workbook = XLSX.utils.book_new();
   const usedNames = new Set<string>();
@@ -176,26 +114,8 @@ async function buildAndDownloadWorkbook(
   const groups = groupRowsByCustomer(rows);
   const singleSheet = groups.length === 1;
   for (const group of groups) {
-    const sourceKeys = sourceFieldKeysForGroup(group.rows);
-    // Avoid colliding with a system column header of the same name.
-    const sourceHeaders = sourceKeys.map((key) =>
-      systemLabels.has(key) ? `Field: ${key}` : key
-    );
-
-    const headers = [...systemColumns.map((c) => c.label), ...sourceHeaders];
-    const sheetRows = group.rows.map((job) => {
-      const record: Record<string, string> = {};
-      for (const col of systemColumns) {
-        record[col.label] = col.get(job);
-      }
-      const fields = job.source_fields ?? {};
-      sourceKeys.forEach((key, i) => {
-        record[sourceHeaders[i]!] = fields[key] ?? '';
-      });
-      return record;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(sheetRows, { header: headers });
+    const { headers, records } = buildSheetModel(group.rows, systemColumns, exportedGroups);
+    const worksheet = XLSX.utils.json_to_sheet(records, { header: headers });
     const label =
       singleSheet && opts.sheetName?.trim()
         ? opts.sheetName.trim()
@@ -222,6 +142,8 @@ export function ExportJobsButton({
   totalCount,
   filters,
   selectedIds = [],
+  fieldGroups = [],
+  visibleColumnIds = [],
 }: ExportJobsButtonProps) {
   const selectedCount = selectedIds.length;
   const isDisabled = jobs.length === 0 && selectedCount === 0;
@@ -229,8 +151,10 @@ export function ExportJobsButton({
   const [scope, setScope] = useState<Scope>(totalCount > jobs.length ? 'all' : 'page');
   const [customCount, setCustomCount] = useState(String(Math.min(totalCount, 100)));
   const [exportName, setExportName] = useState(defaultExportName);
-  const [selectedColumns, setSelectedColumns] = useState<Set<string>>(
-    () => new Set(EXPORT_COLUMNS.map((c) => c.key))
+  // Opens matching the table: the columns it shows are ticked (reference and status-set-at always are).
+  const [selectedColumns, setSelectedColumns] = useState<Set<string>>(() => exportKeysForTable(visibleColumnIds));
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(() =>
+    groupIdsForTable(visibleColumnIds, fieldGroups)
   );
   const [isExporting, setIsExporting] = useState(false);
 
@@ -244,17 +168,9 @@ export function ExportJobsButton({
     if (selectedCount > 0) setScope('selected');
     else setScope(totalCount > jobs.length ? 'all' : 'page');
     setExportName(defaultExportName());
-    setSelectedColumns((prev) => {
-      const valid = new Set(EXPORT_COLUMNS.map((c) => c.key));
-      const next = new Set([...prev].filter((k) => valid.has(k)));
-      // Always default this on — one column for whatever the current status is.
-      next.add('status_set_at');
-      // First open / empty state: all WorkWise columns on.
-      if (next.size <= 1) {
-        for (const key of valid) next.add(key);
-      }
-      return next;
-    });
+    // Every time it opens, start from what the table shows now; the owner can tick more.
+    setSelectedColumns(exportKeysForTable(visibleColumnIds));
+    setSelectedGroupIds(groupIdsForTable(visibleColumnIds, fieldGroups));
     setOpen(true);
   };
 
@@ -267,10 +183,31 @@ export function ExportJobsButton({
     });
   };
 
+  const toggleGroup = (id: string) => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const customLimit = Math.min(totalCount, EXPORT_MAX_ROWS);
+
   const handleExport = async () => {
-    if (selectedColumns.size === 0) {
+    if (selectedColumns.size === 0 && selectedGroupIds.size === 0) {
       toast.error('Select at least one column to export.');
       return;
+    }
+
+    let customAmount = 0;
+    if (scope === 'custom') {
+      const parsed = parseCustomAmount(customCount, customLimit);
+      if (!parsed.ok) {
+        toast.error(parsed.error);
+        return;
+      }
+      customAmount = parsed.count;
     }
 
     if (scope === 'selected' && selectedCount === 0) {
@@ -316,7 +253,7 @@ export function ExportJobsButton({
       } else {
         const result = await getJobsForExportAction(
           filters,
-          scope === 'all' ? { type: 'all' } : { type: 'count', count: Number(customCount) || 0 }
+          scope === 'all' ? { type: 'all' } : { type: 'count', count: customAmount }
         );
         if (!result.success) {
           toast.error(result.error);
@@ -333,10 +270,15 @@ export function ExportJobsButton({
         return;
       }
 
-      await buildAndDownloadWorkbook(rows, [...selectedColumns], {
-        fileName: exportName,
-        sheetName: exportName,
-      });
+      await buildAndDownloadWorkbook(
+        rows,
+        [...selectedColumns],
+        fieldGroups.filter((g) => selectedGroupIds.has(g.id)),
+        {
+          fileName: exportName,
+          sheetName: exportName,
+        }
+      );
       setOpen(false);
     } catch (err) {
       console.error('[ExportJobsButton] export failed', err);
@@ -435,7 +377,7 @@ export function ExportJobsButton({
                   <Input
                     type="number"
                     min={1}
-                    max={Math.min(totalCount, EXPORT_MAX_ROWS)}
+                    max={customLimit}
                     value={customCount}
                     onChange={(e) => setCustomCount(e.target.value)}
                     className="ml-6 w-32"
@@ -476,10 +418,37 @@ export function ExportJobsButton({
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">
-                Each job’s spreadsheet fields are included automatically. The workbook uses
-                one tab per customer so different layouts stay separate.
+                The ticked columns match what your jobs table is showing. Tick more if you want them.
               </p>
             </div>
+
+            {fieldGroups.length > 0 ? (
+              <div className="space-y-2">
+                <Label>Your fields</Label>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                  {fieldGroups.map((g) => (
+                    <label key={g.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="rounded border-border"
+                        checked={selectedGroupIds.has(g.id)}
+                        onChange={() => toggleGroup(g.id)}
+                      />
+                      <span className="truncate">{g.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  A ticked field is one column, whatever each spreadsheet called it. Unticked, its spreadsheet columns are
+                  exported as they were.
+                </p>
+              </div>
+            ) : null}
+
+            <p className="text-xs text-muted-foreground">
+              Any other spreadsheet columns are added automatically. The workbook uses one tab per customer so
+              different layouts stay separate.
+            </p>
           </div>
 
           <DialogFooter className="gap-2">

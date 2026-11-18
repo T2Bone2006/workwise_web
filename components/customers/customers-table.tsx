@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -67,6 +67,14 @@ import {
   deactivateCustomerPortalAccess,
 } from '@/lib/actions/customers';
 import { cn } from '@/lib/utils';
+import {
+  customersToCsv,
+  summariseSelection,
+  toExportRow,
+  type CustomerExportRow,
+} from '@/lib/customers/export-csv';
+import { exportCustomersAction } from '@/lib/actions/customers';
+import { EXPORT_MAX_ROWS } from '@/lib/jobs/export-limits';
 import { FloatingAddButton } from '@/components/ui/floating-add-button';
 
 const PAGE_SIZE = 50;
@@ -173,7 +181,10 @@ export function CustomersTable({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchInput, setSearchInput] = useState(initialFilters.search ?? '');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Ticked customers are kept as a snapshot, so they stay ticked (and exportable) when the page or filter changes.
+  const [selected, setSelected] = useState<Map<string, CustomerExportRow>>(new Map());
+  const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
+  const [isExportingAll, setIsExportingAll] = useState(false);
   const [deactivateConfirmCustomer, setDeactivateConfirmCustomer] =
     useState<CustomerListRow | null>(null);
   const [isDeactivating, setIsDeactivating] = useState(false);
@@ -196,9 +207,20 @@ export function CustomersTable({
     setSearchInput(initialFilters.search ?? '');
   }, [initialFilters.search]);
 
+  // Keep the snapshot of ticked customers fresh when their row is on screen (a rename, a new phone number).
   useEffect(() => {
-    const valid = new Set(customers.map((c) => c.id));
-    setSelectedIds((prev) => new Set([...prev].filter((id) => valid.has(id))));
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Map(prev);
+      for (const c of customers) {
+        if (next.has(c.id)) {
+          next.set(c.id, toExportRow(c));
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [customers]);
 
   useEffect(() => {
@@ -235,15 +257,26 @@ export function CustomersTable({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size >= customers.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(customers.map((c) => c.id)));
+    // Ticks or unticks this page only; customers ticked on other pages stay as they are.
+    const allOnPage = customers.length > 0 && customers.every((c) => selected.has(c.id));
+    setSelected((prev) => {
+      const next = new Map(prev);
+      for (const c of customers) {
+        if (allOnPage) next.delete(c.id);
+        else next.set(c.id, toExportRow(c));
+      }
+      return next;
+    });
   };
 
   const toggleSelect = (id: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIds(next);
+    const row = customers.find((c) => c.id === id);
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(id)) next.delete(id);
+      else if (row) next.set(id, toExportRow(row));
+      return next;
+    });
   };
 
   const openDeactivateConfirm = (customer: CustomerListRow) => {
@@ -264,29 +297,54 @@ export function CustomersTable({
     }
   };
 
-  const handleExportSelected = () => {
-    const selected = customers.filter((c) => selectedIds.has(c.id));
-    const headers = ['Name', 'Type', 'Email', 'Phone', 'Total Jobs'];
-    const rows = selected.map((c) => [
-      c.name,
-      c.type,
-      c.email ?? '',
-      c.phone ?? '',
-      String(c.job_count ?? 0),
-    ]);
-    const csv = [
-      headers.join(','),
-      ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const downloadCsv = (rows: CustomerExportRow[]) => {
+    const blob = new Blob([customersToCsv(rows)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `customers-export-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Export downloaded');
+    toast.success(`Exported ${rows.length.toLocaleString()} ${rows.length === 1 ? 'customer' : 'customers'}`);
   };
+
+  // Everything ticked, on any page.
+  const handleExportSelected = () => downloadCsv([...selected.values()]);
+
+  // Every customer matching the search and type filter, on every page.
+  const handleExportAll = async () => {
+    setIsExportingAll(true);
+    try {
+      const result = await exportCustomersAction({
+        search: initialFilters.search,
+        type: initialFilters.type,
+        sort: initialFilters.sort,
+        sort_dir: initialFilters.sort_dir,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.customers.length === 0) {
+        toast.error('No customers to export.');
+        return;
+      }
+      downloadCsv(result.customers);
+      if (result.capped) {
+        toast.warning(`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} customers.`);
+      }
+    } catch (err) {
+      console.error('[CustomersTable] export all failed', err);
+      toast.error('Export failed. Please try again.');
+    } finally {
+      setIsExportingAll(false);
+    }
+  };
+
+  const selection = summariseSelection(
+    selectedIds,
+    customers.map((c) => c.id)
+  );
 
   const isEmpty = customers.length === 0 && !fetchError;
   const typeFilterValue = initialFilters.type ?? 'all';
@@ -348,16 +406,34 @@ export function CustomersTable({
                 </Select>
               </div>
 
+              {totalCount > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleExportAll()}
+                  disabled={isExportingAll}
+                  className="gap-1"
+                >
+                  {isExportingAll ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                  Export all ({totalCount.toLocaleString()})
+                </Button>
+              ) : null}
+
               {selectedIds.size > 0 && (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
                   <span className="text-sm font-medium text-foreground">
-                    {selectedIds.size} selected
+                    {selection.total} selected
+                    {selection.onOtherPages > 0 ? (
+                      <span className="ml-1 font-normal text-muted-foreground">
+                        ({selection.onOtherPages} on other pages)
+                      </span>
+                    ) : null}
                   </span>
                   <Button variant="outline" size="sm" onClick={handleExportSelected} className="gap-1">
                     <Download className="size-3.5" />
                     Export Selected
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                  <Button variant="ghost" size="sm" onClick={() => setSelected(new Map())}>
                     <X className="size-3.5" />
                     Clear Selection
                   </Button>
@@ -410,7 +486,7 @@ export function CustomersTable({
                     <TableHead className="w-10">
                       <input
                         type="checkbox"
-                        checked={selectedIds.size === customers.length && customers.length > 0}
+                        checked={customers.length > 0 && customers.every((c) => selectedIds.has(c.id))}
                         onChange={toggleSelectAll}
                         className="rounded border-border"
                         aria-label="Select all"
