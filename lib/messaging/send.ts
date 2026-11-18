@@ -27,6 +27,11 @@ import {
   isOptedOut,
 } from '@/lib/messaging/threads';
 import { listRoundsTenantIds } from '@/lib/messaging/rounds-tenants';
+import {
+  GRACE_TEXTS_PER_MONTH,
+  isMoneyKind,
+  waitingExpiry,
+} from '@/lib/messaging/waiting';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export type EmailAttempt = () => Promise<{ sent: boolean; error?: string }>;
@@ -47,6 +52,7 @@ export type SendCustomerMessageInput = {
 export type SendOutcome =
   | { outcome: 'text_sent'; messageId: string }
   | { outcome: 'text_held'; messageId: string }
+  | { outcome: 'text_waiting'; messageId: string }
   | { outcome: 'email_sent'; messageId: string }
   | { outcome: 'duplicate' }
   | {
@@ -93,7 +99,7 @@ async function refundCredits(
     month: string;
   },
 ): Promise<void> {
-  if (p.from !== 'allowance' && p.from !== 'pack') return;
+  if (p.from !== 'allowance' && p.from !== 'pack' && p.from !== 'grace') return;
   const { error } = await admin.rpc('refund_text_credits', {
     p_tenant_id: p.tenantId,
     p_segments: p.segments,
@@ -152,8 +158,40 @@ async function markMessageFailed(
   }
 }
 
-/** Never throws. */
+/**
+ * Never throws. After a message that used (or needed) texts, checks whether the business should be
+ * warned or topped up. Those run after the customer's message is decided and never change its outcome.
+ */
 export async function sendCustomerMessage(
+  input: SendCustomerMessageInput,
+): Promise<SendOutcome> {
+  const outcome = await sendCustomerMessageInner(input);
+  if (
+    outcome.outcome === 'text_sent' ||
+    outcome.outcome === 'text_held' ||
+    outcome.outcome === 'text_waiting' ||
+    (outcome.outcome === 'skipped' && outcome.reason === 'no_texts_left')
+  ) {
+    await afterTextsUsed(input.tenantId, input.now);
+  }
+  return outcome;
+}
+
+/** Warn the owner when texts are low or out, and top up if they asked us to. Dynamic imports keep send.ts out of an import cycle. */
+async function afterTextsUsed(tenantId: string, now?: Date): Promise<void> {
+  try {
+    const admin = createAdminClient();
+    const { checkTextWarnings } = await import('@/lib/messaging/low-texts');
+    await checkTextWarnings(admin, tenantId, now);
+    // Then, for a business that turned auto top-up on, buy a pack if it has fallen to its trigger.
+    const { maybeAutoTopUp } = await import('@/lib/messaging/run-auto-top-up');
+    await maybeAutoTopUp(admin, tenantId, now);
+  } catch (err) {
+    console.error('[sendCustomerMessage] after texts', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function sendCustomerMessageInner(
   input: SendCustomerMessageInput,
 ): Promise<SendOutcome> {
   let claimedMessageId: string | null = null;
@@ -256,7 +294,125 @@ export async function sendCustomerMessage(
     claimedMessageId = messageId;
 
     let skipReason: SkipReason | null = null;
+    // Set when the business had no texts for this message: it gets a grace text (money kinds) or waits.
+    let outOfTexts: { phone: string; body: string; segments: number; month: string } | null = null;
     let lastTextError: string | null = null;
+
+    // Credits are taken. Hold the text for quiet hours or send it now. Returns the final outcome,
+    // or null when the send failed (credits already refunded) so the next channel is tried.
+    const deliverClaimedText = async (d: {
+      admin: SupabaseClient;
+      phone: string;
+      from: string;
+      body: string;
+      segments: number;
+      month: string;
+    }): Promise<SendOutcome | null> => {
+      const { admin, phone, from, body, segments, month } = d;
+      if (isQuietHours(now)) {
+        const holdUntil = sendableFrom(now);
+        const { error: holdError } = await admin
+          .from('messages')
+          .update({
+            channel: 'sms',
+            status: 'held',
+            hold_until: holdUntil.toISOString(),
+            body,
+            to_address: phone,
+            from_address: ourNumber(),
+            segments,
+            billed_from: from,
+            billed_month: month,
+            provider: activeProvider(),
+          })
+          .eq('id', messageId);
+        if (holdError) {
+          await refundCredits(admin, {
+            tenantId: input.tenantId,
+            segments,
+            from,
+            month,
+          });
+          return {
+            outcome: 'failed',
+            messageId,
+            error: holdError.message,
+          };
+        }
+        if (input.bindThread && jobIds.length > 0) {
+          await bindThreadToStop(admin, {
+            threadId,
+            jobIds,
+            at: now,
+          });
+        }
+        return { outcome: 'text_held', messageId };
+      }
+
+      const sent = await sendText({
+        to: phone,
+        body,
+        clientReference: messageId,
+      });
+
+      if (sent.ok) {
+        const { error: sentError } = await admin
+          .from('messages')
+          .update({
+            channel: 'sms',
+            status: 'sent',
+            sent_at: now.toISOString(),
+            provider: sent.provider,
+            provider_message_id: sent.providerMessageId,
+            body,
+            to_address: phone,
+            from_address: ourNumber(),
+            segments,
+            billed_from: from,
+            billed_month: month,
+          })
+          .eq('id', messageId);
+        if (sentError) {
+          console.error('[sendCustomerMessage] sent update', sentError.message);
+        }
+        await markOptIn(admin, input.customerId, input.tenantId, now);
+        await touchThreadOutbound(admin, { threadId, phone, at: now });
+        if (input.bindThread && jobIds.length > 0) {
+          await bindThreadToStop(admin, { threadId, jobIds, at: now });
+        }
+        return { outcome: 'text_sent', messageId };
+      }
+
+      await refundCredits(admin, {
+        tenantId: input.tenantId,
+        segments,
+        from,
+        month,
+      });
+      lastTextError = sent.error;
+      // Keep the text and number so the morning job can retry it
+      // (retryFailedTexts). Credits were refunded above.
+      const { error: failPatchError } = await admin
+        .from('messages')
+        .update({
+          error: sent.error,
+          provider_status: 'send_failed',
+          provider: sent.provider,
+          channel: 'sms',
+          body,
+          to_address: phone,
+          from_address: ourNumber(),
+          segments,
+        })
+        .eq('id', messageId);
+      if (failPatchError) {
+        console.error(
+          '[sendCustomerMessage] send_failed patch',
+          failPatchError.message,
+        );
+      }
+      return null;
+    };
 
     for (const channel of order) {
       if (channel === 'text') {
@@ -293,111 +449,12 @@ export async function sendCustomerMessage(
           typeof billedFrom === 'string' ? billedFrom : String(billedFrom ?? '');
         if (from === 'none') {
           skipReason = preferSkipReason(skipReason, 'no_texts_left');
+          outOfTexts = { phone, body, segments, month };
           continue;
         }
 
-        if (isQuietHours(now)) {
-          const holdUntil = sendableFrom(now);
-          const { error: holdError } = await admin
-            .from('messages')
-            .update({
-              channel: 'sms',
-              status: 'held',
-              hold_until: holdUntil.toISOString(),
-              body,
-              to_address: phone,
-              from_address: ourNumber(),
-              segments,
-              billed_from: from,
-              billed_month: month,
-              provider: activeProvider(),
-            })
-            .eq('id', messageId);
-          if (holdError) {
-            await refundCredits(admin, {
-              tenantId: input.tenantId,
-              segments,
-              from,
-              month,
-            });
-            return {
-              outcome: 'failed',
-              messageId,
-              error: holdError.message,
-            };
-          }
-          if (input.bindThread && jobIds.length > 0) {
-            await bindThreadToStop(admin, {
-              threadId,
-              jobIds,
-              at: now,
-            });
-          }
-          return { outcome: 'text_held', messageId };
-        }
-
-        const sent = await sendText({
-          to: phone,
-          body,
-          clientReference: messageId,
-        });
-
-        if (sent.ok) {
-          const { error: sentError } = await admin
-            .from('messages')
-            .update({
-              channel: 'sms',
-              status: 'sent',
-              sent_at: now.toISOString(),
-              provider: sent.provider,
-              provider_message_id: sent.providerMessageId,
-              body,
-              to_address: phone,
-              from_address: ourNumber(),
-              segments,
-              billed_from: from,
-              billed_month: month,
-            })
-            .eq('id', messageId);
-          if (sentError) {
-            console.error('[sendCustomerMessage] sent update', sentError.message);
-          }
-          await markOptIn(admin, input.customerId, input.tenantId, now);
-          await touchThreadOutbound(admin, { threadId, phone, at: now });
-          if (input.bindThread && jobIds.length > 0) {
-            await bindThreadToStop(admin, { threadId, jobIds, at: now });
-          }
-          return { outcome: 'text_sent', messageId };
-        }
-
-        await refundCredits(admin, {
-          tenantId: input.tenantId,
-          segments,
-          from,
-          month,
-        });
-        lastTextError = sent.error;
-        // Keep the text and number so the morning job can retry it
-        // (retryFailedTexts). Credits were refunded above.
-        const { error: failPatchError } = await admin
-          .from('messages')
-          .update({
-            error: sent.error,
-            provider_status: 'send_failed',
-            provider: sent.provider,
-            channel: 'sms',
-            body,
-            to_address: phone,
-            from_address: ourNumber(),
-            segments,
-          })
-          .eq('id', messageId);
-        if (failPatchError) {
-          console.error(
-            '[sendCustomerMessage] send_failed patch',
-            failPatchError.message,
-          );
-        }
+        const delivered = await deliverClaimedText({ admin, phone, from, body, segments, month });
+        if (delivered) return delivered;
         continue;
       }
 
@@ -447,6 +504,56 @@ export async function sendCustomerMessage(
         messageId,
         error: emailResult.error ?? 'Email send failed',
       };
+    }
+
+    // Out of texts and nothing else went (no email, or the customer has none): a money message gets
+    // a grace text if any are left; anything else waits for texts instead of being thrown away.
+    if (outOfTexts && !lastTextError) {
+      if (isMoneyKind(input.kind)) {
+        const { data: graceFrom, error: graceError } = await admin.rpc(
+          'claim_grace_texts',
+          {
+            p_tenant_id: input.tenantId,
+            p_segments: outOfTexts.segments,
+            p_limit: GRACE_TEXTS_PER_MONTH,
+          },
+        );
+        if (!graceError && graceFrom === 'grace') {
+          const delivered = await deliverClaimedText({
+            admin,
+            phone: outOfTexts.phone,
+            from: 'grace',
+            body: outOfTexts.body,
+            segments: outOfTexts.segments,
+            month: outOfTexts.month,
+          });
+          if (delivered) return delivered;
+          // The send failed (grace was refunded); fall through to the failed outcome below.
+        } else if (graceError) {
+          console.error('[sendCustomerMessage] grace', graceError.message);
+        }
+      }
+      if (!lastTextError) {
+        const { error: parkError } = await admin
+          .from('messages')
+          .update({
+            channel: 'sms',
+            status: 'waiting_texts',
+            body: outOfTexts.body,
+            to_address: outOfTexts.phone,
+            from_address: ourNumber(),
+            segments: outOfTexts.segments,
+            provider: activeProvider(),
+            waiting_since: now.toISOString(),
+            waiting_expires_at: waitingExpiry(input.kind, now).toISOString(),
+          })
+          .eq('id', messageId);
+        if (!parkError) {
+          return { outcome: 'text_waiting', messageId };
+        }
+        // Could not park: fall back to the old behaviour (skipped, no_texts_left) below.
+        console.error('[sendCustomerMessage] park', parkError.message);
+      }
     }
 
     // A text that was attempted and refused must stay failed with the provider
@@ -587,6 +694,7 @@ async function entitledRoundsTenants(
 /** Morning cron: send every held text whose hold_until has passed (max 300 per run). Never throws. */
 export async function sendHeldMessages(
   now?: Date,
+  opts?: { tenantId?: string },
 ): Promise<{ sent: number; emailed: number; skipped: number; failed: number }> {
   const counts = { sent: 0, emailed: 0, skipped: 0, failed: 0 };
   try {
@@ -595,13 +703,15 @@ export async function sendHeldMessages(
     const entitled = await entitledRoundsTenants(admin, 'sendHeldMessages');
     if (!entitled) return counts;
 
-    const { data: rows, error } = await admin
+    let heldQuery = admin
       .from('messages')
       .select(
         'id, tenant_id, thread_id, customer_id, kind, body, to_address, segments, billed_from, billed_month, job_id, job_ids, dedupe_key',
       )
       .eq('status', 'held')
-      .lte('hold_until', at.toISOString())
+      .lte('hold_until', at.toISOString());
+    if (opts?.tenantId) heldQuery = heldQuery.eq('tenant_id', opts.tenantId);
+    const { data: rows, error } = await heldQuery
       .order('hold_until', { ascending: true })
       .limit(300);
 

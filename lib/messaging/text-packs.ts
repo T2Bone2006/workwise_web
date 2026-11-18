@@ -2,11 +2,58 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type Stripe from 'stripe';
 import { textPackByKey, type TextPackKey } from '@/lib/messaging/credits';
+import { releaseWaitingForTenant } from '@/lib/messaging/release-waiting';
 import { getAppUrl, getStripe } from '@/lib/stripe/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** The tenant's Stripe customer id, creating and saving one when the business has none yet. */
+export async function ensureStripeCustomerId(
+  admin: SupabaseClient,
+  tenantId: string,
+  userEmail: string | null,
+): Promise<{ customerId: string } | { error: string }> {
+  const { data: tenant, error: tenantError } = await admin
+    .from('tenants')
+    .select('name, stripe_customer_id')
+    .eq('id', tenantId)
+    .maybeSingle();
+
+  if (tenantError || !tenant) return { error: 'Account not found' };
+
+  let customerId = typeof tenant.stripe_customer_id === 'string' ? tenant.stripe_customer_id : null;
+  if (!customerId) {
+    const customer = await getStripe().customers.create({
+      email: userEmail ?? undefined,
+      name: typeof tenant.name === 'string' ? tenant.name : undefined,
+      metadata: { workwise_tenant_id: tenantId },
+    });
+    const createdId = customer.id;
+    const { data: saved, error: saveError } = await admin
+      .from('tenants')
+      .update({ stripe_customer_id: createdId })
+      .eq('id', tenantId)
+      .is('stripe_customer_id', null)
+      .select('stripe_customer_id');
+    if (saveError) return { error: 'Could not save the billing customer' };
+
+    if (saved && saved.length > 0) {
+      customerId = createdId;
+    } else {
+      const { data: again, error: rereadError } = await admin
+        .from('tenants')
+        .select('stripe_customer_id')
+        .eq('id', tenantId)
+        .maybeSingle();
+      const savedId = typeof again?.stripe_customer_id === 'string' ? again.stripe_customer_id : null;
+      if (rereadError || !savedId) return { error: 'Could not save the billing customer' };
+      customerId = savedId;
+    }
+  }
+  return { customerId };
+}
 
 /** Creates (or reuses) the tenant's Stripe customer and a Checkout Session for one pack. */
 export async function createTextPackCheckout(
@@ -24,43 +71,9 @@ export async function createTextPackCheckout(
   const priceId = process.env[pack.priceEnv];
   if (!priceId) return { error: 'Text packs are not set up yet' };
 
-  const { data: tenant, error: tenantError } = await admin
-    .from('tenants')
-    .select('name, stripe_customer_id')
-    .eq('id', p.tenantId)
-    .maybeSingle();
-
-  if (tenantError || !tenant) return { error: 'Account not found' };
-
-  let customerId = typeof tenant.stripe_customer_id === 'string' ? tenant.stripe_customer_id : null;
-  if (!customerId) {
-    const customer = await getStripe().customers.create({
-      email: p.userEmail ?? undefined,
-      name: typeof tenant.name === 'string' ? tenant.name : undefined,
-      metadata: { workwise_tenant_id: p.tenantId },
-    });
-    const createdId = customer.id;
-    const { data: saved, error: saveError } = await admin
-      .from('tenants')
-      .update({ stripe_customer_id: createdId })
-      .eq('id', p.tenantId)
-      .is('stripe_customer_id', null)
-      .select('stripe_customer_id');
-    if (saveError) return { error: 'Could not save the billing customer' };
-
-    if (saved && saved.length > 0) {
-      customerId = createdId;
-    } else {
-      const { data: again, error: rereadError } = await admin
-        .from('tenants')
-        .select('stripe_customer_id')
-        .eq('id', p.tenantId)
-        .maybeSingle();
-      const savedId = typeof again?.stripe_customer_id === 'string' ? again.stripe_customer_id : null;
-      if (rereadError || !savedId) return { error: 'Could not save the billing customer' };
-      customerId = savedId;
-    }
-  }
+  const ensured = await ensureStripeCustomerId(admin, p.tenantId, p.userEmail);
+  if ('error' in ensured) return ensured;
+  const customerId = ensured.customerId;
 
   const appUrl = getAppUrl();
   const successUrl =
@@ -140,6 +153,14 @@ export async function creditTextPackFromSession(
   });
 
   if (error) throw new Error(error.message);
+  if (data === true) {
+    // The business has texts again: send whatever was waiting. Never fails the webhook.
+    try {
+      await releaseWaitingForTenant(admin, tenantId);
+    } catch (err) {
+      console.error('[creditTextPackFromSession] release', err instanceof Error ? err.message : String(err));
+    }
+  }
   return data === true;
 }
 

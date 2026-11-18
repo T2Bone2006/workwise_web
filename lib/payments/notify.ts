@@ -272,7 +272,8 @@ function doorToNotice(
       result: { outcome: 'sent', channel: 'sms' },
     };
   }
-  if (door.outcome === 'text_held') {
+  // A text waiting for texts is queued like an overnight hold: it goes out when texts are available.
+  if (door.outcome === 'text_held' || door.outcome === 'text_waiting') {
     return {
       patch: {
         channel: 'sms',

@@ -15,6 +15,11 @@ vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => fakeAdmin,
 }));
 
+const checkTextWarnings = vi.fn(async () => ({ sent: null }));
+vi.mock('@/lib/messaging/low-texts', () => ({
+  checkTextWarnings: (...args: unknown[]) => checkTextWarnings(...(args as [])),
+}));
+
 const listRoundsTenantIds = vi.fn(async () => ['tenant-1']);
 vi.mock('@/lib/messaging/rounds-tenants', () => ({
   listRoundsTenantIds: () => listRoundsTenantIds(),
@@ -60,6 +65,9 @@ type FakeDb = {
   optOutError: { message: string } | null;
   creditFrom: string;
   creditError: { message: string } | null;
+  graceFrom: string;
+  graceError: { message: string } | null;
+  graceCalls: { p_segments: number; p_limit: number }[];
   claimCalls: { p_segments: number }[];
   refundCalls: {
     p_segments: number;
@@ -85,6 +93,16 @@ function buildFakeAdmin() {
           return Promise.resolve({ data: null, error: db.creditError });
         }
         return Promise.resolve({ data: db.creditFrom, error: null });
+      }
+      if (name === 'claim_grace_texts') {
+        db.graceCalls.push({
+          p_segments: args.p_segments as number,
+          p_limit: args.p_limit as number,
+        });
+        if (db.graceError) {
+          return Promise.resolve({ data: null, error: db.graceError });
+        }
+        return Promise.resolve({ data: db.graceFrom, error: null });
       }
       if (name === 'refund_text_credits') {
         db.refundCalls.push({
@@ -489,6 +507,9 @@ function resetDb(over: Partial<FakeDb> = {}) {
     optOutError: null,
     creditFrom: 'allowance',
     creditError: null,
+    graceFrom: 'none',
+    graceError: null,
+    graceCalls: [],
     claimCalls: [],
     refundCalls: [],
     nextMessageId: 1,
@@ -673,9 +694,110 @@ describe('sendCustomerMessage', () => {
       email: null,
       now: new Date('2026-09-15T13:00:00.000Z'),
     });
-    expect(reminder).toMatchObject({
-      outcome: 'skipped',
-      reason: 'no_texts_left',
+    // Out of texts and nothing else to try: the message waits a day instead of being thrown away.
+    expect(reminder).toMatchObject({ outcome: 'text_waiting' });
+    expect(db.graceCalls).toHaveLength(0);
+    const parked = db.messages.find((m) => m.dedupe_key === 'reminder:20260918:job7');
+    expect(parked).toMatchObject({ status: 'waiting_texts', channel: 'sms' });
+    expect(typeof parked?.waiting_expires_at).toBe('string');
+    expect(
+      new Date(parked?.waiting_expires_at as string).getTime() -
+        new Date(parked?.waiting_since as string).getTime(),
+    ).toBe(24 * 60 * 60 * 1000);
+  });
+
+  describe('out of texts: grace and waiting', () => {
+    const NOW = new Date('2026-09-15T13:00:00.000Z');
+    const money = (over: Partial<SendCustomerMessageInput> = {}): SendCustomerMessageInput => ({
+      tenantId: TENANT,
+      customerId: CUSTOMER,
+      kind: 'visit_done',
+      dedupeKey: 'visit_done:grace1',
+      text: () => 'Done. Pay here https://x.test/p',
+      email: null,
+      now: NOW,
+      ...over,
+    });
+
+    it('money message with no email → a grace text is sent and billed to grace', async () => {
+      resetDb({ creditFrom: 'none', graceFrom: 'grace' });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(money());
+      expect(result.outcome).toBe('text_sent');
+      expect(db.graceCalls).toEqual([{ p_segments: 1, p_limit: 30 }]);
+      expect(sendText).toHaveBeenCalledOnce();
+      expect(db.messages[0]).toMatchObject({ status: 'sent', billed_from: 'grace' });
+    });
+
+    it('checks the low-texts warning after a message that used texts', async () => {
+      resetDb({ creditFrom: 'allowance' });
+      checkTextWarnings.mockClear();
+      const { sendCustomerMessage } = await loadSend();
+      await sendCustomerMessage(money({ dedupeKey: 'visit_done:warn1' }));
+      expect(checkTextWarnings).toHaveBeenCalledOnce();
+    });
+
+    it('grace used up → the money message waits for 14 days', async () => {
+      resetDb({ creditFrom: 'none', graceFrom: 'none' });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(money({ dedupeKey: 'visit_done:grace2' }));
+      expect(result.outcome).toBe('text_waiting');
+      expect(sendText).not.toHaveBeenCalled();
+      const row = db.messages[0]!;
+      expect(row).toMatchObject({ status: 'waiting_texts', to_address: '+447700900123' });
+      expect(row.body).toContain('Pay here');
+      expect(
+        new Date(row.waiting_expires_at as string).getTime() -
+          new Date(row.waiting_since as string).getTime(),
+      ).toBe(14 * 24 * 60 * 60 * 1000);
+    });
+
+    it('the customer has an email → email goes first and grace is untouched', async () => {
+      resetDb({ creditFrom: 'none', graceFrom: 'grace' });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(
+        money({ dedupeKey: 'visit_done:grace3', email: async () => ({ sent: true }) }),
+      );
+      expect(result.outcome).toBe('email_sent');
+      expect(db.graceCalls).toHaveLength(0);
+    });
+
+    it('a short-life message never uses grace', async () => {
+      resetDb({ creditFrom: 'none', graceFrom: 'grace' });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(
+        money({ kind: 'payment_received', dedupeKey: 'pay:grace4' }),
+      );
+      expect(result.outcome).toBe('text_waiting');
+      expect(db.graceCalls).toHaveLength(0);
+    });
+
+    it('a credit RPC error is not out of texts: no grace, nothing parked', async () => {
+      resetDb({ creditError: { message: 'rpc down' }, graceFrom: 'grace' });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(money({ dedupeKey: 'visit_done:grace5' }));
+      // Same as before this build: a credit blip leaves the message failed so the morning retry can try it.
+      expect(result.outcome).toBe('failed');
+      expect(db.graceCalls).toHaveLength(0);
+      expect(db.messages[0]?.status).not.toBe('waiting_texts');
+    });
+
+    it('a grace text the provider refuses is refunded to grace', async () => {
+      resetDb({ creditFrom: 'none', graceFrom: 'grace' });
+      sendText.mockResolvedValue({ ok: false, provider: 'log', error: 'boom', retryable: true });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(money({ dedupeKey: 'visit_done:grace6' }));
+      expect(result.outcome).toBe('failed');
+      expect(db.refundCalls).toHaveLength(1);
+      expect(db.refundCalls[0]?.p_from).toBe('grace');
+    });
+
+    it('a grace RPC error → the message waits, grace is not assumed', async () => {
+      resetDb({ creditFrom: 'none', graceError: { message: 'rpc down' } });
+      const { sendCustomerMessage } = await loadSend();
+      const result = await sendCustomerMessage(money({ dedupeKey: 'visit_done:grace7' }));
+      expect(result.outcome).toBe('text_waiting');
+      expect(sendText).not.toHaveBeenCalled();
     });
   });
 

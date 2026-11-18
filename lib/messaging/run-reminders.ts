@@ -229,6 +229,7 @@ export async function runRemindersForTenant(
           counts.sent += 1;
           break;
         case 'text_held':
+        case 'text_waiting':
           counts.held += 1;
           break;
         case 'duplicate':

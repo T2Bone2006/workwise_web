@@ -386,6 +386,7 @@ function went(outcome: SendOutcome): boolean {
   return (
     outcome.outcome === 'text_sent' ||
     outcome.outcome === 'text_held' ||
+    outcome.outcome === 'text_waiting' ||
     outcome.outcome === 'email_sent' ||
     outcome.outcome === 'duplicate'
   );

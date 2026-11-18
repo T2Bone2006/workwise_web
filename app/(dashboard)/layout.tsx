@@ -12,6 +12,7 @@ import { employeeFeatures, getTenantFeatures, withWorkerBlock } from '@/lib/data
 import { getWorkerLink } from '@/lib/auth/worker-link';
 import { getWorkerLiteOffer } from '@/lib/data/worker-lite-offer';
 import { getUnreadThreadCount } from '@/lib/data/messaging/threads';
+import { getTextsStatus } from '@/lib/data/messaging/texts-status';
 import { getNetworkNotificationCounts } from '@/lib/data/network';
 import { addLiteInterval, shouldShowAddLite } from '@/lib/data/add-lite-nudge';
 import { referralKind } from '@/lib/data/referral-nudge';
@@ -93,6 +94,7 @@ export default async function DashboardLayout({
     networkCounts,
     messagesBadge,
     overdue,
+    textsStatus,
   ] = await Promise.all([
     getTenantNameForCurrentUser(),
     isAdmin(),
@@ -106,6 +108,15 @@ export default async function DashboardLayout({
       id && p.hasRounds ? getUnreadThreadCount(supabase, id) : undefined,
     ),
     tenantIdPromise.then((id) => paymentOverdue(supabase, id)),
+    // Texts banner (Rounds only). A failed read shows no banner and never breaks the page.
+    Promise.all([tenantIdPromise, productsPromise]).then(([id, p]) =>
+      id && p.hasRounds
+        ? getTextsStatus(supabase, id).catch((err: unknown) => {
+            console.error('[texts banner]', err instanceof Error ? err.name : 'Error');
+            return null;
+          })
+        : null,
+    ),
   ]);
   // A self-employed worker keeps their own business's blocks and gains a 'Work for …' block.
   // Only asked of logins with no Pro or Rounds plan, so offices and Rounds traders pay nothing extra.
@@ -141,6 +152,7 @@ export default async function DashboardLayout({
       referralKind={referralKindNow ?? 'rounds_lite'}
       workerLite={workerLite}
       overdue={overdue}
+      textsStatus={textsStatus}
       assistant={
         // Pro offices get Lily once their dashboard is on the new look; RS Locksmiths stay as they are until then.
         (products.isPro ? look === 'new' : products.hasRounds || products.hasLite)

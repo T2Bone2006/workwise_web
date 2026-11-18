@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from 'react';
 import { DashboardScroll } from './dashboard-scroll';
 import { OverdueBanner } from './overdue-banner';
+import { TextsBanner } from '@/components/messaging/texts-banner';
+import type { TextsStatus } from '@/lib/data/messaging/texts-status';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { ViewAsBanner } from '@/components/admin/view-as-banner';
@@ -36,6 +38,8 @@ interface DashboardShellProps {
   workerLite?: boolean;
   /** Live self-serve subscription is past_due. Never set for Pro or managed businesses. */
   overdue?: boolean;
+  /** Rounds only: texts low / out / waiting / auto top-up paused. Null for everyone else, or when it could not be read. */
+  textsStatus?: TextsStatus | null;
   /** Lily: Rounds and Lite logins, and Pro offices on the new look. */
   assistant?: { hasRounds: boolean; hasLite: boolean; hasPro: boolean } | null;
 }
@@ -59,6 +63,7 @@ export function DashboardShell({
   referralKind = 'rounds_lite',
   workerLite = false,
   overdue = false,
+  textsStatus = null,
   assistant = null,
 }: DashboardShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -110,6 +115,7 @@ export function DashboardShell({
             viewAsActive={Boolean(viewAsTenantName)}
           />
           {overdue ? <OverdueBanner /> : null}
+          {textsStatus ? <TextsBanner status={textsStatus} /> : null}
           <DashboardScroll reserveAskButton={Boolean(assistant)}>
             <Suspense fallback={null}>
               <RestartedWelcome />

@@ -180,6 +180,7 @@ function addOutcome(counts: NoticeCounts, outcome: SendOutcome): void {
       counts.texted += 1;
       return;
     case 'text_held':
+    case 'text_waiting':
       counts.held += 1;
       return;
     case 'email_sent':

@@ -380,6 +380,7 @@ export async function sendDirectDebitInvite(
       return { ok: true, channel: 'email' };
     case 'text_sent':
     case 'text_held':
+    case 'text_waiting':
       return { ok: true, channel: 'sms' };
     case 'duplicate':
       return { ok: false, error: 'The invitation was already sent today.' };

@@ -1,9 +1,18 @@
 import { MessageSquare } from 'lucide-react';
 import { TextsMeter } from '@/components/messaging/texts-meter';
-import type { TextUsage } from '@/lib/data/messaging/texts';
+import { AutoTopUpCard } from '@/components/messaging/auto-top-up-card';
+import { NotDeliveredList } from '@/components/messaging/not-delivered-list';
+import type { NotDelivered } from '@/lib/data/messaging/not-delivered';
+import type { TextsStatus } from '@/lib/data/messaging/texts-status';
 
 /** The right-hand side when no conversation is open (laptop only; on a phone you see the list). */
-export function MessagesEmptyPane({ usage }: { usage: TextUsage | null }) {
+export function MessagesEmptyPane({
+  usage,
+  notDelivered = [],
+}: {
+  usage: TextsStatus | null;
+  notDelivered?: NotDelivered[];
+}) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
@@ -16,6 +25,8 @@ export function MessagesEmptyPane({ usage }: { usage: TextUsage | null }) {
         </p>
       </div>
       {usage ? <TextsMeter usage={usage} /> : null}
+      {usage ? <AutoTopUpCard status={usage} /> : null}
+      {usage ? <NotDeliveredList items={notDelivered} /> : null}
     </div>
   );
 }

@@ -10,6 +10,11 @@ const customersRetrieve = vi.fn();
 const sessionsCreate = vi.fn();
 const constructEvent = vi.fn();
 const provision = vi.fn();
+const releaseWaitingForTenant = vi.fn(async () => ({}));
+
+vi.mock('@/lib/messaging/release-waiting', () => ({
+  releaseWaitingForTenant: (...args: unknown[]) => releaseWaitingForTenant(...(args as [])),
+}));
 
 vi.mock('@/lib/stripe/client', () => ({
   getStripe: () => ({
@@ -163,6 +168,7 @@ beforeEach(() => {
   sessionsCreate.mockReset();
   constructEvent.mockReset();
   provision.mockReset();
+  releaseWaitingForTenant.mockClear();
   customersCreate.mockResolvedValue({ id: 'cus_new' });
   customersRetrieve.mockResolvedValue({ id: 'cus_owner', metadata: {} });
   sessionsCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay_test' });
@@ -266,11 +272,21 @@ describe('text packs', () => {
       p_checkout_session_id: 'cs_test_2',
     });
 
+    // Waiting messages are released after a pack is credited (once per credited pack).
+    expect(releaseWaitingForTenant).toHaveBeenCalledTimes(2);
+    expect(releaseWaitingForTenant).toHaveBeenCalledWith(expect.anything(), TENANT);
+
     const before = rpcCalls.length;
     const unpaid = paidSession('texts_250', 'cs_unpaid');
     unpaid.payment_status = 'unpaid';
     expect(await creditTextPackFromSession(unpaid)).toBe(false);
     expect(rpcCalls).toHaveLength(before);
+  });
+
+  it('a release that throws never fails the credit', async () => {
+    releaseWaitingForTenant.mockRejectedValueOnce(new Error('boom'));
+    const { creditTextPackFromSession } = await import('@/lib/messaging/text-packs');
+    expect(await creditTextPackFromSession(paidSession('texts_250', 'cs_release_boom'))).toBe(true);
   });
 
   it('does not credit a session whose customer belongs to a different tenant', async () => {

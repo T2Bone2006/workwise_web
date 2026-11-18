@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { creditTextPackFromSession } from '@/lib/messaging/text-packs';
+import { saveCardFromSetupSession } from '@/lib/messaging/auto-top-up';
 import { provisionFromCheckoutSession } from '@/lib/stripe/provision';
 import { ensureWidgetClient, syncRestartSession, syncSubscription } from '@/lib/stripe/sync-subscription';
 import { onInvoicePaid, onSubscriptionEnded } from '@/lib/billing/referrals';
@@ -99,6 +100,9 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
         if (invoiceId) await onInvoicePaid(await getStripe().invoices.retrieve(invoiceId));
       } else if (session.mode === 'payment' && session.metadata?.kind === 'text_pack') {
         await creditTextPackFromSession(session);
+      } else if (session.mode === 'setup' && session.metadata?.kind === 'text_topup_card') {
+        // The trader saved a card for auto top-up. Throws on a database error so Stripe retries.
+        await saveCardFromSetupSession(createAdminClient(), session);
       }
       return;
     }

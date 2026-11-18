@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dialog';
 import { startTextPackCheckout } from '@/lib/actions/text-packs';
 import type { TextUsage } from '@/lib/data/messaging/texts';
+import type { TextsStatus } from '@/lib/data/messaging/texts-status';
+import { GRACE_TEXTS_PER_MONTH } from '@/lib/messaging/waiting';
 import { cn } from '@/lib/utils';
 
 function priceLabel(pricePence: number): string {
@@ -21,8 +23,9 @@ function priceLabel(pricePence: number): string {
   return Number.isInteger(pounds) ? `£${pounds}` : `£${pounds.toFixed(2)}`;
 }
 
-export function TextsMeter(props: { usage: TextUsage }): JSX.Element {
+export function TextsMeter(props: { usage: TextUsage | TextsStatus }): JSX.Element {
   const { usage } = props;
+  const extra = 'graceLeft' in usage ? usage : null;
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const out = usage.totalLeft === 0;
   const low = usage.totalLeft <= 20;
@@ -71,9 +74,15 @@ export function TextsMeter(props: { usage: TextUsage }): JSX.Element {
             style={{ width: `${pct}%` }}
           />
         </div>
+        {extra && (out || extra.graceLeft < GRACE_TEXTS_PER_MONTH) ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Grace texts left this month: {extra.graceLeft} of {GRACE_TEXTS_PER_MONTH} (payment links only).
+            {extra.waiting.count > 0 ? ` ${extra.waiting.count} waiting.` : ''}
+          </p>
+        ) : null}
         {out ? (
           <p className="mt-3 text-sm font-medium text-(--tone-amber-text)">
-            You&apos;re out of texts. Reminders are paused; other messages go by email.
+            You&apos;re out of texts. Customers with an email still get emails. Everything else waits until you have texts again.
           </p>
         ) : null}
       </LookCard>

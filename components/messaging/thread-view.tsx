@@ -82,6 +82,9 @@ function statusLine(message: ThreadMessage): string | null {
   if (message.status === 'delivered') return 'Delivered';
   if (message.status === 'sent') return 'Sent';
   if (message.status === 'held') return 'Waiting until 7am';
+  if (message.status === 'waiting_texts') return 'Waiting for texts';
+  if (message.status === 'skipped' && message.error === 'waiting_expired') return 'Not sent: waited too long';
+  if (message.status === 'skipped' && message.error === 'no_texts_left') return 'Not sent: no texts left';
   if (message.status === 'skipped' && message.error === 'opted_out') {
     return 'Skipped: stopped texts';
   }
@@ -273,12 +276,15 @@ export function ThreadView(props: {
               const classification = message.classification ? CLASS_LABEL[message.classification] : null;
               const day = days[index] ?? null;
               const heading = day && day.ymd !== days[index - 1]?.ymd ? day.heading : null;
-              const failed = message.status === 'failed' || (message.status === 'skipped' && message.error === 'opted_out');
+              const failed =
+                message.status === 'failed' ||
+                (message.status === 'skipped' &&
+                  (message.error === 'opted_out' || message.error === 'waiting_expired' || message.error === 'no_texts_left'));
               const StatusIcon = failed
                 ? TriangleAlert
                 : message.status === 'delivered'
                   ? CheckCheck
-                  : message.status === 'held'
+                  : message.status === 'held' || message.status === 'waiting_texts'
                     ? Clock
                     : Check;
               return (
