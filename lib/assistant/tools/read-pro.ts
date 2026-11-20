@@ -140,7 +140,7 @@ export const findJobs = defineTool({
   status: 'Looking through your jobs',
   schema: z.object({
     query: z.string().max(80).optional().describe('Reference, address, postcode, customer or job wording.'),
-    references: z.array(z.string().max(40)).max(40).optional().describe('A pasted list of job references to match exactly (e.g. a customer\'s cancellation list). Gives not_found for any that match nothing.'),
+    references: z.array(z.string().max(40)).max(40).optional().describe('A list of job references to match exactly, all in one call. Gives not_found for any that match nothing: tell the user which.'),
     status: z.array(z.enum(JOB_STATUSES)).max(9).optional(),
     worker_id: z.string().uuid().optional(),
     customer_id: z.string().uuid().optional(),

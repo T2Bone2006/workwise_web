@@ -55,6 +55,17 @@ describe('the Pro prompt and tool set', () => {
     expect(buildSystemPrompt({ hasRounds: false, hasLite: false, hasPro: true, surface: 'web' })).toBe(p);
   });
 
+  it('asks what to do with a paste instead of assuming, for every product', () => {
+    const pro = buildSystemPrompt({ hasRounds: false, hasLite: false, hasPro: true, surface: 'web' });
+    const rounds = buildSystemPrompt({ hasRounds: true, hasLite: false, surface: 'web' });
+    for (const p of [pro, rounds]) {
+      expect(p).toContain('what they say, never from what they paste');
+      expect(p).toContain("ask what they'd like to do with it");
+    }
+    // Cancelling is not baked into the prompt: it lives in the tool, which only runs when asked.
+    expect(pro).not.toContain('cancellations');
+  });
+
   it('leaves the Rounds prompt exactly as it was', () => {
     const rounds = buildSystemPrompt({ hasRounds: true, hasLite: false, surface: 'web' });
     expect(rounds).toContain('self-employed tradesperson');

@@ -327,7 +327,7 @@ type CancelParams = { jobs: Array<{ id: string; ref: string; status: string }>; 
 export const cancelJobs = defineAction({
   name: 'cancel_jobs',
   description:
-    'Propose cancelling one or more jobs that have not started (not assigned, ready to send, sent to a worker or declined). Jobs that are in progress, paused, not completed, done or already cancelled are left alone and listed on the card. For a customer\'s cancellation list, find the jobs with find_jobs references first. If they say when the cancellation reached the office (e.g. "came in Wednesday at 4:46pm"), pass received_date and received_time (UK time); otherwise leave both out and it is recorded as now. Cancelling cannot be undone.',
+    'Propose cancelling one or more jobs that have not started (not assigned, ready to send, sent to a worker or declined). Jobs that are in progress, paused, not completed, done or already cancelled are left alone and listed on the card. For a list of references, find the jobs with find_jobs references first. Started or finished jobs are cancelled on the job page: say so. If they say when the cancellation reached the office (e.g. "came in Wednesday at 4:46pm"), pass received_date and received_time (UK time); otherwise leave both out and it is recorded as now. Cancelling cannot be undone.',
   product: 'pro',
   status: 'Getting the cancellation ready',
   schema: z.object({
@@ -406,7 +406,7 @@ type SendOutParams = { jobIds: string[]; refs: string[] };
 export const sendOutJobs = defineAction({
   name: 'send_out_jobs',
   description:
-    'Propose sending jobs that are "Ready to send" (a worker is picked) out to their workers: each worker is told once by email and app notification, and by text if they turned texts on. Only for Ready to send jobs; give a job to a worker first with assign_jobs. Look up job_ids first. Sending cannot be undone.',
+    'Propose sending jobs that are "Ready to send" (a worker is picked) out to their workers: each worker is told once by email and app notification, and by text if they turned texts on. Only for Ready to send jobs; give a job to a worker first with assign_jobs. The card says the workers are told. Look up job_ids first. Sending cannot be undone.',
   product: 'pro',
   status: 'Getting the send-out ready',
   schema: z.object({ job_ids: jobIds }),
